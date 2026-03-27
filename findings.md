@@ -82,6 +82,8 @@
 - `sdc_preflight.py` establishes the current runtime boundary in one place: on this machine the McPAT binary and gem5 config are present, while the ARM cross-compiler, `qemu-aarch64`, and built `gem5.opt` binary are still missing.
 - The root repo now has a real outer-loop orchestrator in `sdc_campaign.py`. It can select ranked candidates from the vault, resolve testcase source files, execute the differential runner, emit per-testcase artifacts, and fold the result back through the scheduler.
 - `run_sdc_differential.py` is no longer CLI-only; its new `run_differential(...)` API makes the execution chain testable and reusable from higher-level tooling without subprocess wrappers around the script itself.
+- `sdc_materialize.py` closes the biggest remaining root-level dataflow gap: vault entries that only have `asm_content` can now be turned into digest-bearing ARM64 C sources, and the generated `source_path` is written back into testcase metadata.
+- `sdc_campaign.py` now auto-materializes candidates when `source_path` is absent, so the outer loop can consume raw vault rows directly instead of requiring a separate manual source preparation step.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -122,6 +124,7 @@
 | A purely formula-based scheduler allowed high-risk pending seeds to outrank confirmed SDC hits | Added explicit status priority in `sdc_scheduler.py` so the closed loop preserves empirically successful seeds before exploring additional pending work |
 | The operator path still lacked a first-class shell entrypoint for scheduler actions and environment readiness checks | Added `sdc_scheduler.py` subcommands and `sdc_preflight.py` so the runtime harness can validate prerequisites and update the vault without ad-hoc helper scripts |
 | The outer loop still required ad-hoc glue between candidate selection, execution, and vault feedback | Added `sdc_campaign.py` plus a reusable `run_differential(...)` API so the rank -> execute -> record workflow is now a first-class root-level interface |
+| The outer loop still could not execute raw vault entries because they only persisted assembly text | Added `sdc_materialize.py` and campaign-side auto-materialization so the vault can now feed the differential runner without a manually curated source file per testcase |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

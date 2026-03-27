@@ -242,7 +242,7 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
 
 ### Phase 13: Campaign Orchestration
-- **Status:** in progress
+- **Status:** complete
 - Actions taken:
   - Refactored `run_sdc_differential.py` so the compile/QEMU/gem5/McPAT chain is available through a reusable `run_differential(...)` Python API in addition to the existing CLI.
   - Added `sdc_campaign.py` as the root-level outer-loop orchestrator that selects candidates from the vault, resolves testcase source files, runs the differential executor, writes per-testcase result JSON artifacts, and folds the result back into the vault through the scheduler.
@@ -254,6 +254,23 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/sdc_campaign.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_run_sdc_differential.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_campaign.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 14: Source Materialization
+- **Status:** in progress
+- Actions taken:
+  - Added `sdc_materialize.py` so raw vault `asm_content` can be rendered into digest-bearing ARM64 C sources with a stable `SDC_DIGEST` reporting scaffold.
+  - Taught `sdc_campaign.py` to auto-materialize testcase sources on demand whenever `source_path` metadata is missing but the vault row still contains assembly text.
+  - Added tests for source rendering, metadata update on materialization, and campaign execution that starts from a vault row with no pre-existing source file.
+  - Fixed a real `sqlite3.Row` compatibility bug in the metadata decoder while validating the new materialization path.
+  - Re-ran the full regression suite and confirmed 26 tests pass across the ARM64 contract path plus all current root-level orchestration layers.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_materialize.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_campaign.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_materialize.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_campaign.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)

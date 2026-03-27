@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Mapping, Optional
 from run_sdc_differential import (
     DEFAULT_GEM5_CONFIG,
     DEFAULT_GEM5_OUTDIR,
-    DifferentialResult,
     run_differential,
 )
+from sdc_materialize import materialize_testcase
 from sdc_preflight import (
     DEFAULT_GEM5_BINARY,
     DEFAULT_MCPAT_BINARY,
@@ -132,6 +132,15 @@ def execute_campaign(
 
         for candidate in candidates:
             source_path = resolve_source_path(candidate, source_root)
+            if (source_path is None or not source_path.exists()) and candidate.row.get(
+                "asm_content"
+            ):
+                source_path = materialize_testcase(
+                    vault,
+                    candidate.testcase_key,
+                    output_root=output_root / "materialized",
+                )
+
             if source_path is None or not source_path.exists():
                 counts["source_missing"] += 1
                 runs.append(

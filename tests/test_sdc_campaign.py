@@ -130,6 +130,76 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
         assert metadata["scheduler"]["normalized_status"] == "SDC_FOUND"
 
 
+def test_execute_campaign_materializes_source_from_vault(monkeypatch, tmp_path):
+    db_path = tmp_path / "vault.sqlite3"
+    with SDCVault(db_path) as vault:
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="seed-m",
+                asm_content="mov x0, x0",
+                target_name="armv8_common-armv8_common-aarch64_linux_gcc",
+                ace_score=4.0,
+                ibr_score=3.0,
+                memory_pressure_score=1.0,
+                risk_score=9.0,
+                metadata={},
+            )
+        )
+
+    monkeypatch.setattr(
+        "sdc_campaign.run_preflight",
+        lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
+    )
+
+    def fake_run_differential(**kwargs):
+        source = kwargs["source"]
+        assert source.exists()
+        assert "mov x0, x0" in source.read_text(encoding="utf-8")
+        return DifferentialResult(
+            status="matched",
+            golden_digest="aaaa",
+            faulted_digest="aaaa",
+            compile=CommandResult(["cc"], 0, "", ""),
+            qemu=CommandResult(["qemu"], 0, "SDC_DIGEST=aaaa", ""),
+            gem5=CommandResult(["gem5"], 0, "SDC_DIGEST=aaaa", ""),
+            mcpat={"power_total": 1.0},
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_campaign.run_differential", fake_run_differential)
+
+    result = execute_campaign(
+        db_path=db_path,
+        limit=1,
+        source_root=None,
+        output_root=tmp_path / "campaign",
+        dry_run=False,
+        skip_preflight=False,
+        compiler="cc",
+        compiler_flags=[],
+        qemu_binary="qemu-aarch64",
+        qemu_args=[],
+        gem5_binary="gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        gem5_args=[],
+        gem5_cmd_flag="auto",
+        skip_gem5=False,
+        skip_mcpat=False,
+        mcpat_template_profile="arm64-kunpeng920",
+        mcpat_binary=tmp_path / "mcpat",
+        timeout=30,
+    )
+
+    assert result["ok"] is True
+    assert result["counts"]["executed"] == 1
+    with SDCVault(db_path) as vault:
+        row = vault.get_testcase("seed-m")
+        assert row is not None
+        metadata = json.loads(row["metadata_json"])
+        assert metadata["source_path"].endswith("seed-m.c")
+        assert metadata["materialized"]["source_path"].endswith("seed-m.c")
+
+
 def test_execute_campaign_blocks_when_preflight_fails(monkeypatch, tmp_path):
     db_path = tmp_path / "vault.sqlite3"
     source_path = tmp_path / "seed-c.c"
