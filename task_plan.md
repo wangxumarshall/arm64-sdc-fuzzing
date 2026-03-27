@@ -1,0 +1,88 @@
+# Task Plan: ARMv8 SDC Fuzzing Technical Design
+
+## Goal
+Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
+
+## Current Phase
+Phase 8 complete
+
+## Phases
+
+### Phase 1: Workspace Discovery
+- [x] Understand user intent
+- [x] Identify top-level constraints and repository composition
+- [x] Record initial findings in findings.md
+- **Status:** complete
+
+### Phase 2: Microprobe Extension Mapping
+- [x] Locate policy, pass, wrapper, and driver extension points
+- [x] Inspect ARM64 target support and tool entrypoints
+- [x] Record feasible integration seams and gaps
+- **Status:** complete
+
+### Phase 3: Execution Stack Mapping
+- [x] Inspect QEMU/gem5/McPAT integration boundaries
+- [x] Determine practical differential-testing workflow
+- [x] Document risks, assumptions, and required glue code
+- **Status:** complete
+
+### Phase 4: Architecture Design
+- [x] Draft the offline/online SDC fuzzing architecture
+- [x] Define data model, scoring pipeline, and execution flow
+- [x] Tailor the design to Kunpeng 920 style ARMv8-A behavior
+- **Status:** complete
+
+### Phase 5: Delivery
+- [x] Summarize the recommended technical方案
+- [x] Provide phased implementation roadmap grounded in the repo
+- [x] Call out open questions and validation steps
+- **Status:** complete
+
+### Phase 6: Foundation Implementation
+- [x] Add Microprobe benchmark metadata channel and ARM64 SDC analysis scaffolding
+- [x] Add ARM64 SDC fuzzing policy and wrapper discovery fixes
+- [x] Add McPAT ARM64/Kunpeng920 profile plumbing and template selection
+- [x] Stabilize end-to-end McPAT execution for the ARM64 template on this local McPAT fork
+- **Status:** complete
+
+### Phase 7: Differential Execution Bring-Up
+- [x] Add an ARM64 differential wrapper skeleton that snapshots architectural state and prints a digest
+- [x] Add a lightweight `run_sdc_differential.py` executor skeleton for compile/QEMU/gem5/McPAT chaining
+- [ ] Connect the new wrapper into a generated benchmark and validate a full QEMU digest run
+- **Status:** in progress
+
+### Phase 8: Systematic Code Review
+- [x] Re-validate ARM64 target import after the latest compatibility fixes
+- [x] Review the new ARM64/McPAT/SDC code for functional gaps, bugs, logic flaws, and security issues
+- [x] Prepare a severity-ordered findings list with file/line references
+- **Status:** complete
+
+## Key Questions
+1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?
+2. How should the offline vault, QEMU golden run, gem5 fault-injection run, and McPAT power feedback connect in this specific workspace?
+3. What ARMv8-A/Kunpeng-specific stress patterns are most worth prioritizing in the first version?
+
+## Decisions Made
+| Decision | Rationale |
+|----------|-----------|
+| Use file-based planning for this task | The request is multi-stage research/design and will require many tool calls across several subprojects |
+| Prioritize codebase mapping before proposing architecture details | The user explicitly asked for a deep understanding of the current directory's source code |
+| Keep the design centered on Microprobe-native extensions and a lightweight executor | This matches the repository instructions and avoids heavy harness complexity |
+| Treat bootstrap/foundation repair as part of the roadmap | ARM64 policy code exists, but target import and wrapper discovery are not yet coherent enough for end-to-end execution |
+| Use a sidecar metadata channel instead of overloading `Benchmark.context` | The current `Context` type models execution state, not arbitrary score storage |
+| Base the online differential loop on QEMU user-mode plus gem5 SE-mode | Those are the lightest viable execution seams already present in the workspace |
+| Use `pypat` as the default McPAT entrypoint and keep `Gem5McPATParser_custom.py` as a thin compatibility wrapper | The newer `pypat` layer is simpler to extend and now supports template-profile selection |
+| Use a Xeon-derived McPAT skeleton for the ARM64 Kunpeng920 template | The bundled ARM templates are rejected by this local McPAT/Cacti fork, while the Xeon skeleton accepts the Kunpeng-like cache/core parameters once retargeted |
+| Treat `out.ptrace` as the authoritative power artifact for this McPAT fork | The local binary writes area to stdout and emits the per-block power trace to `out.ptrace`, so backend parsing must consume the trace file rather than stdout |
+| Treat the current ARM64 ISA directory as a compatibility layer under repair rather than a complete target | The local ARM64 ISA data mixes partial format descriptions, sidecar instruction-definition YAMLs, and draft ISA helpers, so the review must account for both code and data-model debt |
+
+## Errors Encountered
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+| McPAT ARM64 template execution still fails on this local fork | 1 | Resolved by rebuilding the ARM64 template on a Xeon-derived skeleton and parsing `out.ptrace` instead of stdout area output |
+| ARM64 target import still fails after tuple/uarch repair | 2 | Narrowed the remaining blocker to `targets/arm64/isa/armv8-common/isa.py`: the ISA class is still abstract and helper methods reference undefined instruction names |
+
+## Notes
+- Re-read this plan before major decisions.
+- Keep findings grounded in actual repository paths and extension seams.
+- Prefer lightweight integration over introducing new heavyweight frameworks.
