@@ -84,6 +84,7 @@
 - `run_sdc_differential.py` is no longer CLI-only; its new `run_differential(...)` API makes the execution chain testable and reusable from higher-level tooling without subprocess wrappers around the script itself.
 - `sdc_materialize.py` closes the biggest remaining root-level dataflow gap: vault entries that only have `asm_content` can now be turned into digest-bearing ARM64 C sources, and the generated `source_path` is written back into testcase metadata.
 - `sdc_campaign.py` now auto-materializes candidates when `source_path` is absent, so the outer loop can consume raw vault rows directly instead of requiring a separate manual source preparation step.
+- The root test layer now includes a true cross-repo integration check: it imports the real `microprobe/targets/generic/tools/mp_sdc_offline_gen.py`, generates a testcase with `BareMetalDiffWrapper`, stores it in the SQLite vault, and then drives that testcase through `sdc_campaign.py`.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -125,6 +126,7 @@
 | The operator path still lacked a first-class shell entrypoint for scheduler actions and environment readiness checks | Added `sdc_scheduler.py` subcommands and `sdc_preflight.py` so the runtime harness can validate prerequisites and update the vault without ad-hoc helper scripts |
 | The outer loop still required ad-hoc glue between candidate selection, execution, and vault feedback | Added `sdc_campaign.py` plus a reusable `run_differential(...)` API so the rank -> execute -> record workflow is now a first-class root-level interface |
 | The outer loop still could not execute raw vault entries because they only persisted assembly text | Added `sdc_materialize.py` and campaign-side auto-materialization so the vault can now feed the differential runner without a manually curated source file per testcase |
+| The root regression suite still lacked proof that cross-repo artifacts line up across the intended boundaries | Added `tests/test_offline_to_campaign_integration.py` so a real `microprobe`-generated testcase is now validated through the root vault and campaign interfaces |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

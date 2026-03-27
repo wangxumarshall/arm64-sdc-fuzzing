@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 14 in progress
+Phase 15 in progress
 
 ## Phases
 
@@ -90,7 +90,13 @@ Phase 14 in progress
 ### Phase 14: Source Materialization
 - [x] Add a vault-to-source materializer that turns stored `asm_content` into digest-bearing ARM64 C sources
 - [x] Teach the campaign runner to auto-materialize candidates when no `source_path` is present
-- [ ] Commit and push the source-materialization phase to the root `main` branch
+- [x] Commit and push the source-materialization phase to the root `main` branch
+- **Status:** complete
+
+### Phase 15: Cross-Repo Integration Validation
+- [x] Add a root-level integration test that exercises `microprobe` offline generation into the root vault/campaign flow
+- [x] Re-run the expanded root regression suite with the new integration coverage enabled
+- [ ] Commit and push the integration-validation phase to the root `main` branch
 - **Status:** in progress
 
 ## Key Questions
@@ -117,6 +123,7 @@ Phase 14 in progress
 | Add operator-facing CLIs before attempting more runtime glue | The machine is currently missing the ARM runtime toolchain, so the fastest path forward is to make the scheduler and environment validation usable from the shell while deeper execution pieces remain blocked |
 | Add a root-level campaign runner before returning to deeper ARM64 internals | The root repo now has enough scheduler, vault, and runner pieces to exercise the outer-loop state flow in pure Python even while the compiled ARM runtime remains unavailable locally |
 | Auto-materialize vault assembly before asking users to hand-curate source files | The offline vault already persists `asm_content`, so the outer loop should be able to derive a runnable source scaffold automatically instead of requiring a separate manual source-preparation step |
+| Add a cross-repo pure-Python integration test before chasing the missing ARM runtime toolchain | The biggest remaining confidence gap was whether the `microprobe` offline generator and the root campaign actually connect through the vault as intended; this can be proven locally without waiting on compiler/QEMU/gem5 installs |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -129,6 +136,7 @@ Phase 14 in progress
 | The new scheduler layer had no operator-facing CLI and toolchain readiness check | 6 | Added `sdc_scheduler.py` subcommands plus `sdc_preflight.py` so ranking/recording and environment validation can run directly from the shell |
 | The repo still lacked an orchestrator that could select seeds, execute the runner, and fold results back into the vault | 7 | Added `sdc_campaign.py` and a reusable `run_differential(...)` API so the outer-loop state machine can be exercised and tested without shelling into ad-hoc glue scripts |
 | The campaign runner still depended on pre-existing `source_path` metadata or hand-prepared source files | 8 | Added `sdc_materialize.py` and campaign-side auto-materialization so vault `asm_content` can be promoted directly into runnable C sources and persisted back into testcase metadata |
+| The root test layer still did not prove that `microprobe` generation artifacts can flow into the root campaign stack | 9 | Added a cross-repo integration test that uses the real `mp_sdc_offline_gen.py` path to populate the vault and then exercises `sdc_campaign.py` against that testcase |
 
 ## Notes
 - Re-read this plan before major decisions.

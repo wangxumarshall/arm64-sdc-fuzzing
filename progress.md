@@ -259,7 +259,7 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
 
 ### Phase 14: Source Materialization
-- **Status:** in progress
+- **Status:** complete
 - Actions taken:
   - Added `sdc_materialize.py` so raw vault `asm_content` can be rendered into digest-bearing ARM64 C sources with a stable `SDC_DIGEST` reporting scaffold.
   - Taught `sdc_campaign.py` to auto-materialize testcase sources on demand whenever `source_path` metadata is missing but the vault row still contains assembly text.
@@ -271,6 +271,18 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/sdc_campaign.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_materialize.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_campaign.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 15: Cross-Repo Integration Validation
+- **Status:** in progress
+- Actions taken:
+  - Added `tests/test_offline_to_campaign_integration.py` to exercise the real `microprobe` offline generator path, persist the generated testcase into a temporary vault, and run that testcase through `sdc_campaign.py`.
+  - Validated that `BareMetalDiffWrapper`-generated `.c` outputs now cross the repo boundary cleanly: the root campaign can consume the `source_path` produced by `microprobe` without materializing a fallback source.
+  - Re-ran the expanded root regression suite and confirmed 27 tests now pass across ARM64 contracts, scheduler math, runner helpers, power backends, preflight, campaign orchestration, source materialization, and the new cross-repo flow.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_offline_to_campaign_integration.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
