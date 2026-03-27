@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MCPAT_PYPAT_ROOT = REPO_ROOT / "mcpat" / "mcpat"
+MCPAT_PYPAT_ROOT = REPO_ROOT / "mcpat"
 
 
 def _bootstrap_mcpat_imports() -> None:
