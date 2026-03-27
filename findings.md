@@ -86,6 +86,12 @@
 - `sdc_campaign.py` now auto-materializes candidates when `source_path` is absent, so the outer loop can consume raw vault rows directly instead of requiring a separate manual source preparation step.
 - The root test layer now includes a true cross-repo integration check: it imports the real `microprobe/targets/generic/tools/mp_sdc_offline_gen.py`, generates a testcase with `BareMetalDiffWrapper`, stores it in the SQLite vault, and then drives that testcase through `sdc_campaign.py`.
 - The root orchestration layer now exposes the gem5 fault request as structured CLI/API fields. `run_sdc_differential.py` and `sdc_campaign.py` both accept `fault_model`, `fault_target`, `fault_bit`, and `fault_tick`, so injector intent is no longer hidden inside opaque `--gem5-arg` strings.
+- The current ARM64/Kunpeng McPAT path mixed flat profile constants, gem5-shape inference, and XML-template details in one place. A dedicated Kunpeng adapter layer is the cleanest upstreamable seam because it can normalize config/stat inputs before template rendering.
+- `kunpeng920.md` is detailed enough to drive a first-class McPAT topology model: 64 cores, 4 cores per cluster, 16 clusters, 2 compute dies, 512 KiB private L2 per core, and a 64 MiB LLC best represented as 16 homogeneous 4 MiB slices inside McPAT.
+- The previous ARM64 Kunpeng template still hard-coded many runtime counters (`ROB_*`, rename/window/register-file accesses, cache accesses, memory accesses, and duty cycles), which meant conversion output was only weakly connected to real gem5 stats.
+- A dedicated `pypat/conversion/arm64_kunpeng920.py` adapter is sufficient to decouple Kunpeng support from the conversion core: it builds a structured McPAT model from config/profile data, flattens derived values back into the legacy profile contract for template compatibility, and synthesizes `stats.mcpat.*` counters that replace the previous constants.
+- `power_backends/mcpat_backend.py` had a latent import-path bug: it inserted the local McPAT executable path into `sys.path` instead of the `mcpat/` Python package root. The pure-Python test path hid this, but a real backend invocation would eventually trip over it.
+- `mcpat/` is a nested git repository. Root-level `git diff` does not show the actual Kunpeng converter/template changes unless the nested repo status is checked separately with `git -C mcpat ...`.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -129,6 +135,8 @@
 | The outer loop still could not execute raw vault entries because they only persisted assembly text | Added `sdc_materialize.py` and campaign-side auto-materialization so the vault can now feed the differential runner without a manually curated source file per testcase |
 | The root regression suite still lacked proof that cross-repo artifacts line up across the intended boundaries | Added `tests/test_offline_to_campaign_integration.py` so a real `microprobe`-generated testcase is now validated through the root vault and campaign interfaces |
 | The root runner and campaign still treated fault-injection intent as an untyped gem5 passthrough | Added first-class fault arguments to the root APIs and tests that verify those fields reach the gem5 invocation layer unchanged |
+| The ARM64 Kunpeng McPAT converter still relied on hard-coded XML stats and mixed-profile logic | Added a dedicated `arm64_kunpeng920.py` normalization layer, switched the template to derived `stats.mcpat.*` counters, and covered both model-building and XML generation with new regression tests |
+| Root-level `git diff` appeared to miss the McPAT-side implementation changes | Confirmed that `mcpat/` is a nested git repository and checked/report the nested repo status separately from the root workspace |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

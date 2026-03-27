@@ -303,3 +303,25 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 17: Kunpeng920 McPAT Decoupling
+- **Status:** complete
+- Actions taken:
+  - Re-read `kunpeng920.md` and translated its stable topology/cache facts into a dedicated Kunpeng McPAT adapter at `mcpat/pypat/conversion/arm64_kunpeng920.py`.
+  - Split the ARM64 McPAT conversion path into clearer responsibilities: `profiles.py` now selects and normalizes the Kunpeng config/model layer, `gem5_to_mcpat.py` applies a derived stats normalization pass, and the template consumes `stats.mcpat.*` values instead of old hard-coded counters.
+  - Enriched `kunpeng920_profile.json` with Kunpeng topology fields (core count, clustering, die count, LLC total size, and conservative I/O defaults) while keeping the runtime path safe for SE-mode workloads by defaulting I/O duty/load to zero.
+  - Reworked `template_arm64_kunpeng920.xml` so the system counts, private/shared cache topology, core micro-activity counters, cache/TLB counters, NoC traffic, and memory-controller traffic are all driven by normalized profile/stat data instead of baked-in constants.
+  - Fixed a backend-path bug in `power_backends/mcpat_backend.py`, which had been inserting the McPAT executable path into `sys.path` rather than the `mcpat/` package root.
+  - Added `mcpat/tests/test_arm64_kunpeng920_model.py` to lock down both model construction and generated XML contents, then re-ran focused McPAT and root orchestration tests.
+  - Confirmed that the direct McPAT regression set passed with `PYTHONPATH=.`: 5 tests covering the new Kunpeng model, existing Kunpeng end-to-end conversion, and the normalized power backend; plus 10 additional root tests covering differential execution, campaign orchestration, and offline-to-campaign integration.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/pypat/conversion/arm64_kunpeng920.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/pypat/conversion/profiles.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/pypat/conversion/gem5_to_mcpat.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/gem5_mcpat_parser/kunpeng920_profile.json` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/gem5_mcpat_parser/template_arm64_kunpeng920.xml` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/mcpat/tests/test_arm64_kunpeng920_model.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/power_backends/mcpat_backend.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)

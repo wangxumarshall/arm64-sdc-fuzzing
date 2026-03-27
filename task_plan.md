@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 16 in progress
+Phase 17 complete
 
 ## Phases
 
@@ -105,6 +105,12 @@ Phase 16 in progress
 - [ ] Commit and push the fault-argument phase to the root `main` branch
 - **Status:** in progress
 
+### Phase 17: Kunpeng920 McPAT Decoupling
+- [x] Re-read `kunpeng920.md` and map its topology/core/cache data onto a structured McPAT architecture model
+- [x] Replace flat ARM64 profile consumption with a decoupled Kunpeng model + derived gem5 stats layer
+- [x] Update the ARM64 Kunpeng template/tests so conversion output reflects modeled topology and runtime stats instead of hard-coded constants
+- **Status:** complete
+
 ## Key Questions
 1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?
 2. How should the offline vault, QEMU golden run, gem5 fault-injection run, and McPAT power feedback connect in this specific workspace?
@@ -131,6 +137,8 @@ Phase 16 in progress
 | Auto-materialize vault assembly before asking users to hand-curate source files | The offline vault already persists `asm_content`, so the outer loop should be able to derive a runnable source scaffold automatically instead of requiring a separate manual source-preparation step |
 | Add a cross-repo pure-Python integration test before chasing the missing ARM runtime toolchain | The biggest remaining confidence gap was whether the `microprobe` offline generator and the root campaign actually connect through the vault as intended; this can be proven locally without waiting on compiler/QEMU/gem5 installs |
 | Surface gem5 fault-injection parameters as explicit root-level options | The next execution blocker is no longer testcase selection but injector handoff, so the root orchestration layer should model fault requests directly instead of treating them as opaque passthrough strings |
+| Add a dedicated Kunpeng920 McPAT modeling layer before widening ARM64 support further | The current ARM64 path still mixes flat profile constants, XML skeleton details, and gem5-shape assumptions, so a structured adapter is the cleanest path to decoupled and upstreamable code |
+| Treat `mcpat/` as its own modification boundary during reporting and commit planning | The McPAT converter lives in a nested repository, so root-level `git diff` does not reflect the actual Kunpeng conversion changes unless the nested repo status is inspected separately |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -145,6 +153,8 @@ Phase 16 in progress
 | The campaign runner still depended on pre-existing `source_path` metadata or hand-prepared source files | 8 | Added `sdc_materialize.py` and campaign-side auto-materialization so vault `asm_content` can be promoted directly into runnable C sources and persisted back into testcase metadata |
 | The root test layer still did not prove that `microprobe` generation artifacts can flow into the root campaign stack | 9 | Added a cross-repo integration test that uses the real `mp_sdc_offline_gen.py` path to populate the vault and then exercises `sdc_campaign.py` against that testcase |
 | Fault-injection intent still had to be smuggled through raw gem5 extra args at the root layer | 10 | Added dedicated fault-request options to `run_sdc_differential.py` and `sdc_campaign.py`, then locked propagation down with focused tests |
+| ARM64 Kunpeng support still depended on flat profile constants and hard-coded XML stats | 11 | Introduced a dedicated follow-on phase to extract a structured Kunpeng McPAT model and derived-stat adapter before widening support further |
+| Root-level `git diff` appeared to miss the McPAT changes after implementation | 12 | Confirmed that `mcpat/` is a nested repository and recorded both root and nested repo statuses separately before summarizing the work |
 
 ## Notes
 - Re-read this plan before major decisions.
