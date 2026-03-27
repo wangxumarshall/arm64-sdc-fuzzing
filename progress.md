@@ -224,3 +224,19 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 12: Operator Tooling
+- **Status:** in progress
+- Actions taken:
+  - Added a real CLI to `sdc_scheduler.py` so operators can `rank`, `plan`, and `record` vault feedback directly from the shell.
+  - Added `sdc_preflight.py` to check the local ARM64 SDC runtime prerequisites in one command before attempting differential execution.
+  - Added `tests/test_sdc_preflight.py` to lock down command/path detection and non-ready environment reporting.
+  - Re-ran the root test suite and verified that the scheduler CLI and preflight checker behave as expected in this environment.
+  - Verified the current machine is still not runtime-ready because `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are absent, while the local McPAT binary and ARM64 gem5 config are present.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_scheduler.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_preflight.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_preflight.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)

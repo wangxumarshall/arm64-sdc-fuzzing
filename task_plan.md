@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 11 complete
+Phase 12 in progress
 
 ## Phases
 
@@ -75,6 +75,12 @@ Phase 11 complete
 - [x] Re-run cross-phase pytest coverage to verify the new scheduler layer does not regress the ARM64 contract path
 - **Status:** complete
 
+### Phase 12: Operator Tooling
+- [x] Add a CLI front-end for ranking, planning, and recording scheduler results without writing ad-hoc Python
+- [x] Add a preflight checker that verifies the local compiler/QEMU/gem5/McPAT prerequisites before runtime execution
+- [ ] Commit and push the operator-tooling phase to the root `main` branch
+- **Status:** in progress
+
 ## Key Questions
 1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?
 2. How should the offline vault, QEMU golden run, gem5 fault-injection run, and McPAT power feedback connect in this specific workspace?
@@ -96,6 +102,7 @@ Phase 11 complete
 | Ground the new方案 in the current disk state rather than only the older progress notes | The wrapper path and a few implementation details have drifted, so the final design document must reflect what is actually present in the workspace today |
 | Prefer live pytest coverage over dormant legacy unittest files for ARM64 target hardening | The older ARM64 tests were mostly skip-based and not discovered in normal pytest runs, while new contract tests now exercise the repaired import and wrapper paths directly |
 | Implement the feedback loop as a root-level Python module instead of reviving the deprecated Microprobe GA driver | The repository already persists enough testcase/runtime data in SQLite to rank and recycle seeds without depending on the abandoned `pyevolve` path |
+| Add operator-facing CLIs before attempting more runtime glue | The machine is currently missing the ARM runtime toolchain, so the fastest path forward is to make the scheduler and environment validation usable from the shell while deeper execution pieces remain blocked |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -105,6 +112,7 @@ Phase 11 complete
 | Prior notes and the current tree disagreed on the ARM64 differential wrapper filename | 3 | Re-read the wrapper directory and anchored the new end-to-end design doc to the real file set now present on disk (`baremetaldiff.py`, not `baremetal_diff.py`) |
 | pytest could not import Microprobe because `typeguard` is optional but the testsuite decorator treated it as mandatory | 4 | Softened `typeguard_decorator.py` so runtime type checking only activates when `typeguard` is actually installed |
 | Full end-to-end runtime validation is still blocked by missing local toolchain binaries | 5 | Confirmed that `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently available on this machine, so this phase focused on logic that can be fully verified in pure Python |
+| The new scheduler layer had no operator-facing CLI and toolchain readiness check | 6 | Added `sdc_scheduler.py` subcommands plus `sdc_preflight.py` so ranking/recording and environment validation can run directly from the shell |
 
 ## Notes
 - Re-read this plan before major decisions.

@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from sdc_vault import SDCVault
@@ -283,3 +285,74 @@ def record_result(
     config: SchedulerConfig | None = None,
 ) -> RankedCandidate:
     return FeedbackScheduler(config=config).record_result(vault, testcase_key, result)
+
+
+def _ranked_candidate_to_dict(candidate: RankedCandidate) -> Dict[str, Any]:
+    return {
+        "testcase_key": candidate.testcase_key,
+        "target_name": candidate.target_name,
+        "policy_name": candidate.policy_name,
+        "status": candidate.status,
+        "static_score": candidate.static_score,
+        "sdc_signal": candidate.sdc_signal,
+        "power_total": candidate.power_total,
+        "fitness": candidate.fitness,
+        "risk_score": candidate.row.get("risk_score", 0.0),
+        "memory_pressure_score": candidate.row.get("memory_pressure_score", 0.0),
+        "metadata": candidate.metadata,
+    }
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Rank, plan, and record feedback for the ARM64 SDC vault."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    for command in ["rank", "plan"]:
+        subparser = subparsers.add_parser(command)
+        subparser.add_argument("--db", type=Path, required=True, help="Vault path.")
+        subparser.add_argument(
+            "--limit", type=int, default=10, help="Number of candidates to emit."
+        )
+
+    record_parser = subparsers.add_parser("record")
+    record_parser.add_argument("--db", type=Path, required=True, help="Vault path.")
+    record_parser.add_argument(
+        "--testcase-key", required=True, help="Testcase key to update."
+    )
+    record_parser.add_argument(
+        "--result-json",
+        type=Path,
+        required=True,
+        help="JSON file emitted by run_sdc_differential.py.",
+    )
+
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+    scheduler = FeedbackScheduler()
+
+    with SDCVault(args.db) as vault:
+        if args.command == "rank":
+            payload = [
+                _ranked_candidate_to_dict(candidate)
+                for candidate in scheduler.select_candidates(vault, args.limit)
+            ]
+        elif args.command == "plan":
+            payload = scheduler.mutation_plan(vault, args.limit)
+        else:
+            result_payload = json.loads(args.result_json.read_text(encoding="utf-8"))
+            candidate = scheduler.record_result(
+                vault, args.testcase_key, result_payload
+            )
+            payload = _ranked_candidate_to_dict(candidate)
+
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -78,6 +78,8 @@
 - The feedback scheduler deliberately gives explicit status priority to `SDC_FOUND` seeds over merely high-risk `PENDING` seeds. Pure fitness-by-formula was not enough because an unexecuted high-score seed could otherwise outrank a confirmed SDC-triggering seed.
 - The root test layer now covers three previously unguarded surfaces: scheduler ranking/feedback persistence, runner digest/classification helpers, and backend normalization behavior through pure-Python tests.
 - Full runtime proof of `offline -> compiler -> qemu -> gem5 -> mcpat` is still blocked on this machine because `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently present.
+- `sdc_scheduler.py` now has a shell-friendly CLI with `rank`, `plan`, and `record` subcommands, which means the vault feedback loop no longer requires embedding Python snippets just to rank or fold back results.
+- `sdc_preflight.py` establishes the current runtime boundary in one place: on this machine the McPAT binary and gem5 config are present, while the ARM cross-compiler, `qemu-aarch64`, and built `gem5.opt` binary are still missing.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -116,6 +118,7 @@
 | The generic C wrapper assumed every pass-info message contained a `-` separator and crashed on newer SDC pass metadata | Hardened `microprobe/targets/generic/wrappers/c.py` so wrapper rendering tolerates both legacy and plain-string pass-info formats |
 | pytest could not import Microprobe in this environment because `typeguard` is not installed | Made `typeguard` optional in `microprobe/src/microprobe/utils/typeguard_decorator.py` so tests fall back cleanly instead of failing during import |
 | A purely formula-based scheduler allowed high-risk pending seeds to outrank confirmed SDC hits | Added explicit status priority in `sdc_scheduler.py` so the closed loop preserves empirically successful seeds before exploring additional pending work |
+| The operator path still lacked a first-class shell entrypoint for scheduler actions and environment readiness checks | Added `sdc_scheduler.py` subcommands and `sdc_preflight.py` so the runtime harness can validate prerequisites and update the vault without ad-hoc helper scripts |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`
