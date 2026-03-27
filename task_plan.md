@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 8 complete
+Phase 10 complete
 
 ## Phases
 
@@ -57,6 +57,18 @@ Phase 8 complete
 - [x] Prepare a severity-ordered findings list with file/line references
 - **Status:** complete
 
+### Phase 9: End-to-End Documentation
+- [x] Reconcile the prior design discussion with the repository's current on-disk state
+- [x] Write a repository-grounded end-to-end ARM64 SDC fuzzing plan covering Microprobe, QEMU, gem5, McPAT, and deferred OpenDCDiag integration
+- [x] Capture the current blockers, required file-level work, and acceptance criteria in a durable project document
+- **Status:** complete
+
+### Phase 10: Execution Path Hardening
+- [x] Convert ARM64 target/wrapper assumptions into executable pytest coverage
+- [x] Fix the C wrapper path so `BareMetalDiffWrapper` can render a digest-bearing source file
+- [x] Add a first-class `McPATBackend` and a dedicated ARM64 SE gem5 config, then point the runner at them by default
+- **Status:** complete
+
 ## Key Questions
 1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?
 2. How should the offline vault, QEMU golden run, gem5 fault-injection run, and McPAT power feedback connect in this specific workspace?
@@ -75,12 +87,16 @@ Phase 8 complete
 | Use a Xeon-derived McPAT skeleton for the ARM64 Kunpeng920 template | The bundled ARM templates are rejected by this local McPAT/Cacti fork, while the Xeon skeleton accepts the Kunpeng-like cache/core parameters once retargeted |
 | Treat `out.ptrace` as the authoritative power artifact for this McPAT fork | The local binary writes area to stdout and emits the per-block power trace to `out.ptrace`, so backend parsing must consume the trace file rather than stdout |
 | Treat the current ARM64 ISA directory as a compatibility layer under repair rather than a complete target | The local ARM64 ISA data mixes partial format descriptions, sidecar instruction-definition YAMLs, and draft ISA helpers, so the review must account for both code and data-model debt |
+| Ground the new方案 in the current disk state rather than only the older progress notes | The wrapper path and a few implementation details have drifted, so the final design document must reflect what is actually present in the workspace today |
+| Prefer live pytest coverage over dormant legacy unittest files for ARM64 target hardening | The older ARM64 tests were mostly skip-based and not discovered in normal pytest runs, while new contract tests now exercise the repaired import and wrapper paths directly |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
 | McPAT ARM64 template execution still fails on this local fork | 1 | Resolved by rebuilding the ARM64 template on a Xeon-derived skeleton and parsing `out.ptrace` instead of stdout area output |
 | ARM64 target import still fails after tuple/uarch repair | 2 | Narrowed the remaining blocker to `targets/arm64/isa/armv8-common/isa.py`: the ISA class is still abstract and helper methods reference undefined instruction names |
+| Prior notes and the current tree disagreed on the ARM64 differential wrapper filename | 3 | Re-read the wrapper directory and anchored the new end-to-end design doc to the real file set now present on disk (`baremetaldiff.py`, not `baremetal_diff.py`) |
+| pytest could not import Microprobe because `typeguard` is optional but the testsuite decorator treated it as mandatory | 4 | Softened `typeguard_decorator.py` so runtime type checking only activates when `typeguard` is actually installed |
 
 ## Notes
 - Re-read this plan before major decisions.

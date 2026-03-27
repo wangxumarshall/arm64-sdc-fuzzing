@@ -7,14 +7,13 @@ import argparse
 import json
 import re
 import subprocess
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from power_backends import McPATBackend
 
 REPO_ROOT = Path(__file__).resolve().parent
-MCPAT_PYPAT_ROOT = REPO_ROOT / "mcpat" / "mcpat"
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 
 
@@ -39,6 +38,7 @@ class DifferentialResult:
     qemu: CommandResult
     gem5: Optional[CommandResult]
     mcpat: Optional[Dict[str, Any]]
+    mcpat_error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -142,7 +142,11 @@ def run_gem5(
 
     resolved_cmd_flag = gem5_cmd_flag
     if gem5_cmd_flag == "auto":
-        if gem5_config.name in {"starter_se.py", "etrace_se.py"}:
+        if gem5_config.name in {
+            "starter_se.py",
+            "etrace_se.py",
+            "sdc_kunpeng920_se.py",
+        }:
             resolved_cmd_flag = ""
         else:
             resolved_cmd_flag = "--cmd"
@@ -193,13 +197,6 @@ def run_gem5(
         )
 
     return result
-
-
-def run_mcpat(target_dir: Path, template_profile: str) -> Dict[str, Any]:
-    sys.path.insert(0, str(MCPAT_PYPAT_ROOT))
-    from pypat.conversion.convert import run as run_mcpat_conversion
-
-    return run_mcpat_conversion(target_dir, template_profile=template_profile)
 
 
 def classify(
@@ -261,7 +258,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gem5-config",
         type=Path,
-        default=REPO_ROOT / "gem5" / "configs" / "deprecated" / "example" / "se.py",
+        default=REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_kunpeng920_se.py",
         help="gem5 configuration script.",
     )
     parser.add_argument(
@@ -298,6 +295,12 @@ def parse_args() -> argparse.Namespace:
         "--mcpat-template-profile",
         default="arm64-kunpeng920",
         help="McPAT template profile used for gem5 post-processing.",
+    )
+    parser.add_argument(
+        "--mcpat-binary",
+        type=Path,
+        default=None,
+        help="Optional path to the local McPAT binary.",
     )
     parser.add_argument(
         "--timeout",
@@ -346,6 +349,7 @@ def main() -> int:
 
     gem5_result: Optional[CommandResult] = None
     mcpat_result: Optional[Dict[str, Any]] = None
+    mcpat_error: Optional[str] = None
     faulted_digest: Optional[str] = None
 
     if not args.skip_gem5 and compile_result.returncode == 0:
@@ -360,10 +364,18 @@ def main() -> int:
         )
         faulted_digest = extract_digest(gem5_result)
         if gem5_result.returncode == 0 and not args.skip_mcpat:
-            mcpat_result = run_mcpat(
-                target_dir=args.gem5_outdir.resolve(),
+            backend = McPATBackend(
                 template_profile=args.mcpat_template_profile,
+                mcpat_binary=(
+                    args.mcpat_binary.resolve()
+                    if args.mcpat_binary is not None
+                    else None
+                ),
             )
+            try:
+                mcpat_result = backend.run(args.gem5_outdir.resolve())
+            except Exception as exc:  # pragma: no cover - runtime environment dependent
+                mcpat_error = str(exc)
 
     result = DifferentialResult(
         status=classify(
@@ -379,6 +391,7 @@ def main() -> int:
         qemu=qemu_result,
         gem5=gem5_result,
         mcpat=mcpat_result,
+        mcpat_error=mcpat_error,
     )
 
     payload = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)

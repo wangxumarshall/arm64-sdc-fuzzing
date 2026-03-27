@@ -62,6 +62,18 @@
 - The local ARM64 microarchitecture YAML already models a 4-wide, dual-FPU, load/store separated ARMv8 core with 64 KB L1 and 512 KB L2, which is directionally aligned with Kunpeng 920 / TaiShan V110 stress priorities even if it is not a calibrated vendor model.
 - The ARM64 SIMD/property YAMLs already include vector arithmetic, vector multiply-accumulate style ops, vector loads/stores, and `LDP/STP` forms. That is enough to seed a first-version SDC-sensitive instruction selector without inventing new ISA tags.
 - The ARM64 register-type YAML already exposes `GPR64`, `GPR32`, and 128-bit `SIMD_FP`, so a practical IBR implementation can score by operand/register width immediately.
+- The repository now already contains most of the Phase 1/2 scaffolding discussed in the design notes: `Benchmark.metadata`, `microprobe/src/microprobe/passes/sdc_analysis/offline_coverage.py`, `microprobe/targets/arm64/policies/sdc_fuzzing_policy.py`, `microprobe/targets/generic/tools/mp_sdc_offline_gen.py`, `sdc_vault.py`, and `run_sdc_differential.py`.
+- The actual ARM64 differential wrapper file on disk is `microprobe/targets/arm64/wrappers/baremetaldiff.py`, while older notes referenced `baremetal_diff.py`. The class name is still `BareMetalDiffWrapper`, so naming is functionally close but not fully normalized.
+- `run_sdc_differential.py` is already wired for `compile -> qemu -> gem5 -> McPAT`, but it still defaults gem5 to `configs/deprecated/example/se.py` rather than a dedicated ARM Kunpeng-style SE config.
+- `microprobe/targets/generic/tools/mp_sdc_offline_gen.py` already persists generated candidates into `sdc_vault.py`, so the remaining gap is not the existence of an offline generator but the reliability of the ARM64 target import path it depends on.
+- The ARM64 `targets_tests.py` and `integration_tests.py` still mostly skip on failure instead of asserting the repaired target contract, so they are not yet strong regression guards for the desired end-to-end pipeline.
+- `Arm64ISA` in `microprobe/targets/arm64/isa/armv8-common/isa.py` contains substantial helper logic, but the target import is still blocked by abstract ISA requirements and incomplete instruction-name coverage.
+- A fresh runtime probe now shows `import_definition('armv8_common-armv8_common-aarch64_linux_gcc')` succeeds; the target-import blocker documented earlier has been resolved in the current tree, and the next bottlenecks have shifted to wrapper rendering, gem5 default wiring, and real fault injection.
+- `BareMetalDiffWrapper` had a real render-time failure path: `CWrapper.start_main()` assumed every `pass_info` entry used the historic `"Pass - Detail"` format. The newer SDC passes emit plain strings, so `synth._wrap(bench)` used to raise `IndexError` until the generic wrapper was hardened.
+- The repository now has a first-class `power_backends` package with a default `McPATBackend` and a deferred `OpenDCDiagBackend` interface, which cleanly separates power post-processing from the differential runner.
+- The repository now also has a dedicated ARM64 gem5 SE config at `gem5/configs/example/arm/sdc_kunpeng920_se.py`, so the runner no longer has to default to deprecated `se.py`.
+- The old ARM64 target unittest files remain in-tree, but the new executable guardrail is `microprobe/targets/arm64/tests/targets/test_target_contract.py`, which pytest discovers and which now covers canonical import, legacy alias import, wrapper registry, policy synthesis, and digest-wrapper rendering.
+- `microprobe.utils.typeguard_decorator` treated `typeguard` as an implicit hard dependency whenever `unittest` was present in `sys.modules`. On this machine the package is absent, so tests only became runnable after making that dependency optional.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -81,6 +93,7 @@
 | Base the ARM64 Kunpeng920 template on a Xeon-derived McPAT skeleton | This local McPAT fork rejects the bundled ARM templates, but the Xeon skeleton remains compatible after ARM/Kunpeng retargeting |
 | Parse power from `out.ptrace` rather than stdout | The local McPAT executable prints area vectors to stdout and power vectors to `out.ptrace` |
 | Put the ARM64 digest logic in a dedicated `BareMetalDiffWrapper` subclass | The generic `CWrapper` epilogue restores target context too late for SDC capture and does not preserve the needed architectural snapshot semantics |
+| The default end-to-end方案 should treat existing scaffolding as partial implementation, not future intent | The current tree has enough material to avoid re-planning from scratch, but not enough to claim the pipeline is production-ready without target, gem5, and validation repairs |
 
 ## Issues Encountered
 | Issue | Resolution |
@@ -95,6 +108,9 @@
 | ARM64 ISA import still fails after fixing operand constants and microarchitecture scaffolding | The remaining blocker is now clearly in `targets/arm64/isa/armv8-common/isa.py`: the ISA class is still abstract and some helpers reference undefined instruction names |
 | ARM64 `instruction_props` currently contains extra instruction definitions rather than property files | Added a compatibility shim in the generic instruction importer so these sidecar YAMLs can be imported as instruction-definition extensions, but the directory semantics still need a follow-up cleanup |
 | The new `BareMetalDiffWrapper` wraps arbitrary benchmark instructions in inline asm blocks without explicit inputs, outputs, or clobber lists | This leaves the surrounding C compiler free to make invalid ABI/register assumptions around the benchmark body, which is now the highest-risk correctness issue in the execution path |
+| Prior progress notes and the wrapper directory disagreed about the exact wrapper filename | Re-read the directory and aligned the new documentation to the actual file layout so the plan does not point future work at a nonexistent path |
+| The generic C wrapper assumed every pass-info message contained a `-` separator and crashed on newer SDC pass metadata | Hardened `microprobe/targets/generic/wrappers/c.py` so wrapper rendering tolerates both legacy and plain-string pass-info formats |
+| pytest could not import Microprobe in this environment because `typeguard` is not installed | Made `typeguard` optional in `microprobe/src/microprobe/utils/typeguard_decorator.py` so tests fall back cleanly instead of failing during import |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

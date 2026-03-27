@@ -168,3 +168,42 @@
 
 ---
 *Update after completing each phase or encountering errors*
+
+## Session: 2026-03-27
+
+### Phase 9: End-to-End Documentation
+- **Status:** complete
+- Actions taken:
+  - Re-read the project planning files before making new design decisions, per the planning workflow.
+  - Re-validated the on-disk ARM64, Microprobe, gem5, McPAT, and vault files that matter for the SDC fuzzing pipeline.
+  - Confirmed that several major building blocks already exist in-tree, including `Benchmark.metadata`, static SDC analysis passes, the ARM64 SDC fuzzing policy, the offline generator CLI, the SQLite vault, the ARM64 McPAT profile/template, and the differential runner skeleton.
+  - Identified the most important remaining blockers to a true end-to-end run: incomplete ARM64 ISA importability, drift between historical notes and current wrapper filenames, lack of a real ARM SE fault injector, and gem5 still defaulting to a deprecated SE script in the differential runner.
+  - Wrote a new repository-grounded end-to-end design document that turns the earlier discussion into a concrete roadmap with phases, file ownership, data flow, risks, and acceptance criteria.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_fuzzing_e2e_plan.md` (created)
+
+### Phase 10: Execution Path Hardening
+- **Status:** complete
+- Actions taken:
+  - Re-checked the current ARM64 target and confirmed that the canonical import path now succeeds in the current tree.
+  - Hardened `microprobe/targets/generic/wrappers/c.py` so newer plain-string `pass_info` entries no longer crash wrapper rendering.
+  - Added a compatibility wrapper alias file for `baremetal_diff.py` while keeping `baremetaldiff.py` as the canonical implementation module.
+  - Added `power_backends/mcpat_backend.py` and `power_backends/opendcdiag_backend.py`, plus package exports, to make the power post-processing path explicit.
+  - Added `gem5/configs/example/arm/sdc_kunpeng920_se.py` as the new ARM64/Kunpeng-like SE runner with guest stdout/stderr capture defaults and a fault-request manifest seam.
+  - Rewired `run_sdc_differential.py` to default to the new ARM64 gem5 config and the new `McPATBackend`, while tolerating McPAT failures as data instead of hard-crashing the whole run.
+  - Softened `microprobe/src/microprobe/utils/typeguard_decorator.py` so missing `typeguard` no longer breaks local test execution.
+  - Added pytest-discoverable ARM64 contract tests that cover import aliases, wrapper registry, static-score synthesis, and digest-wrapper rendering.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/generic/wrappers/c.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/wrappers/baremetal_diff.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/power_backends/__init__.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/power_backends/mcpat_backend.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/power_backends/opendcdiag_backend.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_kunpeng920_se.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/run_sdc_differential.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/utils/typeguard_decorator.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tests/conftest.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tests/targets/test_target_contract.py` (created)
