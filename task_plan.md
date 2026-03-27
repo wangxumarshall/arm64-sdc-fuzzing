@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 10 complete
+Phase 11 complete
 
 ## Phases
 
@@ -69,6 +69,12 @@ Phase 10 complete
 - [x] Add a first-class `McPATBackend` and a dedicated ARM64 SE gem5 config, then point the runner at them by default
 - **Status:** complete
 
+### Phase 11: Feedback Scheduling
+- [x] Add a Python 3-native feedback scheduler for ranking seeds and folding execution results back into the vault
+- [x] Add root-level tests for scheduler math, runner classification helpers, and backend normalization
+- [x] Re-run cross-phase pytest coverage to verify the new scheduler layer does not regress the ARM64 contract path
+- **Status:** complete
+
 ## Key Questions
 1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?
 2. How should the offline vault, QEMU golden run, gem5 fault-injection run, and McPAT power feedback connect in this specific workspace?
@@ -89,6 +95,7 @@ Phase 10 complete
 | Treat the current ARM64 ISA directory as a compatibility layer under repair rather than a complete target | The local ARM64 ISA data mixes partial format descriptions, sidecar instruction-definition YAMLs, and draft ISA helpers, so the review must account for both code and data-model debt |
 | Ground the new方案 in the current disk state rather than only the older progress notes | The wrapper path and a few implementation details have drifted, so the final design document must reflect what is actually present in the workspace today |
 | Prefer live pytest coverage over dormant legacy unittest files for ARM64 target hardening | The older ARM64 tests were mostly skip-based and not discovered in normal pytest runs, while new contract tests now exercise the repaired import and wrapper paths directly |
+| Implement the feedback loop as a root-level Python module instead of reviving the deprecated Microprobe GA driver | The repository already persists enough testcase/runtime data in SQLite to rank and recycle seeds without depending on the abandoned `pyevolve` path |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -97,6 +104,7 @@ Phase 10 complete
 | ARM64 target import still fails after tuple/uarch repair | 2 | Narrowed the remaining blocker to `targets/arm64/isa/armv8-common/isa.py`: the ISA class is still abstract and helper methods reference undefined instruction names |
 | Prior notes and the current tree disagreed on the ARM64 differential wrapper filename | 3 | Re-read the wrapper directory and anchored the new end-to-end design doc to the real file set now present on disk (`baremetaldiff.py`, not `baremetal_diff.py`) |
 | pytest could not import Microprobe because `typeguard` is optional but the testsuite decorator treated it as mandatory | 4 | Softened `typeguard_decorator.py` so runtime type checking only activates when `typeguard` is actually installed |
+| Full end-to-end runtime validation is still blocked by missing local toolchain binaries | 5 | Confirmed that `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently available on this machine, so this phase focused on logic that can be fully verified in pure Python |
 
 ## Notes
 - Re-read this plan before major decisions.

@@ -74,6 +74,10 @@
 - The repository now also has a dedicated ARM64 gem5 SE config at `gem5/configs/example/arm/sdc_kunpeng920_se.py`, so the runner no longer has to default to deprecated `se.py`.
 - The old ARM64 target unittest files remain in-tree, but the new executable guardrail is `microprobe/targets/arm64/tests/targets/test_target_contract.py`, which pytest discovers and which now covers canonical import, legacy alias import, wrapper registry, policy synthesis, and digest-wrapper rendering.
 - `microprobe.utils.typeguard_decorator` treated `typeguard` as an implicit hard dependency whenever `unittest` was present in `sys.modules`. On this machine the package is absent, so tests only became runnable after making that dependency optional.
+- The root repository now contains `sdc_scheduler.py`, a Python 3-native feedback scheduler that ranks seeds directly from `sdc_vault.py`, normalizes execution statuses from `run_sdc_differential.py`, and writes scheduler metadata back into the vault.
+- The feedback scheduler deliberately gives explicit status priority to `SDC_FOUND` seeds over merely high-risk `PENDING` seeds. Pure fitness-by-formula was not enough because an unexecuted high-score seed could otherwise outrank a confirmed SDC-triggering seed.
+- The root test layer now covers three previously unguarded surfaces: scheduler ranking/feedback persistence, runner digest/classification helpers, and backend normalization behavior through pure-Python tests.
+- Full runtime proof of `offline -> compiler -> qemu -> gem5 -> mcpat` is still blocked on this machine because `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently present.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -111,6 +115,7 @@
 | Prior progress notes and the wrapper directory disagreed about the exact wrapper filename | Re-read the directory and aligned the new documentation to the actual file layout so the plan does not point future work at a nonexistent path |
 | The generic C wrapper assumed every pass-info message contained a `-` separator and crashed on newer SDC pass metadata | Hardened `microprobe/targets/generic/wrappers/c.py` so wrapper rendering tolerates both legacy and plain-string pass-info formats |
 | pytest could not import Microprobe in this environment because `typeguard` is not installed | Made `typeguard` optional in `microprobe/src/microprobe/utils/typeguard_decorator.py` so tests fall back cleanly instead of failing during import |
+| A purely formula-based scheduler allowed high-risk pending seeds to outrank confirmed SDC hits | Added explicit status priority in `sdc_scheduler.py` so the closed loop preserves empirically successful seeds before exploring additional pending work |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

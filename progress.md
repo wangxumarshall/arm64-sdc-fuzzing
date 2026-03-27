@@ -207,3 +207,20 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/utils/typeguard_decorator.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tests/conftest.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tests/targets/test_target_contract.py` (created)
+
+### Phase 11: Feedback Scheduling
+- **Status:** complete
+- Actions taken:
+  - Added `sdc_scheduler.py` as the new Python 3-native seed ranking and result-foldback layer on top of `sdc_vault.py`.
+  - Normalized runner statuses such as `golden_only`, `matched`, `sdc_found`, `gem5_timeout`, and failure modes into vault-friendly statuses.
+  - Added root-level tests for scheduler persistence, candidate ordering, runner digest/classification helpers, and backend normalization.
+  - Re-ran the ARM64 contract tests together with the new root tests to ensure the new feedback layer does not regress the earlier Microprobe/gem5/McPAT plumbing.
+  - Checked local tool availability and confirmed that full binary runtime validation is still blocked because the required ARM cross-compiler, QEMU user-mode binary, and built gem5 ARM executable are not available in the current environment.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_scheduler.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_scheduler.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_run_sdc_differential.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_power_backends.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
