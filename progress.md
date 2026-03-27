@@ -226,7 +226,7 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
 
 ### Phase 12: Operator Tooling
-- **Status:** in progress
+- **Status:** complete
 - Actions taken:
   - Added a real CLI to `sdc_scheduler.py` so operators can `rank`, `plan`, and `record` vault feedback directly from the shell.
   - Added `sdc_preflight.py` to check the local ARM64 SDC runtime prerequisites in one command before attempting differential execution.
@@ -237,6 +237,23 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/sdc_scheduler.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/sdc_preflight.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_preflight.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 13: Campaign Orchestration
+- **Status:** in progress
+- Actions taken:
+  - Refactored `run_sdc_differential.py` so the compile/QEMU/gem5/McPAT chain is available through a reusable `run_differential(...)` Python API in addition to the existing CLI.
+  - Added `sdc_campaign.py` as the root-level outer-loop orchestrator that selects candidates from the vault, resolves testcase source files, runs the differential executor, writes per-testcase result JSON artifacts, and folds the result back into the vault through the scheduler.
+  - Added targeted tests for the new programmatic runner entrypoint and for campaign dry-run, successful execution, and preflight-blocked behavior.
+  - Re-ran the expanded regression suite and confirmed the root stack now has 23 passing tests across ARM64 target contracts, scheduler math, runner helpers, power backends, preflight checks, and campaign orchestration.
+  - Confirmed that the new orchestration layer is fully validated in pure Python, while true compiled execution is still gated on the missing ARM cross-compiler, QEMU user binary, and built gem5 ARM binary on this machine.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/run_sdc_differential.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_campaign.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_run_sdc_differential.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_campaign.py` (created)
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)

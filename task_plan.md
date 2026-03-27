@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 12 in progress
+Phase 13 in progress
 
 ## Phases
 
@@ -78,7 +78,13 @@ Phase 12 in progress
 ### Phase 12: Operator Tooling
 - [x] Add a CLI front-end for ranking, planning, and recording scheduler results without writing ad-hoc Python
 - [x] Add a preflight checker that verifies the local compiler/QEMU/gem5/McPAT prerequisites before runtime execution
-- [ ] Commit and push the operator-tooling phase to the root `main` branch
+- [x] Commit and push the operator-tooling phase to the root `main` branch
+- **Status:** complete
+
+### Phase 13: Campaign Orchestration
+- [x] Expose the differential runner as a reusable Python API instead of only a CLI
+- [x] Add a campaign runner that ties together preflight, scheduler selection, differential execution, and vault feedback persistence
+- [ ] Commit and push the campaign-orchestration phase to the root `main` branch
 - **Status:** in progress
 
 ## Key Questions
@@ -103,6 +109,7 @@ Phase 12 in progress
 | Prefer live pytest coverage over dormant legacy unittest files for ARM64 target hardening | The older ARM64 tests were mostly skip-based and not discovered in normal pytest runs, while new contract tests now exercise the repaired import and wrapper paths directly |
 | Implement the feedback loop as a root-level Python module instead of reviving the deprecated Microprobe GA driver | The repository already persists enough testcase/runtime data in SQLite to rank and recycle seeds without depending on the abandoned `pyevolve` path |
 | Add operator-facing CLIs before attempting more runtime glue | The machine is currently missing the ARM runtime toolchain, so the fastest path forward is to make the scheduler and environment validation usable from the shell while deeper execution pieces remain blocked |
+| Add a root-level campaign runner before returning to deeper ARM64 internals | The root repo now has enough scheduler, vault, and runner pieces to exercise the outer-loop state flow in pure Python even while the compiled ARM runtime remains unavailable locally |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -113,6 +120,7 @@ Phase 12 in progress
 | pytest could not import Microprobe because `typeguard` is optional but the testsuite decorator treated it as mandatory | 4 | Softened `typeguard_decorator.py` so runtime type checking only activates when `typeguard` is actually installed |
 | Full end-to-end runtime validation is still blocked by missing local toolchain binaries | 5 | Confirmed that `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently available on this machine, so this phase focused on logic that can be fully verified in pure Python |
 | The new scheduler layer had no operator-facing CLI and toolchain readiness check | 6 | Added `sdc_scheduler.py` subcommands plus `sdc_preflight.py` so ranking/recording and environment validation can run directly from the shell |
+| The repo still lacked an orchestrator that could select seeds, execute the runner, and fold results back into the vault | 7 | Added `sdc_campaign.py` and a reusable `run_differential(...)` API so the outer-loop state machine can be exercised and tested without shelling into ad-hoc glue scripts |
 
 ## Notes
 - Re-read this plan before major decisions.

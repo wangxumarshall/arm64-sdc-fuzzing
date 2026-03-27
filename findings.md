@@ -80,6 +80,8 @@
 - Full runtime proof of `offline -> compiler -> qemu -> gem5 -> mcpat` is still blocked on this machine because `aarch64-linux-gnu-gcc`, `qemu-aarch64`, and `gem5/build/ARM/gem5.opt` are not currently present.
 - `sdc_scheduler.py` now has a shell-friendly CLI with `rank`, `plan`, and `record` subcommands, which means the vault feedback loop no longer requires embedding Python snippets just to rank or fold back results.
 - `sdc_preflight.py` establishes the current runtime boundary in one place: on this machine the McPAT binary and gem5 config are present, while the ARM cross-compiler, `qemu-aarch64`, and built `gem5.opt` binary are still missing.
+- The root repo now has a real outer-loop orchestrator in `sdc_campaign.py`. It can select ranked candidates from the vault, resolve testcase source files, execute the differential runner, emit per-testcase artifacts, and fold the result back through the scheduler.
+- `run_sdc_differential.py` is no longer CLI-only; its new `run_differential(...)` API makes the execution chain testable and reusable from higher-level tooling without subprocess wrappers around the script itself.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -119,6 +121,7 @@
 | pytest could not import Microprobe in this environment because `typeguard` is not installed | Made `typeguard` optional in `microprobe/src/microprobe/utils/typeguard_decorator.py` so tests fall back cleanly instead of failing during import |
 | A purely formula-based scheduler allowed high-risk pending seeds to outrank confirmed SDC hits | Added explicit status priority in `sdc_scheduler.py` so the closed loop preserves empirically successful seeds before exploring additional pending work |
 | The operator path still lacked a first-class shell entrypoint for scheduler actions and environment readiness checks | Added `sdc_scheduler.py` subcommands and `sdc_preflight.py` so the runtime harness can validate prerequisites and update the vault without ad-hoc helper scripts |
+| The outer loop still required ad-hoc glue between candidate selection, execution, and vault feedback | Added `sdc_campaign.py` plus a reusable `run_differential(...)` API so the rank -> execute -> record workflow is now a first-class root-level interface |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`

@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional
 from power_backends import McPATBackend
 
 REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_GEM5_CONFIG = (
+    REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_kunpeng920_se.py"
+)
+DEFAULT_GEM5_OUTDIR = REPO_ROOT / "m5out-sdc"
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 
 
@@ -223,6 +227,104 @@ def classify(
     return "matched"
 
 
+def run_differential(
+    source: Path,
+    *,
+    elf: Optional[Path] = None,
+    compiler: str = "aarch64-linux-gnu-gcc",
+    compiler_flags: Optional[List[str]] = None,
+    qemu_binary: str = "qemu-aarch64",
+    qemu_args: Optional[List[str]] = None,
+    gem5_binary: str = "gem5/build/ARM/gem5.opt",
+    gem5_config: Path = DEFAULT_GEM5_CONFIG,
+    gem5_outdir: Path = DEFAULT_GEM5_OUTDIR,
+    gem5_args: Optional[List[str]] = None,
+    gem5_cmd_flag: str = "auto",
+    skip_gem5: bool = False,
+    skip_mcpat: bool = False,
+    mcpat_template_profile: str = "arm64-kunpeng920",
+    mcpat_binary: Optional[Path] = None,
+    timeout: int = 120,
+) -> DifferentialResult:
+    source = source.resolve()
+    elf = elf.resolve() if elf is not None else source.with_suffix(".elf")
+    compiler_flags = list(compiler_flags or [])
+    qemu_args = list(qemu_args or [])
+    gem5_args = list(gem5_args or [])
+
+    compile_result = compile_static_elf(
+        source=source,
+        output=elf,
+        compiler=compiler,
+        compiler_flags=compiler_flags,
+        timeout=timeout,
+    )
+
+    qemu_result = (
+        run_qemu(
+            elf=elf,
+            qemu_binary=qemu_binary,
+            qemu_args=qemu_args,
+            timeout=timeout,
+        )
+        if compile_result.returncode == 0
+        else CommandResult(
+            command=[],
+            returncode=-3,
+            stdout="",
+            stderr="Skipped because compilation failed.",
+        )
+    )
+    golden_digest = extract_digest(qemu_result)
+
+    gem5_result: Optional[CommandResult] = None
+    mcpat_result: Optional[Dict[str, Any]] = None
+    mcpat_error: Optional[str] = None
+    faulted_digest: Optional[str] = None
+
+    if not skip_gem5 and compile_result.returncode == 0:
+        gem5_result = run_gem5(
+            elf=elf,
+            gem5_binary=gem5_binary,
+            gem5_config=gem5_config.resolve(),
+            gem5_outdir=gem5_outdir.resolve(),
+            gem5_args=gem5_args,
+            gem5_cmd_flag=gem5_cmd_flag,
+            timeout=timeout,
+        )
+        faulted_digest = extract_digest(gem5_result)
+        if gem5_result.returncode == 0 and not skip_mcpat:
+            backend = McPATBackend(
+                template_profile=mcpat_template_profile,
+                mcpat_binary=mcpat_binary.resolve() if mcpat_binary is not None else None,
+            )
+            try:
+                mcpat_result = backend.run(gem5_outdir.resolve())
+            except Exception as exc:  # pragma: no cover - runtime environment dependent
+                mcpat_error = str(exc)
+
+    return DifferentialResult(
+        status=classify(
+            compile_result=compile_result,
+            qemu_result=qemu_result,
+            gem5_result=gem5_result,
+            golden_digest=golden_digest,
+            faulted_digest=faulted_digest,
+        ),
+        golden_digest=golden_digest,
+        faulted_digest=faulted_digest,
+        compile=compile_result,
+        qemu=qemu_result,
+        gem5=gem5_result,
+        mcpat=mcpat_result,
+        mcpat_error=mcpat_error,
+    )
+
+
+def result_exit_code(result: DifferentialResult) -> int:
+    return 0 if result.status in {"matched", "sdc_found", "golden_only"} else 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compile an ARM64 test, run QEMU and gem5, and classify SDC."
@@ -258,13 +360,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gem5-config",
         type=Path,
-        default=REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_kunpeng920_se.py",
+        default=DEFAULT_GEM5_CONFIG,
         help="gem5 configuration script.",
     )
     parser.add_argument(
         "--gem5-outdir",
         type=Path,
-        default=REPO_ROOT / "m5out-sdc",
+        default=DEFAULT_GEM5_OUTDIR,
         help="gem5 output directory.",
     )
     parser.add_argument(
@@ -319,86 +421,30 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    source = args.source.resolve()
-    elf = args.elf.resolve() if args.elf is not None else source.with_suffix(".elf")
-
-    compile_result = compile_static_elf(
-        source=source,
-        output=elf,
+    result = run_differential(
+        source=args.source,
+        elf=args.elf,
         compiler=args.compiler,
         compiler_flags=args.compiler_flag,
+        qemu_binary=args.qemu_binary,
+        qemu_args=args.qemu_arg,
+        gem5_binary=args.gem5_binary,
+        gem5_config=args.gem5_config,
+        gem5_outdir=args.gem5_outdir,
+        gem5_args=args.gem5_arg,
+        gem5_cmd_flag=args.gem5_cmd_flag,
+        skip_gem5=args.skip_gem5,
+        skip_mcpat=args.skip_mcpat,
+        mcpat_template_profile=args.mcpat_template_profile,
+        mcpat_binary=args.mcpat_binary,
         timeout=args.timeout,
-    )
-
-    qemu_result = (
-        run_qemu(
-            elf=elf,
-            qemu_binary=args.qemu_binary,
-            qemu_args=args.qemu_arg,
-            timeout=args.timeout,
-        )
-        if compile_result.returncode == 0
-        else CommandResult(
-            command=[],
-            returncode=-3,
-            stdout="",
-            stderr="Skipped because compilation failed.",
-        )
-    )
-    golden_digest = extract_digest(qemu_result)
-
-    gem5_result: Optional[CommandResult] = None
-    mcpat_result: Optional[Dict[str, Any]] = None
-    mcpat_error: Optional[str] = None
-    faulted_digest: Optional[str] = None
-
-    if not args.skip_gem5 and compile_result.returncode == 0:
-        gem5_result = run_gem5(
-            elf=elf,
-            gem5_binary=args.gem5_binary,
-            gem5_config=args.gem5_config.resolve(),
-            gem5_outdir=args.gem5_outdir.resolve(),
-            gem5_args=args.gem5_arg,
-            gem5_cmd_flag=args.gem5_cmd_flag,
-            timeout=args.timeout,
-        )
-        faulted_digest = extract_digest(gem5_result)
-        if gem5_result.returncode == 0 and not args.skip_mcpat:
-            backend = McPATBackend(
-                template_profile=args.mcpat_template_profile,
-                mcpat_binary=(
-                    args.mcpat_binary.resolve()
-                    if args.mcpat_binary is not None
-                    else None
-                ),
-            )
-            try:
-                mcpat_result = backend.run(args.gem5_outdir.resolve())
-            except Exception as exc:  # pragma: no cover - runtime environment dependent
-                mcpat_error = str(exc)
-
-    result = DifferentialResult(
-        status=classify(
-            compile_result=compile_result,
-            qemu_result=qemu_result,
-            gem5_result=gem5_result,
-            golden_digest=golden_digest,
-            faulted_digest=faulted_digest,
-        ),
-        golden_digest=golden_digest,
-        faulted_digest=faulted_digest,
-        compile=compile_result,
-        qemu=qemu_result,
-        gem5=gem5_result,
-        mcpat=mcpat_result,
-        mcpat_error=mcpat_error,
     )
 
     payload = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
     if args.json_out is not None:
         args.json_out.write_text(payload + "\n", encoding="utf-8")
     print(payload)
-    return 0 if result.status in {"matched", "sdc_found", "golden_only"} else 1
+    return result_exit_code(result)
 
 
 if __name__ == "__main__":
