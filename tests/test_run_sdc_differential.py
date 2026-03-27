@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from run_sdc_differential import (
+    build_fault_args,
     CommandResult,
     classify,
     extract_digest,
@@ -59,9 +60,34 @@ def test_classify_reports_golden_only_without_gem5():
     )
 
 
+def test_build_fault_args_renders_optional_fields():
+    assert build_fault_args(fault_model="none", fault_target="") == [
+        "--fault-model",
+        "none",
+        "--fault-target",
+        "",
+    ]
+    assert build_fault_args(
+        fault_model="register_bit_flip",
+        fault_target="x0",
+        fault_bit=7,
+        fault_tick=1234,
+    ) == [
+        "--fault-model",
+        "register_bit_flip",
+        "--fault-target",
+        "x0",
+        "--fault-bit",
+        "7",
+        "--fault-tick",
+        "1234",
+    ]
+
+
 def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
     source = tmp_path / "case.c"
     source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    observed = {}
 
     def fake_compile_static_elf(**kwargs):
         return CommandResult(["cc"], 0, "", "")
@@ -70,6 +96,7 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
         return CommandResult(["qemu"], 0, "SDC_DIGEST=1111", "")
 
     def fake_run_gem5(**kwargs):
+        observed["gem5_args"] = kwargs["gem5_args"]
         return CommandResult(["gem5"], 0, "SDC_HASH=2222", "")
 
     class FakeBackend:
@@ -91,9 +118,23 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
         source=source,
         elf=tmp_path / "case.elf",
         gem5_outdir=tmp_path / "m5out",
+        fault_model="register_bit_flip",
+        fault_target="x0",
+        fault_bit=7,
+        fault_tick=1234,
     )
 
     assert result.status == "sdc_found"
     assert result.golden_digest == "1111"
     assert result.faulted_digest == "2222"
     assert result.mcpat == {"power_total": 3.5, "target_dir": str((tmp_path / "m5out").resolve())}
+    assert observed["gem5_args"][:8] == [
+        "--fault-model",
+        "register_bit_flip",
+        "--fault-target",
+        "x0",
+        "--fault-bit",
+        "7",
+        "--fault-tick",
+        "1234",
+    ]

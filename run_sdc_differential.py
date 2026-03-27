@@ -203,6 +203,26 @@ def run_gem5(
     return result
 
 
+def build_fault_args(
+    *,
+    fault_model: str = "none",
+    fault_target: str = "",
+    fault_bit: Optional[int] = None,
+    fault_tick: Optional[int] = None,
+) -> List[str]:
+    arguments = [
+        "--fault-model",
+        fault_model,
+        "--fault-target",
+        fault_target,
+    ]
+    if fault_bit is not None:
+        arguments.extend(["--fault-bit", str(fault_bit)])
+    if fault_tick is not None:
+        arguments.extend(["--fault-tick", str(fault_tick)])
+    return arguments
+
+
 def classify(
     compile_result: CommandResult,
     qemu_result: CommandResult,
@@ -240,6 +260,10 @@ def run_differential(
     gem5_outdir: Path = DEFAULT_GEM5_OUTDIR,
     gem5_args: Optional[List[str]] = None,
     gem5_cmd_flag: str = "auto",
+    fault_model: str = "none",
+    fault_target: str = "",
+    fault_bit: Optional[int] = None,
+    fault_tick: Optional[int] = None,
     skip_gem5: bool = False,
     skip_mcpat: bool = False,
     mcpat_template_profile: str = "arm64-kunpeng920",
@@ -250,7 +274,12 @@ def run_differential(
     elf = elf.resolve() if elf is not None else source.with_suffix(".elf")
     compiler_flags = list(compiler_flags or [])
     qemu_args = list(qemu_args or [])
-    gem5_args = list(gem5_args or [])
+    gem5_args = build_fault_args(
+        fault_model=fault_model,
+        fault_target=fault_target,
+        fault_bit=fault_bit,
+        fault_tick=fault_tick,
+    ) + list(gem5_args or [])
 
     compile_result = compile_static_elf(
         source=source,
@@ -384,6 +413,28 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--fault-model",
+        default="none",
+        help="Fault model name forwarded to the gem5 SDC config.",
+    )
+    parser.add_argument(
+        "--fault-target",
+        default="",
+        help="Fault target identifier forwarded to the gem5 SDC config.",
+    )
+    parser.add_argument(
+        "--fault-bit",
+        type=int,
+        default=None,
+        help="Optional bit index forwarded to the gem5 SDC config.",
+    )
+    parser.add_argument(
+        "--fault-tick",
+        type=int,
+        default=None,
+        help="Optional tick forwarded to the gem5 SDC config.",
+    )
+    parser.add_argument(
         "--skip-gem5",
         action="store_true",
         help="Only run compile + QEMU golden execution.",
@@ -433,6 +484,10 @@ def main() -> int:
         gem5_outdir=args.gem5_outdir,
         gem5_args=args.gem5_arg,
         gem5_cmd_flag=args.gem5_cmd_flag,
+        fault_model=args.fault_model,
+        fault_target=args.fault_target,
+        fault_bit=args.fault_bit,
+        fault_tick=args.fault_tick,
         skip_gem5=args.skip_gem5,
         skip_mcpat=args.skip_mcpat,
         mcpat_template_profile=args.mcpat_template_profile,

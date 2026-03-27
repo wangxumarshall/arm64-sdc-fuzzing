@@ -50,6 +50,10 @@ def test_execute_campaign_dry_run_plans_candidates(monkeypatch, tmp_path):
         gem5_config=tmp_path / "cfg.py",
         gem5_args=[],
         gem5_cmd_flag="auto",
+        fault_model="none",
+        fault_target="",
+        fault_bit=None,
+        fault_tick=None,
         skip_gem5=False,
         skip_mcpat=False,
         mcpat_template_profile="arm64-kunpeng920",
@@ -75,6 +79,10 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
     )
 
     def fake_run_differential(**kwargs):
+        assert kwargs["fault_model"] == "register_bit_flip"
+        assert kwargs["fault_target"] == "x0"
+        assert kwargs["fault_bit"] == 3
+        assert kwargs["fault_tick"] == 900
         return DifferentialResult(
             status="sdc_found",
             golden_digest="1111",
@@ -104,6 +112,10 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
         gem5_config=tmp_path / "cfg.py",
         gem5_args=[],
         gem5_cmd_flag="auto",
+        fault_model="register_bit_flip",
+        fault_target="x0",
+        fault_bit=3,
+        fault_tick=900,
         skip_gem5=False,
         skip_mcpat=False,
         mcpat_template_profile="arm64-kunpeng920",
@@ -115,6 +127,7 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
     assert result["counts"]["executed"] == 1
     assert result["runs"][0]["action"] == "executed"
     assert result["runs"][0]["result_status"] == "sdc_found"
+    assert result["runs"][0]["artifact_dir"] is not None
 
     result_json = output_root / "seed-b" / "result.json"
     assert result_json.exists()
@@ -183,6 +196,10 @@ def test_execute_campaign_materializes_source_from_vault(monkeypatch, tmp_path):
         gem5_config=tmp_path / "cfg.py",
         gem5_args=[],
         gem5_cmd_flag="auto",
+        fault_model="none",
+        fault_target="",
+        fault_bit=None,
+        fault_tick=None,
         skip_gem5=False,
         skip_mcpat=False,
         mcpat_template_profile="arm64-kunpeng920",
@@ -227,6 +244,10 @@ def test_execute_campaign_blocks_when_preflight_fails(monkeypatch, tmp_path):
             gem5_config=tmp_path / "cfg.py",
             gem5_args=[],
             gem5_cmd_flag="auto",
+            fault_model="none",
+            fault_target="",
+            fault_bit=None,
+            fault_tick=None,
             skip_gem5=False,
             skip_mcpat=False,
             mcpat_template_profile="arm64-kunpeng920",

@@ -276,13 +276,30 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
 
 ### Phase 15: Cross-Repo Integration Validation
-- **Status:** in progress
+- **Status:** complete
 - Actions taken:
   - Added `tests/test_offline_to_campaign_integration.py` to exercise the real `microprobe` offline generator path, persist the generated testcase into a temporary vault, and run that testcase through `sdc_campaign.py`.
   - Validated that `BareMetalDiffWrapper`-generated `.c` outputs now cross the repo boundary cleanly: the root campaign can consume the `source_path` produced by `microprobe` without materializing a fallback source.
   - Re-ran the expanded root regression suite and confirmed 27 tests now pass across ARM64 contracts, scheduler math, runner helpers, power backends, preflight, campaign orchestration, source materialization, and the new cross-repo flow.
 - Files created/modified:
   - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_offline_to_campaign_integration.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 16: Fault Argument Plumbing
+- **Status:** in progress
+- Actions taken:
+  - Added structured fault-request options to `run_sdc_differential.py` so the root differential runner can forward `fault_model`, `fault_target`, `fault_bit`, and `fault_tick` directly to the gem5 SDC config.
+  - Threaded the same fault-request options through `sdc_campaign.py`, which means the outer-loop orchestrator can now express injection intent without forcing callers to build raw gem5 argument strings by hand.
+  - Added focused tests that verify fault arguments are rendered correctly and that the campaign layer passes them through to the runner unchanged.
+  - In parallel, hardened the gem5-side schema by adding `configs/example/arm/sdc_fault_request.py` and its own focused tests in the `gem5` repo, then pushed that phase to `stable`.
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/run_sdc_differential.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_campaign.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_run_sdc_differential.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_sdc_campaign.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/tests/test_offline_to_campaign_integration.py` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)

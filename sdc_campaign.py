@@ -96,6 +96,10 @@ def execute_campaign(
     gem5_config: Path,
     gem5_args: List[str],
     gem5_cmd_flag: str,
+    fault_model: str,
+    fault_target: str,
+    fault_bit: Optional[int],
+    fault_tick: Optional[int],
     skip_gem5: bool,
     skip_mcpat: bool,
     mcpat_template_profile: str,
@@ -185,6 +189,10 @@ def execute_campaign(
                 gem5_outdir=artifact_dir / "gem5",
                 gem5_args=gem5_args,
                 gem5_cmd_flag=gem5_cmd_flag,
+                fault_model=fault_model,
+                fault_target=fault_target,
+                fault_bit=fault_bit,
+                fault_tick=fault_tick,
                 skip_gem5=skip_gem5,
                 skip_mcpat=skip_mcpat,
                 mcpat_template_profile=mcpat_template_profile,
@@ -260,6 +268,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gem5-config", type=Path, default=DEFAULT_GEM5_CONFIG)
     parser.add_argument("--gem5-arg", action="append", default=[])
     parser.add_argument("--gem5-cmd-flag", default="auto")
+    parser.add_argument("--fault-model", default="none")
+    parser.add_argument("--fault-target", default="")
+    parser.add_argument("--fault-bit", type=int, default=None)
+    parser.add_argument("--fault-tick", type=int, default=None)
     parser.add_argument("--skip-gem5", action="store_true")
     parser.add_argument("--skip-mcpat", action="store_true")
     parser.add_argument(
@@ -290,6 +302,10 @@ def main() -> int:
             gem5_config=args.gem5_config,
             gem5_args=args.gem5_arg,
             gem5_cmd_flag=args.gem5_cmd_flag,
+            fault_model=args.fault_model,
+            fault_target=args.fault_target,
+            fault_bit=args.fault_bit,
+            fault_tick=args.fault_tick,
             skip_gem5=args.skip_gem5,
             skip_mcpat=args.skip_mcpat,
             mcpat_template_profile=args.mcpat_template_profile,

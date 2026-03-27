@@ -85,6 +85,7 @@
 - `sdc_materialize.py` closes the biggest remaining root-level dataflow gap: vault entries that only have `asm_content` can now be turned into digest-bearing ARM64 C sources, and the generated `source_path` is written back into testcase metadata.
 - `sdc_campaign.py` now auto-materializes candidates when `source_path` is absent, so the outer loop can consume raw vault rows directly instead of requiring a separate manual source preparation step.
 - The root test layer now includes a true cross-repo integration check: it imports the real `microprobe/targets/generic/tools/mp_sdc_offline_gen.py`, generates a testcase with `BareMetalDiffWrapper`, stores it in the SQLite vault, and then drives that testcase through `sdc_campaign.py`.
+- The root orchestration layer now exposes the gem5 fault request as structured CLI/API fields. `run_sdc_differential.py` and `sdc_campaign.py` both accept `fault_model`, `fault_target`, `fault_bit`, and `fault_tick`, so injector intent is no longer hidden inside opaque `--gem5-arg` strings.
 
 ## Technical Decisions
 | Decision | Rationale |
@@ -127,6 +128,7 @@
 | The outer loop still required ad-hoc glue between candidate selection, execution, and vault feedback | Added `sdc_campaign.py` plus a reusable `run_differential(...)` API so the rank -> execute -> record workflow is now a first-class root-level interface |
 | The outer loop still could not execute raw vault entries because they only persisted assembly text | Added `sdc_materialize.py` and campaign-side auto-materialization so the vault can now feed the differential runner without a manually curated source file per testcase |
 | The root regression suite still lacked proof that cross-repo artifacts line up across the intended boundaries | Added `tests/test_offline_to_campaign_integration.py` so a real `microprobe`-generated testcase is now validated through the root vault and campaign interfaces |
+| The root runner and campaign still treated fault-injection intent as an untyped gem5 passthrough | Added first-class fault arguments to the root APIs and tests that verify those fields reach the gem5 invocation layer unchanged |
 
 ## Resources
 - `/Users/wangxu/1-project/sdc-fuzzing/AGENTS.md`
