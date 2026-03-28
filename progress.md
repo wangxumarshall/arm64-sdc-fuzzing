@@ -36,6 +36,44 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
 
+### Phase 18: Microprobe Architecture Deep Dive and ARM64 Support Enhancement
+- **Status:** in progress
+- Actions taken:
+  - Studied Microprobe core architecture: Target facade pattern, ISA/Microarchitecture/Environment layers.
+  - Analyzed ARM64 ISA implementation in `targets/arm64/isa/armv8-common/`:
+    - `isa.py`: `Arm64ISA` class with register manipulation, memory operations, branch handling
+    - `instruction.yaml`: ~100+ instruction definitions covering data processing, load/store, branch, SIMD
+    - `operand.yaml`: Register operands (GPR64, GPR32, SIMD_FP), immediate operands, condition codes
+    - `register.yaml`: Full register file including X0-X30, V0-V31, special registers
+    - `instruction_format.yaml`: Instruction encoding formats
+  - Examined SDC-sensitive instruction selection in `SDCSensitiveAnalyzer`:
+    - FMA instructions (FMADD, FMSUB, FNMADD, FNMSUB)
+    - Pair memory operations (LDP, STP)
+    - LSE atomic instructions (CAS, LDADD, LDXR/STXR variants)
+  - Documented `BareMetalDiffWrapper` architecture:
+    - State save/restore for callee-saved registers
+    - Digest computation hashing GPRs, NZCV, SIMD registers, and memory
+    - Single `SDC_DIGEST=<hex>` output format
+  - Analyzed static SDC analysis passes:
+    - `StaticACECalculatorPass`: Register exposure estimation
+    - `StaticIBRCoveragePass`: Wide data coverage scoring
+    - `Kunpeng920MemoryPressurePass`: Memory pressure patterns
+    - `CapstoneValidationPass`: Disassembly validation
+  - Reviewed Kunpeng 920 microarchitecture documentation:
+    - TaiShan V110 core: 4-wide OoO, ARMv8.2-A
+    - Cache hierarchy: 64KB L1, 512KB L2 private, 64MB L3 shared
+    - Execution units: 3 ALU, 1 complex, 2 FPU, 2 AGU
+  - Identified gaps in ARM64 support:
+    - Incomplete NEON instruction coverage
+    - No SVE (Scalable Vector Extension) support
+    - No crypto extension instructions
+    - Thin microarchitecture model (no Kunpeng-specific pipeline)
+    - No native gem5 fault injection framework
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
 ### Phase 3: Execution Stack Mapping
 - **Status:** complete
 - Actions taken:
@@ -325,3 +363,80 @@
   - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
   - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 18: Microprobe Architecture Deep Dive and ARM64 Support Enhancement
+- **Status:** complete
+- Actions taken:
+  - Completed comprehensive analysis of Microprobe core architecture including Target facade pattern, ISA/Microarchitecture/Environment layers.
+  - Analyzed ARM64 ISA implementation in `targets/arm64/isa/armv8-common/`:
+    - `isa.py`: `Arm64ISA` class with register manipulation, memory operations, branch handling
+    - `instruction.yaml`: 57 core instruction definitions
+    - `instruction_props/`: 109 extension instructions (SIMD, FP, Atomic, System)
+    - `operand.yaml`: Register operands (GPR64, GPR32, SIMD_FP), immediate operands, condition codes
+    - `register.yaml`: Full register file including X0-X30, V0-V31, special registers
+    - `instruction_format.yaml`: 20+ instruction encoding formats
+  - Examined SDC-sensitive instruction selection in `SDCSensitiveAnalyzer`:
+    - FMA instructions (FMADD, FMSUB, FNMADD, FNMSUB) - identified as missing
+    - Pair memory operations (LDP, STP) - implemented
+    - LSE atomic instructions (CAS, LDADD, LDXR/STXR variants) - partially implemented
+  - Documented `BareMetalDiffWrapper` architecture:
+    - State save/restore for callee-saved registers (X19-X30, V8-V15)
+    - Digest computation hashing GPRs (X0-X30), NZCV, SIMD registers (V0-V31), and memory
+    - Single `SDC_DIGEST=<hex>` output format for differential testing
+  - Analyzed static SDC analysis passes:
+    - `StaticACECalculatorPass`: Register exposure estimation via def-to-last-use distance
+    - `StaticIBRCoveragePass`: Wide data coverage scoring (64/128-bit registers, memory)
+    - `Kunpeng920MemoryPressurePass`: Memory pressure patterns for pair/atomic instructions
+    - `CapstoneValidationPass`: Optional disassembly validation using Capstone library
+  - Reviewed Kunpeng 920 microarchitecture documentation from `doc/kunpeng920.md`:
+    - TaiShan V110 core: 4-wide OoO, ARMv8.2-A
+    - Cache hierarchy: 64KB L1I/D, 512KB L2 private, 64MB L3 shared
+    - Execution units: 3 ALU, 1 complex, 2 FPU, 2 AGU
+  - Performed comprehensive gap analysis:
+    - Current implementation: ~166 instruction variants
+    - Reference documentation: 387 instruction manuals in `doc/armv8-isa/`
+    - Identified missing FMA, incomplete NEON, missing crypto, incomplete LSE, no SVE
+  - Documented enhancement recommendations with priority levels:
+    - Priority 1: SDC-critical instructions (scalar FMA, complete LSE, vector FMA)
+    - Priority 2: Kunpeng 920 optimization (cache prefetch, memory tagging)
+    - Priority 3: Extended coverage (NEON permutation, crypto, SVE basics)
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/findings.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+
+### Phase 21: gem5 Compilation and Simulation Execution
+- **Status:** in progress
+- Actions taken:
+  - Checked gem5 repository status and confirmed ARM64 build configuration exists
+  - Verified system resources: 10 CPU cores, 32GB RAM, 659GB disk space
+  - Created `build_gem5.sh` script for automated gem5 compilation on macOS
+  - Created comprehensive `GEM5_BUILD_GUIDE.md` with detailed compilation instructions
+  - Enhanced `sdc_preflight.py` with:
+    - Build dependency checks (scons, swig, protobuf)
+    - Python version validation
+    - Install hints for missing components
+    - Verbose mode with detailed output
+  - Created `test_gem5_build.py` for post-build verification
+  - Created `setup_environment.sh` for automated dependency installation
+  - Created `README.md` with quick start guide and project structure
+  - Identified missing dependencies on current system:
+    - scons (build tool)
+    - swig (wrapper generator)
+    - qemu (user-mode emulation)
+    - aarch64-linux-gnu-gcc (cross-compiler)
+- Files created/modified:
+  - `/Users/wangxu/1-project/sdc-fuzzing/build_gem5.sh` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/GEM5_BUILD_GUIDE.md` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/sdc_preflight.py` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/test_gem5_build.py` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/setup_environment.sh` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/README.md` (created)
+  - `/Users/wangxu/1-project/sdc-fuzzing/task_plan.md` (updated)
+  - `/Users/wangxu/1-project/sdc-fuzzing/progress.md` (updated)
+- Next steps:
+  1. Run `./setup_environment.sh` to install dependencies
+  2. Run `./build_gem5.sh ARM opt 8` to compile gem5
+  3. Run `python3 test_gem5_build.py` to verify build
+  4. Generate test cases with microprobe
+  5. Execute differential testing

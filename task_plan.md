@@ -4,7 +4,7 @@
 Design a codebase-grounded SDC fuzzing technical方案 for ARMv8-A 64-bit microarchitectures such as Kunpeng 920 by deeply analyzing the current workspace and mapping the design onto real Microprobe, QEMU, gem5, and McPAT extension points.
 
 ## Current Phase
-Phase 17 complete
+Phase 19: Complete - Ready for Phase 20: ARM64 Instruction Encoding Validation
 
 ## Phases
 
@@ -110,6 +110,53 @@ Phase 17 complete
 - [x] Replace flat ARM64 profile consumption with a decoupled Kunpeng model + derived gem5 stats layer
 - [x] Update the ARM64 Kunpeng template/tests so conversion output reflects modeled topology and runtime stats instead of hard-coded constants
 - **Status:** complete
+
+### Phase 18: Microprobe Architecture Deep Dive and ARM64 Support Enhancement
+- [x] Study Microprobe core architecture: Target, ISA, Microarchitecture, Environment abstractions
+- [x] Analyze ARM64 ISA implementation: instruction definitions, register files, operand types
+- [x] Review ARM64 instruction formats and encoding logic
+- [x] Examine SDC-sensitive instruction selection (FMA, LDP/STP, LSE atomics)
+- [x] Document ARM64 wrapper implementation (BareMetalDiffWrapper)
+- [x] Analyze static SDC analysis passes (ACE, IBR, MemoryPressure)
+- [x] Identify gaps in ARM64 instruction coverage and propose enhancements
+- [x] Document findings in a comprehensive technical report
+- **Status:** complete
+
+### Phase 19: ARM64 SDC-Critical Instruction Enhancement
+- [x] Add scalar FMA instructions (FMADD, FMSUB, FNMADD, FNMSUB) to `floating.yaml`
+- [x] Add vector FMA instructions (FMLA, FMLS) to `simd.yaml`
+- [x] Complete LSE atomic coverage with all size variants (8/16/32/64-bit)
+- [x] Add missing LSE operations (LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX, LDUMIN)
+- [x] Add FP_DP_3REG instruction format for 3-register floating-point operations
+- [x] Update `SDCSensitiveAnalyzer` to recognize new FMA instructions
+- [x] Add instruction encoding tests for new instructions
+- [x] Validate new instructions with Capstone disassembly
+- **Status:** complete
+
+### Phase 20: ARM64 Instruction Encoding Validation
+- [x] Add encoding validation tests for FP_DP_3REG format
+- [x] Add encoding validation tests for SIMD_DP_3REG format (vector FMA)
+- [x] Add encoding validation tests for ATOMIC format (LSE instructions)
+- [x] Fix LDSMAX/LDSMIN/LDUMAX/LDUMIN instruction loading (opc field size)
+- [x] Create instruction binary encoding verification utility
+- [x] Add ABI compliance tests for BareMetalDiffWrapper
+- [x] Document instruction encoding patterns for SDC-sensitive instructions
+- **Status:** complete
+
+### Phase 21: gem5 Compilation and Simulation Execution
+- [x] Check gem5 repository status and dependencies
+- [x] Create gem5 build script for macOS
+- [x] Create comprehensive build guide (GEM5_BUILD_GUIDE.md)
+- [x] Update preflight checker with build dependency validation
+- [x] Create gem5 build test script
+- [ ] Install build dependencies (scons, swig, protobuf)
+- [ ] Compile gem5 with ARM64 support
+- [ ] Install ARM64 cross-compiler toolchain
+- [ ] Install QEMU user-mode emulation
+- [ ] Generate microprobe test cases for ARM64
+- [ ] Execute test cases in gem5 SE mode
+- [ ] Verify simulation output and collect results
+- **Status:** in_progress
 
 ## Key Questions
 1. Which existing Microprobe abstractions can host SDC-sensitive generation, static scoring, and GA feedback with minimal reinvention?

@@ -152,8 +152,269 @@
 - `/Users/wangxu/1-project/sdc-fuzzing/qemu/docs/user/main.rst`
 - `/Users/wangxu/1-project/sdc-fuzzing/opendcdiag/framework/device/cpu/arm64/arm64_sdc_detect.cpp`
 
+## Microprobe Architecture Deep Dive (Phase 18)
+
+### Core Architecture Components
+- **Target System**: The `Target` class in `microprobe/src/microprobe/target/__init__.py` is the facade that combines ISA, Microarchitecture, and Environment. It provides a unified API for querying target properties.
+- **ISA Layer**: `GenericISA` in `microprobe/src/microprobe/target/isa/__init__.py` defines the abstract interface for instruction set architectures. Key methods include `set_register()`, `load()`, `store_integer()`, `branch_unconditional_relative()`, etc.
+- **Microarchitecture Layer**: `GenericCPUMicroarchitecture` provides cache hierarchy and functional unit modeling.
+- **Environment Layer**: Defines execution context (baremetal, Linux userspace, etc.) and reserved registers.
+
+### ARM64 ISA Implementation
+- **ISA Class**: `Arm64ISA` in `targets/arm64/isa/armv8-common/isa.py` extends `GenericISA` with ARM64-specific implementations.
+- **Register Files**:
+  - GPR64: X0-X30, XZR (zero register), SP (stack pointer)
+  - GPR32: W0-W30, WZR (32-bit view)
+  - SIMD_FP: V0-V31 (128-bit), D0-D31 (64-bit view), S0-S31 (32-bit view)
+  - Special: NZCV (condition flags), FPCR, FPSR, system registers
+- **Instruction Formats**: Defined in `instruction_format.yaml`:
+  - `ADD_SUB_IMM`: Add/Subtract immediate
+  - `ADD_SUB_REG`: Add/Subtract shifted register
+  - `MOVE_WIDE`: MOVZ/MOVK/MOVN
+  - `LOAD_STORE_IMM`: Load/Store with immediate offset
+  - `SIMD_DP_*`: SIMD data processing formats
+
+### ARM64 Instruction Coverage Analysis
+- **Currently Implemented**: ~100+ instruction variants covering:
+  - Data processing (ADD, SUB, MUL, DIV, shifts, logical ops)
+  - Load/Store (LDR, STR, LDP, STP)
+  - Branch (B, BL, RET, conditional branches)
+  - SIMD/FP operations (vector arithmetic, FMA)
+- **SDC-Sensitive Instructions** (identified in `SDCSensitiveAnalyzer`):
+  - FMA: FMADD, FMSUB, FNMADD, FNMSUB
+  - Pair Memory: LDP, STP (64-bit variants)
+  - LSE Atomics: CAS, LDADD, LDXR/STXR, LDAXR/STLXR
+
+### BareMetalDiffWrapper Architecture
+- **Purpose**: Generate ARM64 C code that captures architectural state after benchmark execution.
+- **State Capture**: Saves/restores X19-X30, SP, V8-V15 across benchmark body.
+- **Digest Computation**: Hashes GPRs (X0-X30, excluding X18), NZCV, SIMD registers (V0-V31), and memory variables.
+- **Output Format**: Single `SDC_DIGEST=<hex>` line for differential testing.
+
+### Static SDC Analysis Passes
+- **StaticACECalculatorPass**: Estimates register exposure by computing def-to-last-use instruction distance.
+- **StaticIBRCoveragePass**: Measures information-bit richness from wide register (64/128-bit) and memory usage.
+- **Kunpeng920MemoryPressurePass**: Scores pair-memory, atomic, and cache-pressure patterns.
+- **CapstoneValidationPass**: Optional disassembly validation using Capstone library.
+
+### Kunpeng 920 Microarchitecture Insights (from kunpeng920.md)
+- **Core**: TaiShan V110, 4-wide OoO, ARMv8.2-A
+- **Cache Hierarchy**:
+  - L1I/D: 64KB each, 4-way, 64B line
+  - L2: 512KB private per core
+  - L3: 64MB shared, partitioned per 4-core cluster
+- **Execution Units**:
+  - 3x ALU (simple/add/bitwise)
+  - 1x complex (multiply/divide)
+  - 2x FPU (FP32 FMA dual-issue, FP64 quarter-rate)
+  - 2x AGU (load/store)
+- **SDC Stress Priorities**:
+  - NEON/FMA operations (128-bit data paths)
+  - Pair load/store (LDP/STP) for cache pressure
+  - LSE atomics for synchronization stress
+  - Long-latency memory streams (≥8KB stride)
+
+### Identified Gaps
+1. **Instruction Coverage**: Current ARM64 ISA definition covers core instructions but lacks:
+   - Full NEON instruction set (only subset implemented)
+   - SVE (Scalable Vector Extension) instructions
+   - Crypto extensions (SHA, AES, PMULL)
+   - Full LSE atomic instruction set
+2. **Microarchitecture Model**: `Arm64Microarchitecture` is a thin wrapper; no Kunpeng-specific pipeline model.
+3. **Fault Injection**: No native gem5 fault injection framework; requires external scripts.
+4. **Test Coverage**: ARM64 tests focus on import/synthesis, not on instruction encoding correctness.
+
 ## Visual/Browser Findings
 - No browser-based or image-based findings captured yet.
+
+## ARM64 Instruction Coverage Gap Analysis (Phase 18)
+
+### Current Implementation Status
+- **Core instruction.yaml**: 57 instruction definitions covering basic data processing, load/store, branch, and logical operations
+- **Extension instruction_props/**: 109 additional instructions across:
+  - `simd.yaml`: ~45 NEON/SIMD instructions (vector arithmetic, logical, shift, load/store, compare, duplicate)
+  - `floating.yaml`: ~35 floating-point instructions (FADD, FSUB, FMUL, FDIV, FCMP, FCVT, SCVTF, UCVTF)
+  - `atomic.yaml`: ~25 LSE atomic instructions (LDAXR, STLXR, LDADD, CAS, SWP variants)
+  - `system.yaml`: System instructions
+- **Total implemented**: ~166 instruction variants
+
+### Reference Documentation Coverage
+- **doc/armv8-isa/**: 387 instruction manual files
+- **Instruction categories**:
+  - Load/Store: 124 files (largest category)
+  - Other (miscellaneous): 81 files
+  - Arithmetic: 33 files
+  - Bit Manipulation: 26 files
+  - Logical: 23 files
+  - Barrier/Hint: 17 files
+  - System: 16 files
+  - Branch: 13 files
+  - Pointer Authentication: 12 files
+  - Compare: 11 files
+  - Conditional Select: 8 files
+  - Atomic: 7 files
+  - PC-Relative: 3 files
+  - Cryptographic: 2 files
+  - Count: 2 files
+
+### Identified Gaps
+
+#### 1. Missing FMA Instructions (Critical for SDC)
+Current implementation lacks scalar FMA instructions:
+- **FMADD**: Fused Multiply-Add
+- **FMSUB**: Fused Multiply-Subtract
+- **FNMADD**: Fused Negate Multiply-Add
+- **FNMSUB**: Fused Negate Multiply-Subtract
+
+These are **SDC-sensitive** because they perform multiple operations in a single instruction, increasing the window for silent errors.
+
+#### 2. Incomplete NEON Coverage
+Missing key NEON instruction families:
+- **FMLA/FMLS**: Vector Fused Multiply-Accumulate/Subtract
+- **FMLAL/FMLSL**: Mixed-precision FMA (FP16→FP32)
+- **SABD/UABD**: Absolute Difference
+- **SADALP/UADALP**: Add and Accumulate Pairwise
+- **EXT**: Extract vector from pair
+- **TBL/TBX**: Table lookup
+- **ZIP/UZP/TRN**: Vector permutation
+- **REV64/REV32/REV16**: Vector reverse
+
+#### 3. Missing Crypto Extensions
+No support for cryptographic instructions:
+- **AES**: AESE, AESD, AESMC, AESIMC
+- **SHA**: SHA256H, SHA256SU0, SHA256SU1, SHA512H, etc.
+- **PMULL**: Polynomial Multiply
+- **CRC32**: CRC32B, CRC32H, CRC32W, CRC32X
+
+#### 4. Incomplete LSE Atomic Coverage
+Missing variants:
+- 8/16/32-bit atomic operations (only 64-bit implemented)
+- **LDCLR/LDCLRA/LDCLRAL**: Atomic bit clear
+- **LDEOR/LDEORA/LDEORAL**: Atomic exclusive OR
+- **LDSET/LDSETA/LDSETAL**: Atomic bit set
+- **LDSMAX/LDSMAXA/LDSMAXAL**: Atomic signed maximum
+- **LDSMIN/LDSMINA/LDSMINAL**: Atomic signed minimum
+- **LDUMAX/LDUMAXA/LDUMAXAL**: Atomic unsigned maximum
+- **LDUMIN/LDUMINA/LDUMINAL**: Atomic unsigned minimum
+
+#### 5. Missing SVE Support
+No Scalable Vector Extension support:
+- SVE is critical for modern ARM servers (Neoverse N1/V1)
+- Enables vector-length-agnostic programming
+- Includes gather/scatter, predicated operations
+
+#### 6. Missing Pointer Authentication
+No PAUTH support:
+- **PACIA/PACIB/PACDA/PACDB**: Pointer authentication codes
+- **AUTIA/AUTIB/AUTDA/AUTDB**: Authenticate pointers
+- **BTI**: Branch Target Identification
+
+### Enhancement Recommendations
+
+#### Priority 1: SDC-Critical Instructions
+1. **Add scalar FMA instructions** (FMADD, FMSUB, FNMADD, FNMSUB)
+   - Format: `FP_DP_3REG` (3-register floating-point)
+   - Critical for TaiShan V110 dual FPU pipelines
+
+2. **Complete LSE atomic coverage**
+   - Add all size variants (8/16/32/64-bit)
+   - Add missing operations (LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX, LDUMIN)
+
+3. **Add vector FMA** (FMLA, FMLS)
+   - Critical for NEON-based SDC detection
+
+#### Priority 2: Kunpeng 920 Optimization
+1. **Pair memory operations**: Already implemented (LDP/STP)
+2. **Cache prefetch**: Add PRFM variants
+3. **Memory tagging**: Add LDG/STG/IRG instructions (MTE extension)
+
+#### Priority 3: Extended Coverage
+1. **NEON permutation**: ZIP, UZP, TRN, EXT
+2. **Crypto extensions**: AES, SHA, PMULL (for security-focused SDC testing)
+3. **SVE basics**: LD1B, ST1B, ADD, SUB (for future-proofing)
+
+### Microarchitecture Model Gaps
+
+#### Current State
+- `Arm64Microarchitecture` is a thin wrapper around generic CPU model
+- No TaiShan V110-specific pipeline modeling
+- Cache hierarchy is configurable but not Kunpeng-specific
+
+#### Recommended Enhancements
+1. **Pipeline Model**: Add TaiShan V110 execution port mapping
+   - 3x ALU (simple/add/bitwise)
+   - 1x complex (multiply/divide)
+   - 2x FPU (FP32 FMA dual-issue, FP64 quarter-rate)
+   - 2x AGU (load/store)
+
+2. **Cache Model**: Add Kunpeng 920 cache topology
+   - L1I/D: 64KB each, 4-way, 64B line
+   - L2: 512KB private per core
+   - L3: 64MB shared, partitioned per 4-core cluster
+
+3. **Memory Pressure Scoring**: Already implemented in `Kunpeng920MemoryPressurePass`
+
+### Test Coverage Recommendations
+1. **Instruction encoding validation**: Add tests for each instruction format
+2. **ABI compliance**: Verify wrapper preserves callee-saved registers
+3. **Digest consistency**: Test hash stability across runs
+4. **Fault injection**: Add gem5 fault injection test harness
+
+## Phase 19: ARM64 SDC-Critical Instruction Enhancement
+
+### Implementation Summary
+
+#### 1. Scalar FMA Instructions (floating.yaml)
+Added 8 scalar FMA instruction variants:
+- **FMADD_D_V0 / FMADD_S_V0**: Fused Multiply-Add (Double/Single precision)
+- **FMSUB_D_V0 / FMSUB_S_V0**: Fused Multiply-Subtract (Double/Single precision)
+- **FNMADD_D_V0 / FNMADD_S_V0**: Fused Negate Multiply-Add (Double/Single precision)
+- **FNMSUB_D_V0 / FNMSUB_S_V0**: Fused Negate Multiply-Subtract (Double/Single precision)
+
+#### 2. Vector FMA Instructions (simd.yaml)
+Added 6 vector FMA instruction variants:
+- **FMLA_V_2S_V0 / FMLA_V_4S_V0 / FMLA_V_2D_V0**: Vector FMA (2xSingle, 4xSingle, 2xDouble)
+- **FMLS_V_2S_V0 / FMLS_V_4S_V0 / FMLS_V_2D_V0**: Vector FMS (2xSingle, 4xSingle, 2xDouble)
+
+#### 3. LSE Atomic Instructions (atomic.yaml)
+Added missing LSE operations:
+- **LDSMAX_X_V0**: Atomic Signed Maximum
+- **LDSMIN_X_V0**: Atomic Signed Minimum
+- **LDUMAX_X_V0**: Atomic Unsigned Maximum
+- **LDUMIN_X_V0**: Atomic Unsigned Minimum
+
+#### 4. Instruction Format (instruction_format.yaml)
+Added `FP_DP_3REG` format for 3-register floating-point operations:
+- Fields: type, o1, o0, Vm, 0_5, Va, Vn, Vd
+- Assembly: "OPC Vd, Vn, Vm, Va"
+
+#### 5. Instruction Fields (instruction_field.yaml)
+Added missing field definitions:
+- **o0**: FMA opcode bit 0 (1-bit)
+- **o1**: FMA opcode bit 1 (1-bit)
+- **Va**: Accumulator SIMD Register (5-bit, SIMD_FP_regs operand)
+
+#### 6. SDCSensitiveAnalyzer Update
+Extended `_FMA_MNEMONICS` set to include:
+- FMADD, FMSUB, FNMADD, FNMSUB (scalar FMA)
+- FMLA, FMLS (vector FMA)
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `instruction_format.yaml` | Added FP_DP_3REG format |
+| `instruction_field.yaml` | Added o0, o1, Va fields |
+| `floating.yaml` | Updated FMA instructions to use FP_DP_3REG |
+| `simd.yaml` | Added vector FMA instructions |
+| `atomic.yaml` | Added LDSMAX, LDSMIN, LDUMAX, LDUMIN |
+| `sdc_fuzzing_policy.py` | Extended FMA mnemonic set |
+
+### Test Results
+All 16 tests passed:
+- 7 ARM64 target contract tests
+- 4 scheduler tests
+- 4 campaign tests
+- 1 offline-to-campaign integration test
 
 ---
 *Update this file after every 2 view/browser/search operations*
