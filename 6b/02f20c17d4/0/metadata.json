@@ -1,0 +1,36 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "6b02f20c17d4",
+  "session_id": "d910793e-44d5-4b76-a978-fb98052552f1",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-01T07:51:15.577979Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "plan/README.md",
+    "run_power_analysis.py",
+    "test_nop.s"
+  ],
+  "agent": "Claude Code",
+  "model": "MiniMax-M2.5",
+  "turn_id": "b75845995ede",
+  "token_usage": {
+    "input_tokens": 5183658,
+    "cache_creation_tokens": 10790,
+    "cache_read_tokens": 138077065,
+    "output_tokens": 375836,
+    "api_call_count": 1210
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-01T07:51:14.285942Z",
+    "agent_lines": 0,
+    "human_added": 336,
+    "human_modified": 349,
+    "human_removed": 0,
+    "total_committed": 493,
+    "agent_percentage": 0
+  }
+}
