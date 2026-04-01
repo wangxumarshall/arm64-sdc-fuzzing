@@ -8,9 +8,9 @@
 
 ## 四阶段路线
 
-### Phase 0: opendcdiag-arm
+### Phase 0: Microprobe-arm
 
-**目标**: 把x86架构的opendcdiag所有SDC测试用例都移植到arm64架构。
+**目标**: Microprobe 移植支持 arm64 指令流生成。
 
 ### Phase 1: 高功耗波动引导 SDC Fuzzing (当前)
 
@@ -66,7 +66,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| opendcdiag移植到arm64架构 | ✅ 完成 | 支持 arm64测试 |
+| Microprobe移植到arm64架构 | ✅ 完成 | 支持 arm64测试 |
 
 ### Phase 1 进度
 
