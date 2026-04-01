@@ -8,6 +8,10 @@
 
 ## 三阶段路线
 
+### Phase 0: opendcdiag-arm
+
+**目标**: 把x86架构的opendcdiag所有SDC测试用例都移植到arm64架构。
+
 ### Phase 1: 高功耗波动引导 SDC Fuzzing (当前)
 
 **目标**: 使用 gem5 仿真执行测试用例 + McPAT 计算功耗，利用功耗反馈引导 Microprobe 生成高功耗波动指令流。
@@ -57,6 +61,12 @@
 ---
 
 ## 当前状态
+
+### Phase 0 进度
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| opendcdiag移植到arm64架构 | ✅ 完成 | 支持 arm64测试 |
 
 ### Phase 1 进度
 
