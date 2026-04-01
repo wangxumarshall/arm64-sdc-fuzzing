@@ -1,4 +1,4 @@
-# SDC Fuzzing 项目计划
+# SDC Sentinel 项目计划
 
 ## 项目概述
 
@@ -6,7 +6,7 @@
 
 ---
 
-## 三阶段路线
+## 四阶段路线
 
 ### Phase 0: opendcdiag-arm
 
