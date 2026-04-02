@@ -1,7 +1,7 @@
 import json
 
-from sdc_materialize import materialize_testcase, render_materialized_source
-from sdc_vault import SDCVault, VaultEntry
+from sdc_agent.materialize import materialize_testcase, render_materialized_source
+from sdc_agent.vault import SDCVault, VaultEntry
 
 
 def test_render_materialized_source_embeds_digest_and_asm():

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from sdc_vault import SDCVault
+from .vault import SDCVault
 
 
 DEFAULT_CANDIDATE_STATUSES = ("PENDING", "GOLDEN_READY", "MATCHED", "SDC_FOUND")
@@ -325,7 +325,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--result-json",
         type=Path,
         required=True,
-        help="JSON file emitted by run_sdc_differential.py.",
+        help="JSON file emitted by tools/run_sdc_differential.py.",
     )
 
     return parser

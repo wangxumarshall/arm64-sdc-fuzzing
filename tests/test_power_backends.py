@@ -2,8 +2,8 @@ import types
 
 import pytest
 
-from power_backends.mcpat_backend import McPATBackend
-from power_backends.opendcdiag_backend import OpenDCDiagBackend
+from sdc_agent.power_backends.mcpat_backend import McPATBackend
+from sdc_agent.power_backends.opendcdiag_backend import OpenDCDiagBackend
 
 
 def test_mcpat_backend_normalizes_conversion_result(monkeypatch, tmp_path):

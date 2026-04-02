@@ -1,7 +1,7 @@
 import json
 
-from sdc_scheduler import FeedbackScheduler, compute_fitness, normalize_runner_status
-from sdc_vault import SDCVault, VaultEntry
+from sdc_agent.scheduler import FeedbackScheduler, compute_fitness, normalize_runner_status
+from sdc_agent.vault import SDCVault, VaultEntry
 
 
 def test_normalize_runner_status_maps_execution_results():

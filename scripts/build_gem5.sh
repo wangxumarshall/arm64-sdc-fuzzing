@@ -5,7 +5,7 @@ echo "=========================================="
 echo "gem5 ARM64 Build Script for macOS"
 echo "=========================================="
 
-GEM5_DIR="$(cd "$(dirname "$0")/gem5" && pwd)"
+GEM5_DIR="$(cd "$(dirname "$0")/../gem5" && pwd)"
 BUILD_TARGET="${1:-ARM}"
 BUILD_TYPE="${2:-opt}"
 NUM_JOBS="${3:-$(sysctl -n hw.ncpu)}"

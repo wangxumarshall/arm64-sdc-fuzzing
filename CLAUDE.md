@@ -58,14 +58,14 @@
 ### Phase 3: 开发离线引擎与用例金库 (CLI & Database)
 * **目标**：高并发生成汇编并进行持久化管理。
 * **开发任务**：
-    1. **用例金库 (`sdc_vault.py`)**：基于 SQLite 构建 `OfflineTestCases` 表。字段包括 `test_id, asm_content, ace_score, ibr_score, qemu_golden_hash, status`。实现 `fetch_top_k_risky()` 方法（按 `ace*0.6 + ibr*0.4` 降序拉取）。
+    1. **用例金库 (`sdc_agent/vault.py`)**：基于 SQLite 构建 `OfflineTestCases` 表。字段包括 `test_id, asm_content, ace_score, ibr_score, qemu_golden_hash, status`。实现 `fetch_top_k_risky()` 方法（按 `ace*0.6 + ibr*0.4` 降序拉取）。
     2. **离线 CLI (`targets/generic/tools/mp_sdc_offline_gen.py`)**：利用 `multiprocessing.Pool` 多进程调用 Microprobe generator。执行 Phase 2 的 Pass 进行静态打分，过滤后批量存入 SQLite。
 
 ### Phase 4: 轻量级 C Wrapper 与差分测试流水线 (The Execution Engine)
 * **目标**：抛弃繁重的框架，实现极速、零误报的 SDC 捕获。
 * **开发任务**：
     1. **定制 Wrapper (`src/microprobe/code/wrapper.py`)**：编写 `BareMetalDiffWrapper`。它只需生成一个带有 `main()` 的 C 文件，在注入汇编后，**追加一段遍历打印 X0-X30 寄存器值及内存 Checksum 的 C/内联汇编代码**。
-    2. **差分判定器 (`run_sdc_differential.py`)**：
+    2. **差分判定器 (`sdc_agent/differential.py`)**：
        - 调用 `aarch64-linux-gnu-gcc -static` 极速编译 ELF。
        - `subprocess` 跑 `qemu-aarch64` 获取 `Golden_Hash`。
        - `subprocess` 跑 `gem5.opt` (SE 模式) + 故障注入脚本获取 `Gem5_Hash`。

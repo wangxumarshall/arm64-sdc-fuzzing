@@ -1,6 +1,16 @@
 __pycache__/
+*.py[cod]
+*.swp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.claude
+.omc
+.entire
 out.area
 out.ptrace
+artifacts/runtime/
+artifacts/materialized/
 gem5/
 microprobe/
 mcpat/

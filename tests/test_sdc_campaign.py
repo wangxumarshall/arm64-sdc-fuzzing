@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from run_sdc_differential import CommandResult, DifferentialResult
-from sdc_campaign import execute_campaign
-from sdc_vault import SDCVault, VaultEntry
+from sdc_agent.differential import CommandResult, DifferentialResult
+from sdc_agent.campaign import execute_campaign
+from sdc_agent.vault import SDCVault, VaultEntry
 
 
 def _seed_vault(db_path: Path, *, testcase_key: str, source_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_execute_campaign_dry_run_plans_candidates(monkeypatch, tmp_path):
     _seed_vault(db_path, testcase_key="seed-a", source_path=source_path)
 
     monkeypatch.setattr(
-        "sdc_campaign.run_preflight",
+        "sdc_agent.campaign.run_preflight",
         lambda **kwargs: {"ready": False, "checks": [], "repo_root": str(tmp_path)},
     )
 
@@ -74,7 +74,7 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
     _seed_vault(db_path, testcase_key="seed-b", source_path=source_path)
 
     monkeypatch.setattr(
-        "sdc_campaign.run_preflight",
+        "sdc_agent.campaign.run_preflight",
         lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
     )
 
@@ -94,7 +94,7 @@ def test_execute_campaign_records_results(monkeypatch, tmp_path):
             mcpat_error=None,
         )
 
-    monkeypatch.setattr("sdc_campaign.run_differential", fake_run_differential)
+    monkeypatch.setattr("sdc_agent.campaign.run_differential", fake_run_differential)
 
     output_root = tmp_path / "campaign"
     result = execute_campaign(
@@ -160,7 +160,7 @@ def test_execute_campaign_materializes_source_from_vault(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(
-        "sdc_campaign.run_preflight",
+        "sdc_agent.campaign.run_preflight",
         lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
     )
 
@@ -179,7 +179,7 @@ def test_execute_campaign_materializes_source_from_vault(monkeypatch, tmp_path):
             mcpat_error=None,
         )
 
-    monkeypatch.setattr("sdc_campaign.run_differential", fake_run_differential)
+    monkeypatch.setattr("sdc_agent.campaign.run_differential", fake_run_differential)
 
     result = execute_campaign(
         db_path=db_path,
@@ -224,7 +224,7 @@ def test_execute_campaign_blocks_when_preflight_fails(monkeypatch, tmp_path):
     _seed_vault(db_path, testcase_key="seed-c", source_path=source_path)
 
     monkeypatch.setattr(
-        "sdc_campaign.run_preflight",
+        "sdc_agent.campaign.run_preflight",
         lambda **kwargs: {"ready": False, "checks": [], "repo_root": str(tmp_path)},
     )
 

@@ -2,9 +2,9 @@ import importlib.util
 import json
 from pathlib import Path
 
-from run_sdc_differential import CommandResult, DifferentialResult
-from sdc_campaign import execute_campaign
-from sdc_vault import SDCVault
+from sdc_agent.differential import CommandResult, DifferentialResult
+from sdc_agent.campaign import execute_campaign
+from sdc_agent.vault import SDCVault
 
 
 MICROPROBE_TOOL = (
@@ -42,7 +42,7 @@ def test_offline_generator_output_flows_into_campaign(monkeypatch, tmp_path):
         vault.upsert_testcase(generated["entry"])
 
     monkeypatch.setattr(
-        "sdc_campaign.run_preflight",
+        "sdc_agent.campaign.run_preflight",
         lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
     )
 
@@ -62,7 +62,7 @@ def test_offline_generator_output_flows_into_campaign(monkeypatch, tmp_path):
             mcpat_error=None,
         )
 
-    monkeypatch.setattr("sdc_campaign.run_differential", fake_run_differential)
+    monkeypatch.setattr("sdc_agent.campaign.run_differential", fake_run_differential)
 
     result = execute_campaign(
         db_path=db_path,

@@ -9,22 +9,22 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
-from run_sdc_differential import (
+from .differential import (
     DEFAULT_GEM5_CONFIG,
     DEFAULT_GEM5_OUTDIR,
     run_differential,
 )
-from sdc_materialize import materialize_testcase
-from sdc_preflight import (
+from .materialize import materialize_testcase
+from .preflight import (
     DEFAULT_GEM5_BINARY,
     DEFAULT_MCPAT_BINARY,
     run_preflight,
 )
-from sdc_scheduler import FeedbackScheduler, RankedCandidate
-from sdc_vault import SDCVault
+from .scheduler import FeedbackScheduler, RankedCandidate
+from .vault import SDCVault
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "campaign"
 
 

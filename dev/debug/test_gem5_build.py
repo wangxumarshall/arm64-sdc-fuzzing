@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
 DEFAULT_GEM5_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "starter_se.py"
 
@@ -192,7 +192,7 @@ def main() -> int:
             print(f"   ✗ Binary is not executable")
     else:
         print(f"   ✗ Binary not found: {binary_check['path']}")
-        print(f"   → Run: ./build_gem5.sh ARM opt")
+        print(f"   → Run: ./scripts/build_gem5.sh ARM opt")
     
     print("\n2. Checking gem5 config...")
     config_check = check_gem5_config(args.gem5_config)
@@ -244,7 +244,7 @@ def main() -> int:
             print("✗ gem5 ARM64 setup incomplete")
             print("\nNext steps:")
             if not binary_check["exists"]:
-                print("  1. Build gem5: ./build_gem5.sh ARM opt")
+                print("  1. Build gem5: ./scripts/build_gem5.sh ARM opt")
             if not binary_check.get("executable"):
                 print("  2. Verify permissions: chmod +x gem5/build/ARM/gem5.opt")
             print("  3. Install toolchain: brew install qemu")

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sdc_preflight import check_command, check_path, run_preflight
+from sdc_agent.preflight import check_command, check_path, run_preflight
 
 
 def test_check_command_reports_missing_binary():

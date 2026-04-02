@@ -60,7 +60,7 @@ protoc --version
 
 ```bash
 cd /Users/wangxu/1-project/sdc-fuzzing
-./build_gem5.sh ARM opt 8
+./scripts/build_gem5.sh ARM opt 8
 ```
 
 参数说明：
@@ -177,7 +177,7 @@ python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
 cd /Users/wangxu/1-project/sdc-fuzzing
 
 # 运行差分测试
-python3 run_sdc_differential.py \
+python3 tools/run_sdc_differential.py \
     artifacts/testcases/test_001.c \
     --compiler aarch64-linux-gnu-gcc \
     --qemu-binary qemu-aarch64 \
@@ -194,9 +194,9 @@ python3 run_sdc_differential.py \
 
 ```bash
 # 使用campaign runner运行批量测试
-python3 sdc_campaign.py run \
-    --vault-path artifacts/sdc_vault.sqlite3 \
-    --batch-size 10 \
+python3 tools/sdc_campaign.py \
+    --db artifacts/sdc_vault.sqlite3 \
+    --limit 10 \
     --fault-model bit-flip
 ```
 
@@ -214,7 +214,7 @@ python3 sdc_campaign.py run \
 
 ```bash
 # 查看vault中的测试结果
-python3 sdc_scheduler.py rank --vault-path artifacts/sdc_vault.sqlite3
+python3 tools/sdc_scheduler.py rank --db artifacts/sdc_vault.sqlite3
 
 # 查看特定测试的详细结果
 cat artifacts/results/test_001_result.json

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Repo root
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = REPO_ROOT / "artifacts" / "sdc_vault.sqlite3"
 DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
 DEFAULT_GEM5_CONFIG = (
@@ -379,7 +379,7 @@ def run_power_analysis(
         gcc = _find_aarch64_gcc()
 
     sys.path.insert(0, str(REPO_ROOT))
-    from sdc_vault import SDCVault, VaultEntry
+    from .vault import SDCVault, VaultEntry
 
     with SDCVault(vault_path) as vault:
         # Fetch PENDING entries sorted by risk score

@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from sdc_vault import SDCVault
+from .vault import SDCVault
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "materialized"
 
 

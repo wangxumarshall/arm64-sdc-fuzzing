@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from run_sdc_differential import (
+from sdc_agent.differential import (
     build_fault_args,
     CommandResult,
     classify,
@@ -108,11 +108,11 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
             return {"power_total": 3.5, "target_dir": str(target_dir)}
 
     monkeypatch.setattr(
-        "run_sdc_differential.compile_static_elf", fake_compile_static_elf
+        "sdc_agent.differential.compile_static_elf", fake_compile_static_elf
     )
-    monkeypatch.setattr("run_sdc_differential.run_qemu", fake_run_qemu)
-    monkeypatch.setattr("run_sdc_differential.run_gem5", fake_run_gem5)
-    monkeypatch.setattr("run_sdc_differential.McPATBackend", FakeBackend)
+    monkeypatch.setattr("sdc_agent.differential.run_qemu", fake_run_qemu)
+    monkeypatch.setattr("sdc_agent.differential.run_gem5", fake_run_gem5)
+    monkeypatch.setattr("sdc_agent.differential.McPATBackend", FakeBackend)
 
     result = run_differential(
         source=source,
