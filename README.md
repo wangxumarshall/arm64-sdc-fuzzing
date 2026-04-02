@@ -40,8 +40,8 @@
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
 完整目标架构、数据库模型和实施路线见 [spec.md](./doc/spec.md) 与 [plan.md](./doc/plan.md)。
-源码事实与关键缺口 [find.md](./doc/find.md)，完成度 [progress.md](./doc/progress.md)。
-root 级工作记忆同步为 当前目录的task_plan.md、findings.md、progress.md
+源码事实与关键缺口见 [findings.md](./doc/findings.md)，完成度见 [progress.md](./doc/progress.md)。
+root 级工作记忆同步为当前目录下的 `task_plan.md`、`findings.md`、`progress.md`。
 
 ### 1.3 SDC-Agent 的定义
 

@@ -1,352 +1,425 @@
 # SDC-Agent Project Plan
 
-## 1. Planning Goal
+## 1. 计划目标
 
-将整个项目拆解成逻辑独立、边界清晰、与当前源码事实一致的大 Phase，使项目可以在庞大代码基座和较高技术债之上，按阶段逐步兑现 README 与 spec 中的完整愿景。
+本计划把 README 的愿景拆成一组与当前源码结构兼容、可逐步交付的工程阶段。核心原则只有三个：
 
-本计划采用五个大 Phase：
-
-1. `Phase 1: Microprobe-arm`
-2. `Phase 2: 高功耗波动引导 SDC Fuzzing`
-3. `Phase 3: LLM 增强的智能变异生成`
-4. `Phase 4: QEMU vs gem5 + 故障注入差分验证`
-5. `Phase 5: OpenDCDiag-ARM 真实环境验证与数据库回灌`
-
-其中 Phase 1-4 与你给出的方向一一对应；Phase 5 是为了与 README/spec 中“真实硬件验证环”保持一致而补出的必要阶段。
+1. 不推倒重来，围绕现有控制平面骨架升级。
+2. 先把数据契约和内循环做厚，再扩展 fault campaign 与真机回灌。
+3. 所有阶段都必须能明确映射到子项目：
+   - `Sub-P0 opendcdiag-arm`
+   - `Sub-P1 microprobe-arm`
+   - `Sub-P2-1 qemu`
+   - `Sub-P2-2 gem5`
+   - `mcpat-arm`
+   - `SDC-Agent control plane`
 
 ---
 
-## 2. Phase Overview
+## 2. 计划全景
 
-| Phase | Goal | Current Status | Completion |
+| Phase | 目标 | 主要子项目 | 当前状态 | 完成度 |
+| --- | --- | --- | --- | --- |
+| Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
+| Phase 1 | Vault v2 与数据契约升级 | Control plane | 待执行 | 20% |
+| Phase 2 | 高频内循环产品化 | Sub-P1、Sub-P2-1、mcpat-arm、Control plane | 部分完成 | 45% |
+| Phase 3 | 功耗驱动的进化闭环 | Sub-P1、mcpat-arm、Control plane | 部分完成 | 30% |
+| Phase 4 | 低频外循环产品化 | Sub-P2-1、Sub-P2-2、Control plane | 部分完成 | 35% |
+| Phase 5 | gem5 真实 fault injector | Sub-P2-2 | 早期 | 10% |
+| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0、Control plane | 早期 | 10% |
+| Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1、Control plane | 规划中 | 10% |
+
+### 2.1 关键路径
+
+达到 README 完成态的关键路径必须按这个顺序推进：
+
+1. `Phase 1: Vault v2`
+2. `Phase 2: Inner Loop`
+3. `Phase 4: Outer Loop`
+4. `Phase 5: gem5 Injector`
+5. `Phase 6: Hardware Lane`
+6. `Phase 7: Intelligent Generation`
+
+原因很简单：
+
+1. 没有数据库 v2，就无法表达 fault campaign 和硬件回灌。
+2. 没有正式 inner loop，就没有稳定的 `INNER_READY` 样本池。
+3. 没有 outer loop 与 injector，就无法真实判断 SDC 检测能力。
+4. 没有硬件验证环，就无法闭合 README 最后的真实环境愿景。
+
+---
+
+## 3. Phase 0：架构合同与规划文档重构
+
+**目标**：把“源码事实、README 愿景、子项目边界、执行顺序”统一成一套稳定叙事。
+
+### 已交付
+
+1. 重写 `doc/spec.md`
+2. 重写 `doc/plan.md`
+3. 重写 `doc/findings.md`
+4. 重写 `doc/progress.md`
+5. 同步 root 级 `task_plan.md`、`findings.md`、`progress.md`
+6. 修正 README 的规划文档指针
+
+### 验收标准
+
+1. 所有规划文档都以源码事实为依据。
+2. 明确区分：
+   - 已实现
+   - 控制面已实现但执行面未实现
+   - 纯规划项
+3. 内循环、外循环、硬件验证环边界清晰。
+
+---
+
+## 4. Phase 1：Vault v2 与数据契约升级
+
+**目标**：把当前 `offline_testcases` 单表扩展为能承载完整三层闭环的兼容式多表模型。
+
+### 需要完成的工作
+
+1. 设计并创建以下表：
+   - `testcases`
+   - `static_metrics`
+   - `artifacts`
+   - `inner_runs`
+   - `power_annotations`
+   - `fault_campaigns`
+   - `fault_runs`
+   - `hardware_promotions`
+   - `hardware_runs`
+   - `lineage_events`
+2. 为现有 `offline_testcases` 提供兼容映射层。
+3. 将 `risk_score / qemu_golden_hash / gem5_fault_hash / mcpat_power / status` 保持为 summary 字段。
+4. 定义统一状态机：
+   - inner states
+   - outer states
+   - hardware states
+5. 增加 schema migration 与最小回滚策略。
+
+### 子项目映射
+
+1. `Control plane`
+   - 负责迁移、DAO、兼容层、summary 写回
+2. `Sub-P1 microprobe-arm`
+   - 负责补充 generation metadata contract
+3. `Sub-P2-2 gem5`
+   - 负责定义 `fault_runs` 需要的最小字段
+4. `Sub-P0 opendcdiag-arm`
+   - 负责定义 `hardware_runs` 所需元数据
+
+### 交付物
+
+1. `sdc_agent/vault_v2.py` 或对 `vault.py` 的兼容升级
+2. 数据迁移脚本
+3. 兼容视图或 summary adapter
+4. 对应单元测试与迁移测试
+
+### 验收标准
+
+1. 现有 CLI 不因为数据库升级而失效。
+2. 一个 testcase 可以关联多次 power run、fault run、hardware run。
+3. 现有 `status` 汇总能力仍然可用。
+
+---
+
+## 5. Phase 2：高频内循环产品化
+
+**目标**：将 README 中要求的“生成、覆盖率、wrapper、QEMU 合法性、McPAT 功耗、反馈进化”收敛成正式 `inner_loop`。
+
+### 需要完成的工作
+
+1. 抽出正式 orchestrator：
+   - `sdc_agent/inner_loop.py`
+   - `tools/sdc_inner_loop.py`
+2. 将生成阶段标准化为：
+   - profile 选择
+   - batch generation
+   - static metrics writeback
+3. 将物料化与 QEMU 校验纳入主路径。
+4. 引入 artifact caching：
+   - source cache
+   - ELF cache
+   - golden digest cache
+5. 将 shortlist 的功耗标注纳入主路径，而不是独立脚本。
+6. 输出标准状态：
+   - `STATIC_DONE`
+   - `GOLDEN_READY`
+   - `POWER_READY`
+   - `INNER_READY`
+
+### 子项目映射
+
+1. `Sub-P1 microprobe-arm`
+   - 生成 testcase、计算静态指标
+2. `Sub-P2-1 qemu`
+   - 快速合法性验证与 golden digest
+3. `mcpat-arm`
+   - 对 shortlist 样本打功耗标签
+4. `Control plane`
+   - orchestrator、缓存、状态迁移、批处理
+
+### 当前阻塞
+
+1. `cycle()` 只是串联函数，不是正式 inner loop。
+2. 功耗链路还没有成为标准步骤。
+3. 当前 profile 仍然以 `SIM_SAFE` 为主。
+
+### 交付物
+
+1. `sdc_agent/inner_loop.py`
+2. `tools/sdc_inner_loop.py`
+3. Inner loop integration tests
+4. 批量运行报告与状态汇总
+
+### 验收标准
+
+1. 单条命令可以把样本从生成推进到 `INNER_READY`。
+2. QEMU 可执行性结果被稳定回写数据库。
+3. shortlist 样本具备可查询的功耗标签。
+
+---
+
+## 6. Phase 3：功耗驱动的进化闭环
+
+**目标**：让 `microprobe-arm` 的后续样本生成不再只依赖静态分，而是显式使用功耗与合法性反馈。
+
+### 需要完成的工作
+
+1. 把 `static_risk_score` 与 `inner_value_score` 分离。
+2. 将 `McPAT` 输出引入 `FeedbackScheduler`。
+3. 为 `genetic.py` 增加 profile-aware 变异和 reweighting。
+4. 引入 diversity constraint，避免 offspring 全部坍缩到同类样本。
+5. 把 memory bias、dependency distance、stride tuning 显式记录到 `lineage_events`。
+
+### 子项目映射
+
+1. `Sub-P1 microprobe-arm`
+   - profile-aware instruction family weighting
+2. `mcpat-arm`
+   - 稳定的功耗字段与模板版本
+3. `Control plane`
+   - scheduler scoring、offspring ranking、feedback log
+
+### 交付物
+
+1. 升级后的 `FeedbackScheduler`
+2. 升级后的 `SDCFuzzingGeneticDriver`
+3. 功耗与 lineage 联动测试
+
+### 验收标准
+
+1. offspring 的选择能显式使用功耗信息。
+2. 能解释“为什么这个 parent 被优先繁殖”。
+3. 3000+ 样本级批处理不会让 lineage 失真。
+
+---
+
+## 7. Phase 4：低频外循环产品化
+
+**目标**：把当前单次差分执行扩展成真正的 `fault campaign`。
+
+### 需要完成的工作
+
+1. 抽出：
+   - `sdc_agent/outer_loop.py`
+   - `tools/sdc_outer_loop.py`
+2. 引入 `fault matrix planner`。
+3. 确保同一 testcase 的：
+   - QEMU golden
+   - gem5 fault-side
+   - digest compare
+   以同一逻辑 run 单元记录。
+4. 支持多次 fault run 的聚合：
+   - detection rate
+   - repeatability
+   - outer value score
+5. 支持 campaign 级报告与回放。
+
+### 子项目映射
+
+1. `Sub-P2-1 qemu`
+   - paired golden execution
+2. `Sub-P2-2 gem5`
+   - fault-side execution
+3. `Control plane`
+   - planner、aggregator、campaign ledger
+
+### 当前阻塞
+
+1. `campaign.py` 当前只适合单次或少量点状执行。
+2. 没有 `fault_runs` 数据模型。
+3. 没有 `outer_value_score` 聚合逻辑。
+
+### 交付物
+
+1. `outer_loop.py`
+2. `fault planner`
+3. campaign aggregation tests
+4. per-fault result schema
+
+### 验收标准
+
+1. 一个 testcase 能关联多个 fault run。
+2. 系统能自动判断“该样本是否值得 promotion”。
+3. 外循环结果能稳定回写到数据库 summary。
+
+---
+
+## 8. Phase 5：gem5 真实 fault injector
+
+**目标**：把当前的 `fault request manifest` 升级为真正生效的 fault injection 执行面。
+
+### 需要完成的工作
+
+1. 选择注入实现位置：
+   - CPU pipeline hook
+   - register file hook
+   - memory/cache hook
+2. 让 `sdc_fault_request.json` 被 gem5 执行面真正消费。
+3. 支持至少一类可验证的注入：
+   - register bit flip
+   - memory bit flip
+4. 增加 injector 自测与金丝雀用例。
+5. 把 `implemented_in_script=False` 升级为真实实现状态。
+
+### 子项目映射
+
+1. `Sub-P2-2 gem5`
+   - injector 主实现
+2. `Control plane`
+   - campaign request schema、fault planner 适配
+
+### 交付物
+
+1. gem5 C++/Python 注入扩展
+2. 注入正确性测试
+3. 与 outer loop 的联调报告
+
+### 验收标准
+
+1. fault request 不再只是记录文件。
+2. 系统能证明 fault 已在预期位置、预期时间生效。
+3. outer loop 的 `SDC_FOUND` 结果来自真实 injector，而不是占位流程。
+
+---
+
+## 9. Phase 6：opendcdiag-arm promotion 与真机回灌
+
+**目标**：把高价值 testcase 推广为 `opendcdiag-arm` 测试，并把真机结果回灌数据库。
+
+### 需要完成的工作
+
+1. 设计 promotion contract：
+   - testcase -> opendcdiag test source
+   - metadata -> test knobs / detectors
+2. 生成 `tests/cpu/arm64` 风格测试文件。
+3. 接入 `meson.build` 或等价构建入口。
+4. 提供运行与结果解析脚本。
+5. 把 pass/fail、检测器输出、机器元数据、日志路径写回数据库。
+
+### 子项目映射
+
+1. `Sub-P0 opendcdiag-arm`
+   - 测试模板、运行环境、结果格式
+2. `Control plane`
+   - promotion selector、backfill importer
+
+### 当前阻塞
+
+1. 当前只有 `OpenDCDiagBackend` placeholder。
+2. 没有 test emitter。
+3. 没有 hardware result parser。
+
+### 交付物
+
+1. `sdc_agent/hardware_lane.py`
+2. `tools/sdc_promote_hw.py`
+3. `tools/sdc_ingest_hw_results.py`
+4. opendcdiag-arm 集成样例
+
+### 验收标准
+
+1. 可以从数据库自动生成一个 opendcdiag ARM64 SDC 测试。
+2. 可以在真实机器执行并回写结果。
+3. 结果能与 outer loop 形成闭环对照。
+
+---
+
+## 10. Phase 7：LLM / PCFG / Template 智能生成
+
+**目标**：在规则生成器和 GA baseline 之上叠加更智能的生成策略，而不是替代当前 Microprobe 主干。
+
+### 需要完成的工作
+
+1. LLM mutation advisor：
+   - 读取 lineage、inner/outer/hardware 反馈
+   - 输出变异建议
+2. PCFG instruction family generator
+3. 高价值模板库：
+   - cache-thrash
+   - long dependency chain
+   - NEON/FMA heavy pattern
+4. profile reweighting service
+5. prompt 与模板版本管理
+
+### 子项目映射
+
+1. `Sub-P1 microprobe-arm`
+   - instruction family/模板承载
+2. `Control plane`
+   - LLM orchestration、版本化、反馈接入
+
+### 验收标准
+
+1. 新生成策略能挂接到 inner loop，而不是独立实验。
+2. 新策略在覆盖率、功耗波动或 outer sensitivity 上优于纯 baseline。
+
+---
+
+## 11. 子项目工作包矩阵
+
+| 子项目 | 近期必须完成 | 中期必须完成 | 完成态职责 |
 | --- | --- | --- | --- |
-| Phase 1: Microprobe-arm | ARM64 指令流生成与静态覆盖分析底座 | 已完成主干 | 80% |
-| Phase 2: 高功耗波动引导 SDC Fuzzing | 建立高频内循环：生成、QEMU、功耗、反馈 | 部分完成 | 60% |
-| Phase 3: LLM 增强的智能变异生成 | 让生成策略从规则/GA 扩展到 LLM/PCFG/模板协同 | 规划中 | 15% |
-| Phase 4: QEMU vs gem5 + 故障注入差分验证 | 建立低频外循环与 fault campaign | 部分完成 | 50% |
-| Phase 5: OpenDCDiag-ARM 真实环境验证与数据库回灌 | 将高价值样本推广到真实硬件环境并回灌 | 早期 | 20% |
+| `Sub-P1 microprobe-arm` | 双 profile、metadata contract | template/PCFG/LLM 接入 | 持续生成高价值 ARM64 样本 |
+| `Sub-P2-1 qemu` | golden digest 缓存、非法指令分类 | batch executor | 高频 legality/golden 验证 |
+| `Sub-P2-2 gem5` | fault matrix runner 对接 | 真实 injector | 外循环主执行面 |
+| `mcpat-arm` | 稳定模板与字段 | batch backfill | 功耗主标签器 |
+| `Sub-P0 opendcdiag-arm` | promotion contract | 结果回灌 | 真机验证终端 |
+| `Control plane` | Vault v2、inner/outer orchestrator | hardware lane、reporting | 全局编排总线 |
 
 ---
 
-## 3. Phase 1: Microprobe-arm
+## 12. 测试与验收策略
 
-**目标**: Microprobe 移植支持 arm64 指令流生成。
+达到 README 完成态时，测试必须覆盖四层：
 
-### 当前事实
-
-当前源码中，这个阶段已经具备主要基础设施：
-
-- ARM64 target/env/wrapper 已接通
-- `sdc_fuzzing_policy` 已能生成 ARM64 指令流
-- ACE / IBR / Memory Pressure / Capstone 分析 pass 已存在
-- Offline CLI 已可将样本写入 Vault
-
-对应源码：
-
-- [`microprobe/targets/arm64/policies/sdc_fuzzing_policy.py`](/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/policies/sdc_fuzzing_policy.py)
-- [`microprobe/src/microprobe/passes/sdc_analysis/offline_coverage.py`](/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/passes/sdc_analysis/offline_coverage.py)
-- [`microprobe/targets/generic/tools/mp_sdc_offline_gen.py`](/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/generic/tools/mp_sdc_offline_gen.py)
-- [`sdc_agent/generation.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py)
-
-### 阶段边界
-
-Phase 1 只解决“能生成什么、能分析什么、能否入库”，不负责：
-
-- gem5 fault campaign
-- OpenDCDiag 真机回灌
-- LLM 驱动的高级变异
-
-### 剩余工作
-
-1. 将当前默认 `SIM_SAFE` 生成 profile 与未来 `HW_AGGRESSIVE` profile 正式区分。
-2. 修复当前评分器与生成器的偏好错位：
-   - `Kunpeng920MemoryPressurePass` 偏好某些访存模式
-   - 默认生成器却大量过滤它们
-3. 为后续 Phase 2/3 输出更稳定的 generation metadata。
-
-### 验收标准
-
-1. ARM64 目标可稳定生成指令流。
-2. 每个 testcase 都具备基本 static metrics。
-3. testcase 可稳定写入数据库。
+1. 单元测试
+   - score、status、DAO、artifact contract
+2. 集成测试
+   - generation -> vault -> materialize -> qemu
+   - campaign -> gem5 -> mcpat -> writeback
+3. 研究级批处理验证
+   - 3000+ 样本吞吐
+   - lineage 稳定性
+   - score 分布合理性
+4. 硬件验收
+   - promotion 成功
+   - 真机结果可回灌
+   - 数据库与报告一致
 
 ---
 
-## 4. Phase 2: 高功耗波动引导 SDC Fuzzing
+## 13. 计划结论
 
-**目标**: 使用 gem5 仿真执行测试用例 + McPAT 计算功耗，利用功耗反馈引导 Microprobe 生成高功耗波动指令流。
+正确的执行顺序不是“先把所有子项目都改一遍”，而是：
 
-### 对应系统层
+1. 先稳数据库和架构合同。
+2. 再把高频内循环正式化。
+3. 再把低频外循环升级成真正的 fault campaign。
+4. 随后补齐 gem5 injector。
+5. 最后接入 `opendcdiag-arm` 真机验证。
+6. 在系统闭环之后，再把 LLM/PCFG/template 作为增益层叠加。
 
-这是 README/spec 中的 **高频内循环**。
-
-### 当前事实状态
-
-你给出的步骤与当前源码的契合度如下：
-
-1. Microprobe 移植支持 arm64 指令流生成
-   - 已完成主干
-2. 生成 SDC 测试用例到 Vault
-   - 已完成主干
-3. 用例物化 (Materialize)
-   - 已完成主干
-4. gem5 SE 执行 + McPAT 功耗计算
-   - 已有主干，但仍受两类问题约束：
-     - 指令编码/兼容性问题
-     - 功耗链路尚未成为统一内循环标准步骤
-5. 反馈引导的下一代生成
-   - 已有 Python 3 genetic baseline
-   - 但还没有真正把 QEMU/功耗反馈编织进统一 inner loop
-6. Phase 2 联调验证 (3000+ 用例)
-   - 尚未完成
-
-### 详细步骤
-
-#### Step 1: 生成
-
-- 调用 `microprobe-arm`
-- 生成 testcase
-- 写入数据库
-
-#### Step 2: 覆盖率评估
-
-- ACE
-- IBR
-- Memory Pressure
-- Capstone legality
-
-#### Step 3: Wrapper / Materialize
-
-- 生成 digest wrapper
-- 生成可编译 C 源与 ELF
-
-#### Step 4: QEMU 快速验证
-
-- 提取 golden digest
-- 快速判定样本是否合法、可执行
-
-#### Step 5: gem5 + McPAT 功耗标注
-
-- 对 shortlist 样本跑 gem5
-- 使用 McPAT 打功耗标签
-- 计算 `inner_value_score`
-
-#### Step 6: 反馈引导下一代
-
-- 用 genetic driver、功耗信号、覆盖率信号调整下一批样本
-
-#### Step 7: 大规模联调
-
-- 以 3000+ 样本为目标验证吞吐、稳定性、评分有效性
-
-### 当前主要阻塞
-
-1. 当前 `cycle()` 还不是正式 `inner_loop.py`
-2. 功耗链路独立存在，但还没有被标准纳入高频内循环
-3. 当前生成策略仍主要偏 sim-safe，不足以充分覆盖高功耗/高波动模式
-
-### 本阶段交付物
-
-- `sdc_agent/inner_loop.py`
-- `tools/sdc_inner_loop.py`
-- 数据库中的 `STATIC_DONE / QEMU_VALID / POWER_ANNOTATED / INNER_READY` 轨迹
-
-### 验收标准
-
-1. 可以批量跑完整 inner loop。
-2. 可以稳定得到功耗标签。
-3. genetic 迭代开始使用功耗反馈，而不仅是静态分。
-
----
-
-## 5. Phase 3: LLM 增强的智能变异生成
-
-**目标**: 借助 LLM 推理能力实现更精准的 SDC 检测指令流生成和覆盖率评估。
-
-### 当前事实状态
-
-这个阶段目前还处于规划中，但并非从零开始，因为已有：
-
-- 规则生成器
-- genetic baseline
-- static coverage metrics
-- Vault 数据积累
-
-因此，Phase 3 的定位是“在已有规则/GA 之上叠加智能生成层”，而不是替代现有生成器。
-
-### 步骤
-
-#### Step A: LLM 变异生成器
-
-- 读取父代 lineage / static metrics / power labels
-- 生成更具针对性的变异建议
-
-#### Step B: 概率上下文文法 (PCFG) 生成器
-
-- 把 ARM64 指令族、依赖链、访存模板表达为概率文法
-
-#### Step C: 模板生成器
-
-- 沉淀高价值模式模板：
-  - cache-thrash
-  - long-lifetime register chain
-  - vector-heavy compute pattern
-
-#### Step D: 遗传算法 (GA) 优化器
-
-- 当前 Python 3 `SDCFuzzingGeneticDriver` 作为 baseline
-- 后续将其升级为与 LLM/PCFG/template 协同的多策略优化器
-
-#### Step E: LLM 覆盖率评估器
-
-- 只能作为补充评估器
-- 不能替代 source-of-truth 的 static passes
-
-#### Step F: LLM Prompt 生成
-
-- 自动根据外循环/hardware 反馈调整 prompt、模板和 profile 权重
-
-### 阶段边界
-
-本阶段不负责真实 fault injection；它负责的是更聪明的候选生成。
-
-### 当前主要阻塞
-
-1. 缺少数据库 v2 与更完整 metadata
-2. 缺少正式内循环 orchestrator
-3. 缺少 aggressive profile 的显式建模
-
-### 验收标准
-
-1. LLM/PCFG/template 不是单点实验，而是能接入内循环。
-2. 新生成策略在覆盖率、多样性或功耗波动上优于纯 baseline。
-
----
-
-## 6. Phase 4: QEMU vs gem5 + 故障注入差分验证
-
-**目标**: 增加 SDC 检测能力。
-
-### 对应系统层
-
-这是 README/spec 中的 **低频外循环**。
-
-### 当前事实状态
-
-你给出的步骤与当前源码的契合度如下：
-
-#### Step A: 构建 QEMU aarch64-linux-user
-
-- 已具备基本依赖与 runner 支持
-- 当前 `tools/run_sdc_differential.py` 已可使用 qemu 作为 golden executor
-
-#### Step B: gem5 SDC 故障注入引擎
-
-- 当前只完成了 fault control plane：
-  - `fault_model`
-  - `fault_target`
-  - `fault_bit`
-  - `fault_tick`
-  - `sdc_fault_request.json`
-- 真实 injector 尚未实现
-
-#### Step C: 差分验证流水线
-
-- 已完成单 fault configuration 的 skeleton
-- 尚未升级为完整 fault matrix campaign
-
-### 本阶段应有的完整流程
-
-1. 从数据库中选取高价值 `INNER_READY` 样本
-2. 构建 fault matrix
-3. 缓存 QEMU golden
-4. 多次执行 gem5 fault run
-5. 聚合 fault run 结果
-6. 计算 `sdc_sensitivity_score`
-7. 更新数据库并进入 promotion queue
-
-### 本阶段交付物
-
-- `sdc_agent/outer_loop.py`
-- `tools/sdc_outer_loop.py`
-- per-fault run persistence
-- sensitivity aggregation
-- gem5 real injector
-
-### 当前主要阻塞
-
-1. 数据库仍是单表
-2. `campaign.py` 还是单 fault 执行器
-3. gem5 real injector 未实现
-
-### 验收标准
-
-1. 一个 testcase 能挂多组 fault run。
-2. 能输出 testcase 级 SDC 检测能力分。
-3. 启用 fault 时，gem5 结果是真实 fault behavior，而不是 manifest 记录。
-
----
-
-## 7. Phase 5: OpenDCDiag-ARM 真实环境验证与数据库回灌
-
-**目标**: 将数据库中已被证明具有价值的指令流封装成真实环境 SDC 检测用例，追加到 `opendcdiag-arm`，执行后将结果回灌数据库。
-
-### 为什么必须独立成 Phase 5
-
-虽然你给出的参考阶段只写到 Phase 4，但按照 README/spec 的完整愿景，项目最终不能止步于仿真。
-
-所以必须补出一个独立硬件验证阶段。
-
-### 当前事实状态
-
-- `opendcdiag-arm` 中已经有 ARM64 测试与文档资产
-- 但 `sdc_agent` 侧只有 placeholder backend
-- promotion / packaging / result parser / backfill 还不存在
-
-### 详细步骤
-
-1. 从数据库中选择 `PROMOTABLE` 样本
-2. 生成 OpenDCDiag-ARM test package
-3. 在真实 ARM64 机器上执行
-4. 采集：
-   - pass/fail
-   - digest mismatch
-   - timeout/crash
-   - 平台信息
-5. 将结果写回数据库
-
-### 本阶段交付物
-
-- `sdc_agent/hardware_promotion.py`
-- `sdc_agent/hardware_results.py`
-- `tools/sdc_promote_hw.py`
-- `opendcdiag/tests/cpu/arm64/generated/`
-
-### 验收标准
-
-1. 可以自动从数据库选择高价值样本。
-2. 可以自动生成 OpenDCDiag-ARM 测试。
-3. 可以将真实环境结果回灌数据库。
-
----
-
-## 8. Recommended Execution Order
-
-虽然 Phase 1-5 是项目级大阶段，但真正执行时建议顺序如下：
-
-1. Phase 1 收尾
-   - 明确双 profile
-2. Phase 2 完整化
-   - `inner_loop.py`
-   - 功耗正式并入内循环
-3. Phase 4 基础化
-   - 先补数据库 v2 和 fault matrix，再做 real injector
-4. Phase 3 接入
-   - 在稳定的 inner loop / outer loop 之上接入 LLM/PCFG/template
-5. Phase 5 收尾
-   - OpenDCDiag hardware promotion
-
-原因：
-
-- Phase 3 依赖 Phase 2/4 的稳定 metadata 和反馈数据
-- Phase 5 依赖 Phase 4 已经能稳定筛出高价值样本
+按这个顺序推进，才能在不破坏现有骨架的前提下，逐步把项目推到 README 的完整目标形态。
