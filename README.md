@@ -40,6 +40,8 @@
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
 完整目标架构、数据库模型和实施路线见 [spec.md](./doc/spec.md) 与 [plan.md](./doc/plan.md)。
+源码事实与关键缺口 [find.md](./doc/find.md)，完成度 [progress.md](./doc/progress.md)。
+root 级工作记忆同步为 当前目录的task_plan.md、findings.md、progress.md
 
 ### 1.3 SDC-Agent 的定义
 
@@ -224,39 +226,57 @@ PENDING ──▶ GOLDEN_READY ──▶ MATCHED
 
 ## 四、阶段路线图
 
-### Phase 1：ARM64 静态离线引擎
+### Phase 1：Microprobe-arm
 
-状态：已完成主干
+目标：Microprobe 移植支持 arm64 指令流生成。
+
+当前事实：
 
 - ARM64 target / env / wrapper 已接通
 - `sdc_fuzzing_policy` 已可生成指令流
 - ACE / IBR / Memory Pressure / Capstone Pass 已可运行
 - Offline CLI 已可批量写入 Vault
 
-### Phase 2：差分执行与功耗闭环
+### Phase 2：高功耗波动引导 SDC Fuzzing
 
-状态：已完成主干
+目标：使用 gem5 仿真执行测试用例 + McPAT 计算功耗，利用功耗反馈引导 Microprobe 生成高功耗波动指令流。
 
-- `BareMetalDiffWrapper` 与 `sdc_agent/materialize.py` 可生成 digest 程序
-- `sdc_agent/differential.py` 已实现 compile → qemu → gem5 → McPAT
-- `sdc_agent/campaign.py` 已实现批量外循环
-- `sdc_agent/scheduler.py` 已实现状态归一化与 fitness 计算
+当前事实：
 
-### Phase 3：反馈进化层
+1. Microprobe arm64 生成基础已具备
+2. testcase → Vault 已具备
+3. materialize 已具备
+4. gem5 + McPAT 主干已具备，但尚未形成统一高频内循环
+5. feedback-guided next generation 已有 genetic baseline
+6. 3000+ 用例级联调仍未完成
 
-状态：已完成首个可用版本
+### Phase 3：LLM 增强的智能变异生成
 
-- Python 3 `SDCFuzzingGeneticDriver` 已落地
-- 支持 parent selection / crossover / memory-biased mutation / vault reinjection
-- `tools/sdc_agent.py` 已能编排生成、执行、进化与状态汇总
+目标：借助 LLM 推理能力实现更精准的 SDC 检测指令流生成和覆盖率评估。
 
-### Phase 4：真实 gem5 故障注入器
+当前事实：
 
-状态：待完成
+- 规则生成器与 Python 3 GA baseline 已存在
+- LLM / PCFG / template 协同层尚未实现
 
-- 当前 `fault_model / fault_target / fault_bit / fault_tick` 已贯通到控制面
-- gem5 配置脚本已写出 fault request manifest
-- 下一步需要在 gem5 侧增加真正消费 manifest 的 fault injector 实现
+### Phase 4：QEMU vs gem5 + 故障注入差分验证
+
+目标：增加 SDC 检测能力。
+
+当前事实：
+
+1. QEMU golden execution 已具备
+2. gem5 fault manifest 已具备，但真实 injector 未实现
+3. 差分流水线已具备单 fault skeleton，尚未升级为完整 fault campaign
+
+### Phase 5：OpenDCDiag-ARM 真实环境验证与数据库回灌
+
+目标：将高价值样本推广到 `opendcdiag-arm`，在真实环境中验证，并把结果回写数据库。
+
+当前事实：
+
+- OpenDCDiag-ARM 测试与文档资产已存在
+- 自动 promotion / result ingest / DB backfill 尚未实现
 
 ---
 

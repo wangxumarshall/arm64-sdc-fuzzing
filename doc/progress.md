@@ -6,7 +6,19 @@
 
 ---
 
-## 2. Progress by Loop
+## 2. Progress by Strategic Phase
+
+| Phase | Status | Completion | Notes |
+| --- | --- | --- | --- |
+| Phase 1: Microprobe-arm | strong | 80% | ARM64 target、policy、pass、offline CLI 已可用 |
+| Phase 2: 高功耗波动引导 SDC Fuzzing | partial | 60% | 生成、静态分析、物料化、功耗主干已存在，但还未统一成正式 inner loop |
+| Phase 3: LLM 增强的智能变异生成 | planned | 15% | 规则生成器与 GA baseline 已有，LLM/PCFG/template 层未实现 |
+| Phase 4: QEMU vs gem5 + 故障注入差分验证 | partial | 50% | 单 fault differential 可用，fault campaign 与 real injector 未完成 |
+| Phase 5: OpenDCDiag-ARM 真实环境验证与数据库回灌 | early | 20% | ARM64 资产存在，但 promotion/backfill 未落地 |
+
+---
+
+## 3. Progress by Loop
 
 | Loop | Status | Completion | Notes |
 | --- | --- | --- | --- |
@@ -16,7 +28,7 @@
 
 ---
 
-## 3. Progress by Subproject
+## 4. Progress by Subproject
 
 | Subproject | Status | Completion | Current State |
 | --- | --- | --- | --- |
@@ -29,7 +41,7 @@
 
 ---
 
-## 4. What Is Done
+## 5. What Is Done
 
 ### Architecture and Repository
 
@@ -59,7 +71,7 @@
 
 ---
 
-## 5. What Is Not Done
+## 6. What Is Not Done
 
 ### Inner Loop Gaps
 
@@ -85,7 +97,7 @@
 
 ---
 
-## 6. Readiness Assessment
+## 7. Readiness Assessment
 
 ### Can the current code run a minimal research workflow?
 
@@ -114,7 +126,7 @@
 
 ---
 
-## 7. Immediate Execution Order
+## 8. Immediate Execution Order
 
 下一步最正确的顺序是：
 
