@@ -1,204 +1,332 @@
 # SDC-Agent Project Plan
 
-## 1. 项目目标
+## 1. Goal
 
-在现有仓库基础上，交付一套面向 ARM64 的 SDC 自动化 Fuzzing 主流程，形成以下闭环：
+把当前已经存在的 SDC-Agent 骨架扩展为一套完整系统，使其能够完整兑现 README 的目标与愿景：
 
-1. 使用 `microprobe-arm` 生成 ARM64 指令流。
-2. 计算 ACE / IBR / Memory Pressure 等静态覆盖指标。
-3. 将候选持久化到 SQLite Vault。
-4. 物料化为带 digest 的 SDC 检测用例。
-5. 用 QEMU 获取 ISA golden。
-6. 用 gem5 执行候选并采集统计信息。
-7. 用 McPAT 计算功耗。
-8. 用反馈调度器和进化驱动把高价值样本重新注入 Vault。
-
----
-
-## 2. 当前阶段判断
-
-| 阶段 | 状态 | 说明 |
-| --- | --- | --- |
-| Phase 1：离线生成与静态评分 | 已完成 | Policy、Pass、Offline CLI、Vault 已打通 |
-| Phase 2：wrapper、materialize、差分执行 | 已完成 | `sdc_agent/materialize.py`、`sdc_agent/differential.py`、`sdc_agent/campaign.py` 可执行 |
-| Phase 3：功耗反馈 | 已完成主干 | `McPATBackend` 和 `sdc_agent/power_analysis.py` 已接通 |
-| Phase 4：反馈调度 | 已完成 | `FeedbackScheduler` 已实现状态回写和 fitness 计算 |
-| Phase 5：进化闭环 | 已完成首版 | `SDCFuzzingGeneticDriver` 与 `tools/sdc_agent.py` 已落地 |
-| Phase 6：gem5 真实故障注入器 | 待实现 | 当前仍为 manifest/hook 形态，未进入 gem5 C++ 核心执行路径 |
+1. 高频内循环
+   - 生成海量指令流
+   - 计算覆盖率
+   - wrapper 成 SDC 检测用例
+   - QEMU 验证
+   - McPAT 功耗标注
+   - 反馈指导 Microprobe 继续生成更优样本
+2. 低频外循环
+   - 从数据库中选择高价值样本
+   - 执行 gem5 fault campaign 与 QEMU 对照
+   - 量化样本的 SDC 检测能力
+3. 真实硬件验证环
+   - 将高价值样本推广到 OpenDCDiag-ARM
+   - 运行真实环境检测
+   - 把结果回灌数据库
 
 ---
 
-## 3. 详细计划
+## 2. Planning Assumptions
 
-### Phase 1：离线静态扫街引擎
-
-目标：
-
-- 稳定生成 ARM64 候选样本。
-- 在不运行仿真的情况下评估静态风险。
-
-已完成项：
-
-- `microprobe/targets/arm64/policies/sdc_fuzzing_policy.py`
-- `microprobe/src/microprobe/passes/sdc_analysis/offline_coverage.py`
-- `microprobe/targets/generic/tools/mp_sdc_offline_gen.py`
-- `sdc_agent/generation.py`
-- `sdc_agent/vault.py`
-
-验收标准：
-
-- 能批量生成样本并写入 `offline_testcases`
-- 样本包含 `ace_score / ibr_score / memory_pressure_score / risk_score`
-
-### Phase 2：执行与差分引擎
-
-目标：
-
-- 将静态候选变成可运行的 SDC 检测程序。
-- 用 QEMU 与 gem5 做最小差分判定。
-
-已完成项：
-
-- `microprobe/targets/arm64/wrappers/baremetaldiff.py`
-- `sdc_agent/materialize.py`
-- `sdc_agent/differential.py`
-- `sdc_agent/campaign.py`
-
-验收标准：
-
-- 能编译静态 ELF
-- 能提取 `SDC_DIGEST`
-- 能把结果归一化为 `matched / sdc_found / invalid / timeout / crashed`
-
-### Phase 3：功耗建模
-
-目标：
-
-- 基于 gem5 输出做 McPAT 后处理。
-
-已完成项：
-
-- `sdc_agent/power_backends/mcpat_backend.py`
-- `sdc_agent/power_analysis.py`
-
-验收标准：
-
-- 能返回 `power_total / power_dynamic / power_leakage`
-- 能回写 Vault 的 `mcpat_power`
-
-### Phase 4：反馈排序
-
-目标：
-
-- 用执行结果和功耗结果更新样本优先级。
-
-已完成项：
-
-- `sdc_agent/scheduler.py`
-
-验收标准：
-
-- 支持 `normalize_runner_status()`
-- 支持 `compute_fitness()`
-- 支持 `select_candidates()` 和 `record_result()`
-
-### Phase 5：进化闭环
-
-目标：
-
-- 根据高价值父代自动生成 offspring 并回灌 Vault。
-
-已完成项：
-
-- `microprobe/src/microprobe/driver/genetic.py` 中新增 Python 3 `SDCFuzzingGeneticDriver`
-- `tools/sdc_agent.py` 顶层入口
-
-当前策略：
-
-1. 从 Vault 中选取高价值父代。
-2. 读取 `instruction_names`。
-3. 做一位点交叉。
-4. 强制注入偏向访存的变异，并保持 `preferred_stride_bytes >= 8192`。
-5. 重新调用 Microprobe 合成 offspring。
-6. 将 offspring 写回 Vault，状态默认为 `PENDING`。
-
-验收标准：
-
-- 能自动产生 offspring
-- offspring 带 lineage metadata
-- offspring 能重新进入 campaign
-
-### Phase 6：真实 gem5 故障注入
-
-目标：
-
-- 让 `fault_model / fault_target / fault_bit / fault_tick` 不只是 manifest，而是真正驱动 gem5 内核注入故障。
-
-当前状态：
-
-- `sdc_fault_request.py` 已定义 manifest
-- `sdc_kunpeng920_se.py` 已输出 `sdc_fault_request.json`
-- 但尚未在 gem5 C++ 执行路径中消费该请求
-
-后续任务：
-
-1. 明确故障注入粒度：寄存器、ROB、LSQ、cache line、内存位翻转。
-2. 设计 gem5 SimObject 或 CPU hook。
-3. 让 differential runner 在启用 fault 时拿到真实 faulted digest。
+1. 不重写现有控制平面，而是在 `sdc_agent/` 基础上扩展。
+2. 保留现有 `offline_testcases` 兼容入口，同时引入多表模型。
+3. OpenDCDiag 只作为最终硬件验证层，而不是仿真执行层。
+4. 允许 `SIM_SAFE` 与 `HW_AGGRESSIVE` 双 profile 并存。
 
 ---
 
-## 4. 验证命令
+## 3. Work Packages
 
-### 离线生成
+## Phase 0: Baseline Freeze
 
-```bash
-python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
-  --db artifacts/sdc_vault.sqlite3 \
-  --count 10 \
-  --output-dir artifacts/generated
-```
+状态：已完成
 
-### Vault 状态
+已具备：
 
-```bash
-python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3
-```
+- 代码结构重构完成
+- README 与当前代码基线已同步
+- `tools/`、`scripts/`、`dev/`、`artifacts/runtime/` 已分层
+- 定向 pytest 已通过
 
-### 进化回灌
+主要资产：
 
-```bash
-python3 tools/sdc_agent.py evolve \
-  --db artifacts/sdc_vault.sqlite3 \
-  --parent-limit 4 \
-  --max-offspring 8
-```
-
-### 单样本差分
-
-```bash
-python3 tools/run_sdc_differential.py artifacts/materialized/example.c \
-  --gem5-config gem5/configs/example/arm/sdc_kunpeng920_se.py
-```
-
-### 一次完整循环
-
-```bash
-python3 tools/sdc_agent.py cycle \
-  --db artifacts/sdc_vault.sqlite3 \
-  --generate-count 10 \
-  --campaign-limit 3 \
-  --max-offspring 6 \
-  --skip-preflight
-```
+- [`sdc_agent/agent.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py)
+- [`sdc_agent/generation.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py)
+- [`sdc_agent/differential.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py)
+- [`sdc_agent/campaign.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/campaign.py)
+- [`sdc_agent/scheduler.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py)
+- [`sdc_agent/vault.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/vault.py)
 
 ---
 
-## 5. 风险与剩余工作
+## Phase 1: Database v2
 
-1. `gem5/ext/pybind11/tests` 属于第三方测试目录，不能作为本项目回归基线。
-2. 真实 fault injector 尚未落地前，`fault_model != none` 的生产级 SDC 判定仍依赖后续 gem5 侧实现。
-3. 当前进化层是可执行首版，后续仍可继续增强：
-   - 更强的 crossover
-   - 基于父代功耗和状态的多目标选择
-   - 针对 TaiShan/Kunpeng 微架构单元的定向变异
+目标：
+
+让数据库足以支撑内循环、外循环、硬件回灌。
+
+交付物：
+
+1. 在现有 `offline_testcases` 之外增加：
+   - `testcase_static_metrics`
+   - `testcase_builds`
+   - `testcase_qemu_runs`
+   - `testcase_power_profiles`
+   - `fault_campaigns`
+   - `fault_runs`
+   - `hardware_promotions`
+   - `hardware_runs`
+   - `lineage`
+2. 在 `sdc_agent/vault.py` 中增加 migration / repository API
+3. 兼容旧接口：
+   - `fetch_top_k_risky`
+   - `record_result`
+   - `select_candidates`
+
+建议新增文件：
+
+- `sdc_agent/db_schema.py`
+- `sdc_agent/db_models.py`
+
+验收标准：
+
+- 一个 testcase 可挂多次 qemu/gem5/hardware run
+- 不破坏现有测试和 CLI 基本能力
+
+---
+
+## Phase 2: High-Frequency Inner Loop Orchestrator
+
+目标：
+
+把当前分散的生成、静态分析、物料化、QEMU 验证、功耗标注、进化收束成正式内循环。
+
+交付物：
+
+1. 新增 `sdc_agent/inner_loop.py`
+2. 新增 `tools/sdc_inner_loop.py`
+3. 内循环状态机：
+   - `NEW`
+   - `STATIC_DONE`
+   - `QEMU_VALID`
+   - `POWER_ANNOTATED`
+   - `INNER_READY`
+4. 双 profile 支持：
+   - `SIM_SAFE`
+   - `HW_AGGRESSIVE`
+
+内循环步骤：
+
+1. `microprobe-arm` 生成样本
+2. 运行 ACE / IBR / Memory Pressure / Capstone
+3. materialize
+4. compile + qemu validate
+5. tiered power annotate
+6. 更新 inner score
+7. 调用 genetic driver 调整下一批样本
+
+需要改动的现有模块：
+
+- [`sdc_agent/generation.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py)
+- [`sdc_agent/materialize.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/materialize.py)
+- [`sdc_agent/power_analysis.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/power_analysis.py)
+- [`microprobe/src/microprobe/driver/genetic.py`](/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/driver/genetic.py)
+
+验收标准：
+
+- 单个命令能跑完完整内循环
+- 样本在数据库中形成完整 inner-loop 轨迹
+- genetic feedback 真正使用 QEMU/功耗信号，不只看静态分
+
+---
+
+## Phase 3: Generation Strategy Upgrade
+
+目标：
+
+让生成策略真正覆盖 README 想要的指令敏感区。
+
+交付物：
+
+1. 拆分指令 profile：
+   - `sim_safe_pool`
+   - `hardware_aggressive_pool`
+2. 扩展 mutation operators：
+   - NEON/FMA 组合
+   - 大步长访存
+   - LDP/STP 对偶访存
+   - cache eviction 访存模板
+3. 引入多目标 seed selection：
+   - coverage
+   - qemu stability
+   - power volatility
+   - diversity
+
+关键说明：
+
+这个阶段是兑现 README “NEON / FMA / 跨步访存”愿景的必要条件。
+
+验收标准：
+
+- 数据库中可以区分 sim-safe 和 hardware-aggressive 样本
+- aggressive 样本可以被正确标记为 `HW_ONLY` 或 `SIM_UNSUPPORTED`
+
+---
+
+## Phase 4: Low-Frequency Outer Loop
+
+目标：
+
+把当前单 fault 执行器升级为完整 fault campaign。
+
+交付物：
+
+1. 新增 `sdc_agent/outer_loop.py`
+2. 新增 `tools/sdc_outer_loop.py`
+3. 新增 fault matrix planner
+4. 新增 per-fault run persistence
+5. 新增 `sdc_sensitivity_score`
+
+外循环步骤：
+
+1. 从 `INNER_READY` 样本中选择 top-K
+2. 生成 fault matrix
+3. 缓存 golden digest
+4. 执行多次 gem5 fault run
+5. 分类结果
+6. 聚合出 testcase 级 sensitivity
+7. 更新数据库并产生 promotion candidate
+
+需要改动的现有模块：
+
+- [`sdc_agent/differential.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py)
+- [`sdc_agent/campaign.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/campaign.py)
+- [`sdc_agent/scheduler.py`](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py)
+
+验收标准：
+
+- 单个 testcase 可以绑定多组 fault run
+- 能输出 testcase 级 `outer_value_score`
+
+---
+
+## Phase 5: gem5 Real Fault Injector
+
+目标：
+
+让 fault manifest 变成真正的 fault execution。
+
+交付物：
+
+1. gem5 fault injector 设计与实现
+2. `implemented_in_script` 从 `False` 变成真实路径
+3. 至少支持：
+   - register bit flip
+   - memory bit flip
+   - configurable tick injection
+
+建议落点：
+
+- `gem5/src/...` CPU hook 或 SimObject
+- `gem5/configs/example/arm/sdc_kunpeng920_se.py` 中接入 injector
+
+验收标准：
+
+- 启用 fault 参数时，gem5 结果可真实变化
+- 不再只是记录 `sdc_fault_request.json`
+
+---
+
+## Phase 6: OpenDCDiag Promotion Lane
+
+目标：
+
+把最优样本迁移到真实环境中验证，并将结果回灌。
+
+交付物：
+
+1. 新增 `sdc_agent/hardware_promotion.py`
+2. 新增 `tools/sdc_promote_hw.py`
+3. 新增 `sdc_agent/hardware_results.py`
+4. 自动生成：
+   - `opendcdiag/tests/cpu/arm64/generated/*.cpp`
+   - 必要的 metadata manifest
+5. 结果采集与解析器
+
+验收标准：
+
+- 可从数据库中选取 top candidates
+- 可在 OpenDCDiag-ARM 中形成生成测试
+- 可将真实环境结果写回数据库
+
+---
+
+## Phase 7: Reporting, Skillization, and Operations
+
+目标：
+
+把系统从“可开发”提升到“可长期运行”。
+
+交付物：
+
+1. 系统级 report：
+   - coverage frontier
+   - power frontier
+   - sdc frontier
+   - hardware verified frontier
+2. 将核心能力沉淀为 engine skill 文档：
+   - generation skill
+   - coverage skill
+   - validation skill
+   - power skill
+   - fault campaign skill
+   - hardware promotion skill
+3. recurring automation / nightly campaign
+
+---
+
+## 4. Milestone-Based Acceptance
+
+### M1: 完整内循环
+
+判定标准：
+
+- 一条命令可完成生成、静态分析、QEMU 校验、功耗标注、反馈生成
+
+### M2: 完整外循环
+
+判定标准：
+
+- 一条命令可对 top-K 候选执行多 fault campaign 并写回 sensitivity
+
+### M3: 真实 fault injection
+
+判定标准：
+
+- gem5 fault 参数触发真实 fault behavior
+
+### M4: OpenDCDiag 真机闭环
+
+判定标准：
+
+- promoted testcase 能进入 OpenDCDiag-ARM 并把结果回灌数据库
+
+### M5: README Vision Complete
+
+判定标准：
+
+- 高频内循环、低频外循环、真实环境验证环三者全部连通
+- 子项目 P0 / P1 / P2-1 / P2-2 / P3 全部接入系统
+
+---
+
+## 5. Immediate Next Steps
+
+按执行顺序，下一步应优先做：
+
+1. Database v2
+2. Inner loop orchestrator
+3. fault matrix outer loop
+4. gem5 real fault injector
+5. OpenDCDiag promotion lane
+
+原因：
+
+- 数据模型不先扩展，后面 outer loop 和 hardware lane 都会被迫塞进 `metadata_json`
+- inner loop 不先统一，power/qemu/genetic 就始终是分裂的
