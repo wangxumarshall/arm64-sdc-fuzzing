@@ -243,18 +243,40 @@ def _write_c_and_compile(asm_content: str, testcase_key: str, gcc: str) -> Path:
         src_path = tmp_path / f"{testcase_key}.c"
         elf_path = tmp_path / f"{testcase_key}.elf"
         src_path.write_text(source, encoding="utf-8")
-        # Use simpler approach - no linker script, let compiler handle it
+
+        # Compact linker script: places all sections starting at 0x400000
+        # with no alignment padding.  This eliminates the 64KB section-alignment
+        # gap that aarch64-elf-gcc inserts by default, ensuring literal pools
+        # (adr xN, #offset) always reference mapped memory.
+        # NOTE: SECTIONS must be used (not SECTORS) for GNU ld.
+        linker_script = tmp_path / "bare_metal.ld"
+        linker_script.write_text(
+            'OUTPUT_FORMAT("elf64-littleaarch64")\n'
+            'OUTPUT_ARCH(aarch64)\n'
+            'ENTRY(main)\n'
+            '_start = 0x400000;\n'
+            'SECTIONS {\n'
+            '    . = 0x400000;\n'
+            '    .text : { *(.text) }\n'
+            '    .rodata : { *(.rodata) }\n'
+            '    .data : { *(.data) }\n'
+            '    .bss : { *(.bss) *(COMMON) }\n'
+            '}\n',
+            encoding="utf-8",
+        )
+
         compile_cmd = [
             gcc,
             "-static",
             "-nostdlib",
+            "-nostartfiles",
             "-ffreestanding",
             "-fno-pie",
             "-fno-builtin",
             "-march=armv8.2-a",
-            "-nostdinc",
             "-Wl,--gc-sections",
-            "-e", "_start",
+            "-Wl,-T," + str(linker_script),
+            "-Wl,-e,main",
             "-o", str(elf_path),
             str(src_path),
         ]
