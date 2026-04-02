@@ -39,7 +39,7 @@
 2. 低频外循环：gem5 fault campaign + QEMU 差分 + SDC 能力评分
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
-完整目标架构、数据库模型和实施路线见 [spec.md](/Users/wangxu/1-project/sdc-fuzzing/doc/spec.md) 与 [plan.md](/Users/wangxu/1-project/sdc-fuzzing/doc/plan.md)。
+完整目标架构、数据库模型和实施路线见 [spec.md](./doc/spec.md) 与 [plan.md](./doc/plan.md)。
 
 ### 1.3 SDC-Agent 的定义
 
@@ -314,9 +314,6 @@ sdc-fuzzing/
 ├── mcpat/
 └── doc/
     ├── spec.md
-    ├── plan.md
-    ├── findings.md
-    └── progress.md
 ```
 
 ---

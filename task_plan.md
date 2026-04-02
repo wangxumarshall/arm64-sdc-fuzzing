@@ -19,7 +19,7 @@
 | Phase 2: Architecture redesign | completed | 已定义高频内循环、低频外循环、硬件验证环三层架构 |
 | Phase 3: Spec/Plan rewrite | completed | 已重写 `doc/spec.md` 与 `doc/plan.md` |
 | Phase 4: Findings/Progress rewrite | completed | 已重写 `doc/findings.md` 与 `doc/progress.md` |
-| Phase 5: Consistency sync | in_progress | 正在检查 README/根目录 planning files 与新方案一致性 |
+| Phase 5: Consistency sync | completed | README 与 root planning files 已同步到新方案口径 |
 
 ## Key Decisions
 
