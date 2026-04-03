@@ -16,19 +16,20 @@
 
 当前主阶段：
 
-- `Phase 2: 高频内循环产品化`
+- `Phase 4: 低频外循环产品化`
 
 当前判断：
 
 1. `Phase 0` 已完成。
 2. `Phase 1` 已完成。
-3. `Phase 2` 进行中，已完成约 `92%`。
+3. `Phase 2` 已完成真实端到端验证。
+4. `Phase 4` 已开始首版实现。
 
 当前阶段的核心目标：
 
 1. 让 inner loop 成为正式 orchestrator，而不是零散脚本拼接。
 2. 将生成、静态分析、物料化、QEMU 合法性、McPAT 功耗、反馈进化串成一条标准路径。
-3. 为 `Phase 4` 的 outer loop 准备稳定的 `INNER_READY` 样本池。
+3. 将单次差分执行扩展成真正的 fault campaign。
 
 ---
 
@@ -50,6 +51,7 @@
 7. inner loop 现在会优先从 artifacts 索引恢复 source / ELF，而不是只依赖 metadata 路径。
 8. `fault_model=none` 的过滤必须继续保留，否则 inner loop 会污染 outer loop 的 `fault_runs` 历史。
 9. 当前控制平面已经足够支撑继续推进，不需要重写整体骨架。
+10. 通过 source-built `qemu-system-aarch64`、source-built `mcpat`、`aarch64-conda-linux-gnu-gcc`、`gem5` 的真实链路，`Phase 2` baseline case 已得到端到端通过。
 
 ---
 
@@ -94,6 +96,19 @@
 6. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
 7. artifacts 索引现在可为 inner loop 提供 source / ELF fallback。
 8. evolution 继续可作为 inner loop 的尾段使用。
+9. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
+
+### 3.4 Phase 4
+
+1. [outer_loop.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/outer_loop.py) 已实现首版 outer loop orchestrator。
+2. [sdc_outer_loop.py](/Users/wangxu/1-project/sdc-fuzzing/tools/sdc_outer_loop.py) 已提供 CLI 入口。
+3. 已支持 fault matrix planner。
+4. 已支持多 fault run 写入 `fault_runs` 与 `fault_campaigns`。
+5. 已支持基础的：
+   - `fault_detection_rate`
+   - `repeatability_score`
+   - `outer_value_score`
+9. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
 
 ---
 
@@ -110,6 +125,9 @@
 7. `python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py --help`
 8. 最小 `HW_AGGRESSIVE` profile generation smoke
 9. `python3 -m pytest microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py -q`
+10. `python3 tools/validate_phase2_e2e.py --candidate-kind baseline ...`
+11. `python3 -m pytest tests/test_sdc_outer_loop.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
+12. `python3 tools/sdc_outer_loop.py --help`
 
 当前结果：
 
@@ -118,6 +136,13 @@
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
 5. `HW_AGGRESSIVE` 请求会被正确记录为“requested=HW_AGGRESSIVE, effective=SIM_SAFE”
+6. baseline Phase 2 真实端到端验证已通过：
+   - qemu golden digest = `2b85c03077dc5edd`
+   - gem5 digest = `2b85c03077dc5edd`
+   - mcpat power_total = `43738.51286976`
+7. Phase 4 定向测试已通过：
+   - `11 passed`
+8. `sdc_outer_loop.py --help` 已 smoke 通过
 
 ---
 
@@ -127,10 +152,7 @@
 
 1. `HW_AGGRESSIVE` 默认生成器尚未正式落地。
 2. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
-3. outer loop 仍未产品化：
-   - 缺少 `fault matrix planner`
-   - 缺少正式 `outer_loop.py`
-   - 缺少 `outer_value_score`
+3. outer loop 已有首版骨架，但仍未与真实 injector 联动完成。
 4. gem5 real fault injector 尚未实现。
 5. `opendcdiag-arm` promotion/backfill 尚未接入控制平面。
 
@@ -140,15 +162,11 @@
 
 推荐的后续顺序仍然是：
 
-1. 完成 Phase 2 的尾项
-   - 更强的 artifact/index 体系
-   - profile contract 继续收口
-2. 进入 `Phase 4: 低频外循环产品化`
-   - `outer_loop.py`
-   - `fault matrix planner`
-   - per-fault aggregation
-3. 推进 `Phase 5: gem5 真实 fault injector`
-4. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
+1. 继续推进 `Phase 4`
+   - outer loop 与真实 injector 的衔接
+   - 更丰富的聚合与排序
+2. 推进 `Phase 5: gem5 真实 fault injector`
+3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
 
 ---
 

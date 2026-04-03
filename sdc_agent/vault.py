@@ -1116,6 +1116,54 @@ class SDCVault:
             (status, limit),
         ).fetchall()
 
+    def record_fault_run(
+        self,
+        *,
+        campaign_id: Optional[int],
+        testcase_key: str,
+        fault_model: str,
+        fault_target: str,
+        fault_bit: Optional[int],
+        fault_tick: Optional[int],
+        golden_digest: Optional[str],
+        faulted_digest: Optional[str],
+        result_status: str,
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        now = _utcnow()
+        with self._conn:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO fault_runs (
+                    campaign_id,
+                    testcase_key,
+                    fault_model,
+                    fault_target,
+                    fault_bit,
+                    fault_tick,
+                    golden_digest,
+                    faulted_digest,
+                    result_status,
+                    metadata_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    campaign_id,
+                    testcase_key,
+                    fault_model,
+                    fault_target,
+                    fault_bit,
+                    fault_tick,
+                    golden_digest,
+                    faulted_digest,
+                    result_status,
+                    _json_dumps(metadata),
+                    now,
+                ),
+            )
+        return int(cursor.lastrowid)
+
     def upsert_hardware_promotion(
         self,
         testcase_key: str,
