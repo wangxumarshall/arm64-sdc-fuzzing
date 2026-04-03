@@ -55,12 +55,12 @@
 
 ### 已交付
 
-1. 重写 `doc/spec.md`
-2. 重写 `doc/plan.md`
-3. 重写 `doc/findings.md`
-4. 重写 `doc/progress.md`
-5. 同步 root 级 `task_plan.md`、`findings.md`、`progress.md`
-6. 修正 README 的规划文档指针
+1. 重写 `docs/spec.md`
+2. 重写 `docs/plan.md`
+3. 将状态类文档收敛为 `docs/state.md`
+4. 将 `doc/` 目录重命名为 `docs/`
+5. 删除 root 级重复状态镜像文件
+6. 修正 README 与仓库内文档引用
 
 ### 验收标准
 

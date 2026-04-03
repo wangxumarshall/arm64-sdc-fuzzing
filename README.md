@@ -39,9 +39,8 @@
 2. 低频外循环：gem5 fault campaign + QEMU 差分 + SDC 能力评分
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
-完整目标架构、数据库模型和实施路线见 [spec.md](./doc/spec.md) 与 [plan.md](./doc/plan.md)。
-源码事实与关键缺口见 [findings.md](./doc/findings.md)，完成度见 [progress.md](./doc/progress.md)。
-root 级工作记忆同步为当前目录下的 `task_plan.md`、`findings.md`、`progress.md`。
+完整目标架构、数据库模型和实施路线见 [spec.md](./docs/spec.md) 与 [plan.md](./docs/plan.md)。
+当前阶段状态、最新发现、验证结果与下一步统一见 [state.md](./docs/state.md)。
 
 ### 1.3 SDC-Agent 的定义
 
@@ -332,8 +331,10 @@ sdc-fuzzing/
 │       ├── sdc_baremetal_se.py
 │       └── sdc_fault_request.py
 ├── mcpat/
-└── doc/
+└── docs/
     ├── spec.md
+    ├── plan.md
+    ├── state.md
 ```
 
 ---

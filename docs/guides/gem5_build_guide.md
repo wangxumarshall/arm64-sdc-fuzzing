@@ -333,4 +333,4 @@ cat m5out-sdc/mcpat_input.xml
 - gem5官方文档: https://www.gem5.org/documentation/
 - ARM架构参考手册: https://developer.arm.com/documentation/
 - Microprobe文档: 项目内 `microprobe/README.md`
-- Kunpeng920架构: 项目内 `doc/kunpeng920.md`
+- Kunpeng920架构: 项目内 `docs/kunpeng920.md`

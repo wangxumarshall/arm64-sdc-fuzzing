@@ -49,7 +49,7 @@
    - 当前角色是 golden legality validator；主仓库尚未依赖 qemu fork 级修改。
 3. `Sub-P2-2 gem5`
    - 当前角色是 fault-side simulator 和 stats producer；真实 injector 尚未落地。
-4. `mcpat-arm`
+4. `Sub-P3 mcpat-arm`
    - 当前通过 `pypat` 与 gem5 输出对接。
 5. `Sub-P0 opendcdiag-arm`
    - 当前拥有 ARM64 SDC 检测资产，但还未承担 promotion/backfill 流程。
