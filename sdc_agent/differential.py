@@ -252,6 +252,9 @@ def run_differential(
     source: Path,
     *,
     elf: Optional[Path] = None,
+    skip_compile: bool = False,
+    skip_qemu: bool = False,
+    cached_golden_digest: Optional[str] = None,
     compiler: str = "aarch64-linux-gnu-gcc",
     compiler_flags: Optional[List[str]] = None,
     qemu_binary: str = "qemu-aarch64",
@@ -282,16 +285,31 @@ def run_differential(
         fault_tick=fault_tick,
     ) + list(gem5_args or [])
 
-    compile_result = compile_static_elf(
-        source=source,
-        output=elf,
-        compiler=compiler,
-        compiler_flags=compiler_flags,
-        timeout=timeout,
-    )
+    if skip_compile and elf.exists():
+        compile_result = CommandResult(
+            command=[],
+            returncode=0,
+            stdout="",
+            stderr="Skipped compilation; reused cached ELF.",
+        )
+    else:
+        compile_result = compile_static_elf(
+            source=source,
+            output=elf,
+            compiler=compiler,
+            compiler_flags=compiler_flags,
+            timeout=timeout,
+        )
 
     qemu_result = (
-        run_qemu(
+        CommandResult(
+            command=[],
+            returncode=0,
+            stdout=f"SDC_DIGEST={cached_golden_digest}",
+            stderr="Skipped QEMU; reused cached golden digest.",
+        )
+        if compile_result.returncode == 0 and skip_qemu and cached_golden_digest is not None
+        else run_qemu(
             elf=elf,
             qemu_binary=qemu_binary,
             qemu_args=qemu_args,

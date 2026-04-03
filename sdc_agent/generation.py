@@ -303,6 +303,7 @@ def generate_batch(
 ) -> Dict[str, Any]:
     successes = 0
     failures: List[Dict[str, Any]] = []
+    testcase_keys: List[str] = []
 
     with SDCVault(db_path) as vault:
         tasks = list(
@@ -344,10 +345,12 @@ def generate_batch(
 
             vault.upsert_testcase(result["entry"])
             successes += 1
+            testcase_keys.append(result["entry"].testcase_key)
 
     return {
         "requested": count,
         "inserted": successes,
+        "testcase_keys": testcase_keys,
         "failed": failures,
         "db": str(db_path),
     }

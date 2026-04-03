@@ -41,7 +41,7 @@ except Exception:  # pragma: no cover - imported lazily in some environments
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "inner-loop"
-DEFAULT_PROCESS_STATUSES = ("PENDING",)
+DEFAULT_PROCESS_STATUSES = ("STATIC_DONE", "PENDING")
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,9 @@ class InnerLoopCaseResult:
     result_status: Optional[str] = None
     golden_digest: Optional[str] = None
     power_total: Optional[float] = None
+    source_cache_hit: bool = False
+    elf_cache_hit: bool = False
+    golden_cache_hit: bool = False
     error: Optional[str] = None
 
 
@@ -97,13 +100,53 @@ def _resolve_source_path(
     metadata: Mapping[str, Any],
     *,
     output_root: Path,
-) -> Path:
+) -> tuple[Path, bool]:
     explicit = metadata.get("source_path")
     if explicit:
         source_path = Path(str(explicit)).expanduser().resolve()
         if source_path.exists():
-            return source_path
-    return materialize_testcase(vault, testcase_key, output_root=output_root)
+            return source_path, True
+    return materialize_testcase(vault, testcase_key, output_root=output_root), False
+
+
+def _cache_flags(
+    candidate: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    *,
+    source_cache_hit: bool,
+    elf_path: Path,
+) -> Dict[str, Any]:
+    execution = metadata.get("execution", {})
+    if isinstance(execution, Mapping):
+        execution = dict(execution)
+    else:
+        execution = {}
+    compile_meta = execution.get("compile", {})
+    qemu_meta = execution.get("qemu", {})
+    if not isinstance(compile_meta, Mapping):
+        compile_meta = {}
+    if not isinstance(qemu_meta, Mapping):
+        qemu_meta = {}
+
+    elf_cache_hit = bool(
+        elf_path.exists()
+        and compile_meta.get("status") == "ok"
+    )
+    cached_golden_digest = (
+        candidate.get("qemu_golden_hash")
+        or metadata.get("golden_digest")
+    )
+    golden_cache_hit = bool(
+        elf_cache_hit
+        and cached_golden_digest
+        and qemu_meta.get("status") == "ok"
+    )
+    return {
+        "source_cache_hit": source_cache_hit,
+        "elf_cache_hit": elf_cache_hit,
+        "golden_cache_hit": golden_cache_hit,
+        "cached_golden_digest": str(cached_golden_digest) if cached_golden_digest else None,
+    }
 
 
 def _inner_status_from_result(
@@ -141,6 +184,7 @@ def _build_case_metadata(
     result: DifferentialResult,
     power_requested: bool,
     inner_status: str,
+    cache_flags: Mapping[str, Any],
 ) -> Dict[str, Any]:
     power_total = None
     if result.mcpat is not None:
@@ -164,6 +208,9 @@ def _build_case_metadata(
             "gem5_digest": result.faulted_digest,
             "power_total": power_total,
             "mcpat_error": result.mcpat_error,
+            "source_cache_hit": bool(cache_flags.get("source_cache_hit", False)),
+            "elf_cache_hit": bool(cache_flags.get("elf_cache_hit", False)),
+            "golden_cache_hit": bool(cache_flags.get("golden_cache_hit", False)),
         },
         "execution": {
             "compile": _jsonable_command(result.compile.to_dict()),
@@ -310,6 +357,13 @@ def run_inner_loop(
             strict_validation=strict_validation,
             output_dir=output_root / "generated",
         )
+        generated_keys = generation_payload.get("testcase_keys", [])
+        if generated_keys:
+            with SDCVault(db_path) as generation_vault:
+                for testcase_key in generated_keys:
+                    row = generation_vault.get_testcase(testcase_key)
+                    if row is not None and row["status"] == "PENDING":
+                        generation_vault.mark_status(testcase_key, "STATIC_DONE")
 
     preflight = None
     require_power = not skip_power and power_limit > 0
@@ -329,12 +383,16 @@ def run_inner_loop(
     counts = {
         "selected": 0,
         "processed": 0,
+        "static_done": 0,
         "golden_ready": 0,
         "power_ready": 0,
         "inner_ready": 0,
         "invalid": 0,
         "timed_out": 0,
         "crashed": 0,
+        "cached_source": 0,
+        "cached_elf": 0,
+        "cached_golden": 0,
     }
 
     with SDCVault(db_path) as vault:
@@ -350,18 +408,32 @@ def run_inner_loop(
             candidate_output = output_root / testcase_key
             candidate_output.mkdir(parents=True, exist_ok=True)
             metadata = _decode_metadata(candidate)
-            source_path = _resolve_source_path(
+            source_path, source_cache_hit = _resolve_source_path(
                 vault,
                 testcase_key,
                 metadata,
                 output_root=output_root / "materialized",
             )
+            elf_path = candidate_output / f"{testcase_key}.elf"
+            cache_flags = _cache_flags(
+                candidate,
+                metadata,
+                source_cache_hit=source_cache_hit,
+                elf_path=elf_path,
+            )
             power_requested = (not skip_power) and index < power_limit
+            counts["static_done"] += 1 if candidate.get("status") == "STATIC_DONE" else 0
+            counts["cached_source"] += 1 if cache_flags["source_cache_hit"] else 0
+            counts["cached_elf"] += 1 if cache_flags["elf_cache_hit"] else 0
+            counts["cached_golden"] += 1 if cache_flags["golden_cache_hit"] else 0
 
             try:
                 result = run_differential(
                     source=source_path,
-                    elf=candidate_output / f"{testcase_key}.elf",
+                    elf=elf_path,
+                    skip_compile=bool(cache_flags["elf_cache_hit"]),
+                    skip_qemu=bool(cache_flags["golden_cache_hit"]),
+                    cached_golden_digest=cache_flags["cached_golden_digest"],
                     compiler=compiler,
                     qemu_binary=qemu_binary,
                     gem5_binary=gem5_binary,
@@ -386,6 +458,7 @@ def run_inner_loop(
                     result=result,
                     power_requested=power_requested,
                     inner_status=inner_status,
+                    cache_flags=cache_flags,
                 )
                 mcpat_power = None
                 if result.mcpat is not None and result.mcpat.get("power_total") is not None:
@@ -423,6 +496,9 @@ def run_inner_loop(
                         result_status=result.status,
                         golden_digest=result.golden_digest,
                         power_total=mcpat_power,
+                        source_cache_hit=bool(cache_flags["source_cache_hit"]),
+                        elf_cache_hit=bool(cache_flags["elf_cache_hit"]),
+                        golden_cache_hit=bool(cache_flags["golden_cache_hit"]),
                     )
                 )
             except Exception as exc:
@@ -452,6 +528,9 @@ def run_inner_loop(
                         artifact_dir=str(candidate_output.resolve()),
                         power_requested=power_requested,
                         inner_status="CRASHED",
+                        source_cache_hit=bool(cache_flags["source_cache_hit"]),
+                        elf_cache_hit=bool(cache_flags["elf_cache_hit"]),
+                        golden_cache_hit=bool(cache_flags["golden_cache_hit"]),
                         error=str(exc),
                     )
                 )

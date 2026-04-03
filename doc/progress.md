@@ -40,7 +40,7 @@
 
 | 环路 | 状态 | 完成度 | 说明 |
 | --- | --- | --- | --- |
-| 高频内循环 | partial | 70% | `inner_loop.py`、CLI、`GOLDEN_READY / POWER_READY / INNER_READY` 状态已落地，仍缺 profile-aware generation 与更强缓存/批处理 |
+| 高频内循环 | partial | 80% | `inner_loop.py`、CLI、`STATIC_DONE / GOLDEN_READY / POWER_READY / INNER_READY` 状态、source/ELF/golden cache 已落地，仍缺 profile-aware generation 与更强批处理 |
 | 低频外循环 | partial | 40% | 单次差分和 summary writeback 已有；fault matrix 与 injector 仍未完成 |
 | 硬件验证环 | early | 15% | opendcdiag-arm 资产存在，但 promotion/backfill 尚未接入 |
 
@@ -126,10 +126,11 @@
 4. 统一了 `spec / plan / findings / progress` 的口径。
 5. 将 root 级 planning files 与 `doc/` 下规划文档同步。
 6. 完成 `Phase 1: Vault v2 与数据契约升级`。
-7. 完成 `Phase 2` 的首版内循环落地：
+7. 完成 `Phase 2` 的内循环主干与缓存落地：
    - `sdc_agent/inner_loop.py`
    - `tools/sdc_inner_loop.py`
-   - `INNER_READY / POWER_READY / GOLDEN_READY` 状态推进
+   - `STATIC_DONE / GOLDEN_READY / POWER_READY / INNER_READY` 状态推进
+   - source / ELF / golden digest cache
 
 ---
 
@@ -140,7 +141,7 @@
 影响：
 
 1. `SIM_SAFE / HW_AGGRESSIVE` 尚未正式落地
-2. inner loop 目前仍是首版 orchestrator，缺批处理缓存与更细粒度状态
+2. inner loop 目前已具备基础缓存，但缺更强的批处理复用与更细粒度 artifact 索引
 
 ### 阻塞 2：低频外循环仍未产品化
 
@@ -207,9 +208,11 @@
 
 1. `python3 -m pytest tests/test_sdc_inner_loop.py tests/test_sdc_scheduler.py -q`
 2. `python3 -m pytest tests -q`
-3. 结果：`31 passed`
+3. `python3 tools/sdc_inner_loop.py --help`
+4. `python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3 --limit 1`
+5. 结果：`32 passed`
 
 这说明：
 
 1. `Phase 1` 的 Vault v2 升级保持兼容。
-2. `Phase 2` 的 inner loop 首版实现已经接入现有测试基线。
+2. `Phase 2` 的 inner loop 主干与缓存已经接入现有测试基线。

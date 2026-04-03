@@ -2,15 +2,15 @@
 
 ## Summary
 
-进入 `Phase 2` 之后，本轮新增的关键结论如下：
+本轮继续推进 `Phase 2` 后，新增的关键结论如下：
 
-1. 现有 `generation / materialize / differential / genetic` 已足够拼出首版正式 inner loop，不需要重写执行器。
-2. inner loop 的 summary 状态推进应明确为 `GOLDEN_READY / POWER_READY / INNER_READY`。
-3. `fault_model=none` 的结果必须从 fault history 投影里排除，否则会污染外循环数据。
-4. 正式文档与 root 工作记忆必须同时更新，才能避免后续 Phase 4/5/6 执行时丢上下文。
+1. `STATIC_DONE` 应当作为内循环里“已生成、已静态分析、待执行”的明确状态保留下来。
+2. `run_differential()` 只要支持 `skip_compile / skip_qemu / cached_golden_digest`，就足以承载 Phase 2 所需的 ELF 与 golden cache 复用。
+3. source / ELF / golden 三层 cache 已经能显著减少重复执行时的开销。
+4. `fault_model=none` 的过滤必须继续保留，否则 cache 驱动的 inner loop 会反复污染外循环历史。
 
 ## Pointers
 
 - 项目级发现见 [doc/findings.md](/Users/wangxu/1-project/sdc-fuzzing/doc/findings.md)
-- 当前阶段代码见 [sdc_agent/inner_loop.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/inner_loop.py)
-- 当前任务执行状态见 [task_plan.md](/Users/wangxu/1-project/sdc-fuzzing/task_plan.md)
+- 当前阶段实现见 [sdc_agent/inner_loop.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/inner_loop.py)
+- 当前任务状态见 [task_plan.md](/Users/wangxu/1-project/sdc-fuzzing/task_plan.md)

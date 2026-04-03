@@ -2,29 +2,28 @@
 
 ## Snapshot
 
-当前任务已经从 `Phase 1` 切换到 `Phase 2`，并完成了首版高频内循环落地：
+当前任务继续围绕 `Phase 2` 推进，并已把内循环从“首版能跑”推进到“带基础缓存的可复用版本”：
 
-1. `sdc_agent/inner_loop.py` 已实现。
-2. `tools/sdc_inner_loop.py` 已提供 CLI 入口。
-3. 样本现在可以按 inner loop 推进到：
-   - `GOLDEN_READY`
-   - `POWER_READY`
-   - `INNER_READY`
-4. `fault_model=none` 不再污染 `fault_runs`。
-5. evolution 可作为 inner loop 的尾段继续接入。
+1. `STATIC_DONE` 已进入正式状态流。
+2. source cache 已复用已有 `source_path`。
+3. ELF cache 已通过 `skip_compile` 接入。
+4. golden digest cache 已通过 `skip_qemu + cached_golden_digest` 接入。
+5. `tools/sdc_inner_loop.py` 与 `tools/sdc_agent.py status` 均已 smoke 通过。
 
 ## Validation
 
 已完成验证：
 
-1. `python3 -m py_compile sdc_agent/inner_loop.py tools/sdc_inner_loop.py sdc_agent/agent.py sdc_agent/scheduler.py sdc_agent/vault.py`
-2. `python3 -m pytest tests/test_sdc_inner_loop.py tests/test_sdc_scheduler.py -q`
+1. `python3 -m py_compile sdc_agent/generation.py sdc_agent/differential.py sdc_agent/inner_loop.py sdc_agent/agent.py`
+2. `python3 -m pytest tests/test_sdc_inner_loop.py tests/test_sdc_agent.py tests/test_run_sdc_differential.py -q`
 3. `python3 -m pytest tests -q`
+4. `python3 tools/sdc_inner_loop.py --help`
+5. `python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3 --limit 1`
 
 结果：
 
-- `7 passed`
-- `31 passed`
+- `10 passed`
+- `32 passed`
 
 ## Pointers
 

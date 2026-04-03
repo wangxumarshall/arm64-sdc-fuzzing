@@ -126,3 +126,78 @@ def test_inner_loop_can_chain_into_evolution(monkeypatch, tmp_path):
 
     assert payload["counts"]["golden_ready"] == 1
     assert payload["evolve"]["emitted"] == 2
+
+
+def test_inner_loop_reuses_source_elf_and_golden_cache(monkeypatch, tmp_path):
+    db_path = tmp_path / "vault.sqlite3"
+    output_root = tmp_path / "inner"
+    source_path = tmp_path / "cached-source.c"
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    elf_dir = output_root / "cached-seed"
+    elf_dir.mkdir(parents=True, exist_ok=True)
+    elf_path = elf_dir / "cached-seed.elf"
+    elf_path.write_text("cached elf", encoding="utf-8")
+
+    with SDCVault(db_path) as vault:
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="cached-seed",
+                asm_content="mov x0, x0",
+                target_name="armv8_common-armv8_common-aarch64_linux_gcc",
+                ace_score=0.8,
+                ibr_score=0.7,
+                memory_pressure_score=0.3,
+                risk_score=0.8,
+                status="GOLDEN_READY",
+                qemu_golden_hash="face",
+                metadata={
+                    "source_path": str(source_path),
+                    "golden_digest": "face",
+                    "execution": {
+                        "compile": {"status": "ok", "returncode": 0},
+                        "qemu": {"status": "ok", "returncode": 0},
+                    },
+                },
+            )
+        )
+
+    observed = {}
+
+    def fake_run_differential(**kwargs):
+        observed["skip_compile"] = kwargs["skip_compile"]
+        observed["skip_qemu"] = kwargs["skip_qemu"]
+        observed["cached_golden_digest"] = kwargs["cached_golden_digest"]
+        return DifferentialResult(
+            status="matched",
+            golden_digest="face",
+            faulted_digest="face",
+            compile=CommandResult([], 0, "", "Skipped compilation; reused cached ELF."),
+            qemu=CommandResult([], 0, "SDC_DIGEST=face", "Skipped QEMU; reused cached golden digest."),
+            gem5=CommandResult(["gem5"], 0, "SDC_DIGEST=face", ""),
+            mcpat={"power_total": 1.0},
+            fault_request={"fault_model": "none", "fault_target": ""},
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_agent.inner_loop.run_differential", fake_run_differential)
+
+    payload = run_inner_loop(
+        db_path=db_path,
+        output_root=output_root,
+        process_limit=1,
+        power_limit=1,
+        process_statuses=("GOLDEN_READY",),
+        skip_preflight=True,
+        enable_evolution=False,
+    )
+
+    assert payload["counts"]["processed"] == 1
+    assert payload["counts"]["cached_source"] == 1
+    assert payload["counts"]["cached_elf"] == 1
+    assert payload["counts"]["cached_golden"] == 1
+    assert observed == {
+        "skip_compile": True,
+        "skip_qemu": True,
+        "cached_golden_digest": "face",
+    }

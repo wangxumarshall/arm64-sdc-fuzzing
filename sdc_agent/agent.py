@@ -38,6 +38,7 @@ def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
         counts = {
             "ALL": vault.count(),
             "PENDING": vault.count(status="PENDING"),
+            "STATIC_DONE": vault.count(status="STATIC_DONE"),
             "GOLDEN_READY": vault.count(status="GOLDEN_READY"),
             "POWER_READY": vault.count(status="POWER_READY"),
             "INNER_READY": vault.count(status="INNER_READY"),
