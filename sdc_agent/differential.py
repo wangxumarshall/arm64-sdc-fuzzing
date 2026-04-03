@@ -19,6 +19,16 @@ DEFAULT_GEM5_CONFIG = (
 )
 DEFAULT_GEM5_OUTDIR = REPO_ROOT / "m5out-sdc"
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
+FAULT_MANIFEST_NAME = "sdc_fault_request.json"
+INJECTION_LOG_PATTERN = re.compile(
+    r"\[sdc\] injected register bit flip: "
+    r"cpu=(?P<cpu_index>\d+) "
+    r"reg=(?P<register_name>[A-Za-z0-9_]+) "
+    r"bit=(?P<fault_bit>\d+) "
+    r"old=0x(?P<old_value>[0-9a-fA-F]+) "
+    r"new=0x(?P<new_value>[0-9a-fA-F]+) "
+    r"tick=(?P<fault_tick>\d+)"
+)
 
 
 @dataclass
@@ -103,6 +113,103 @@ def read_text_if_exists(path: Path) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def load_fault_request_manifest(gem5_outdir: Path) -> Dict[str, Any]:
+    manifest_path = gem5_outdir / FAULT_MANIFEST_NAME
+    if not manifest_path.exists():
+        return {"manifest_found": False}
+
+    payload: Dict[str, Any]
+    try:
+        raw_payload = json.loads(
+            manifest_path.read_text(encoding="utf-8", errors="replace")
+        )
+    except json.JSONDecodeError as exc:
+        return {
+            "manifest_found": True,
+            "manifest_path": str(manifest_path.resolve()),
+            "manifest_error": str(exc),
+        }
+
+    if isinstance(raw_payload, dict):
+        payload = dict(raw_payload)
+    else:
+        payload = {"manifest_payload": raw_payload}
+
+    payload["manifest_found"] = True
+    payload["manifest_path"] = str(manifest_path.resolve())
+    if "binary_args" in payload and not isinstance(payload["binary_args"], list):
+        payload["binary_args"] = list(payload.get("binary_args") or [])
+    return payload
+
+
+def parse_injection_observation(
+    command_result: Optional[CommandResult],
+) -> Optional[Dict[str, Any]]:
+    if command_result is None:
+        return None
+    for payload in (command_result.stderr, command_result.stdout):
+        match = INJECTION_LOG_PATTERN.search(payload)
+        if match is None:
+            continue
+        groups = match.groupdict()
+        return {
+            "cpu_index": int(groups["cpu_index"]),
+            "register_name": groups["register_name"],
+            "fault_bit": int(groups["fault_bit"]),
+            "fault_tick": int(groups["fault_tick"]),
+            "old_value": f"0x{groups['old_value'].lower()}",
+            "new_value": f"0x{groups['new_value'].lower()}",
+        }
+    return None
+
+
+def _infer_fault_execution_plane(
+    fault_request: Dict[str, Any],
+    *,
+    observation: Optional[Dict[str, Any]],
+) -> str:
+    if str(fault_request.get("fault_model", "none")) == "none":
+        return "none"
+    if observation is not None:
+        return "gem5_scripted"
+    if bool(fault_request.get("implemented_in_script", False)):
+        return "gem5_script_capable_unobserved"
+    if bool(fault_request.get("manifest_found", False)):
+        return "manifest_only"
+    return "request_only"
+
+
+def build_fault_request_summary(
+    *,
+    gem5_outdir: Optional[Path],
+    gem5_result: Optional[CommandResult],
+    fault_model: str,
+    fault_target: str,
+    fault_bit: Optional[int],
+    fault_tick: Optional[int],
+) -> Dict[str, Any]:
+    payload = (
+        load_fault_request_manifest(gem5_outdir.resolve())
+        if gem5_outdir is not None
+        else {"manifest_found": False}
+    )
+    payload.setdefault("fault_model", fault_model)
+    payload.setdefault("fault_target", fault_target)
+    payload.setdefault("fault_bit", fault_bit)
+    payload.setdefault("fault_tick", fault_tick)
+    payload["implemented_in_script"] = bool(payload.get("implemented_in_script", False))
+
+    observation = parse_injection_observation(gem5_result)
+    payload["injection_observed"] = observation is not None
+    if observation is not None:
+        payload["observation"] = observation
+    payload["execution_plane"] = _infer_fault_execution_plane(
+        payload,
+        observation=observation,
+    )
+    return payload
 
 
 def compile_static_elf(
@@ -351,12 +458,14 @@ def run_differential(
             except Exception as exc:  # pragma: no cover - runtime environment dependent
                 mcpat_error = str(exc)
 
-    fault_request = {
-        "fault_model": fault_model,
-        "fault_target": fault_target,
-        "fault_bit": fault_bit,
-        "fault_tick": fault_tick,
-    }
+    fault_request = build_fault_request_summary(
+        gem5_outdir=gem5_outdir if gem5_result is not None else None,
+        gem5_result=gem5_result,
+        fault_model=fault_model,
+        fault_target=fault_target,
+        fault_bit=fault_bit,
+        fault_tick=fault_tick,
+    )
 
     return DifferentialResult(
         status=classify(

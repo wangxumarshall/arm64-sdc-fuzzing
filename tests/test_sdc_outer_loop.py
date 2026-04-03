@@ -99,9 +99,27 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
         if kwargs["fault_target"] == "x0":
             status = "sdc_found"
             faulted = "2222"
+            fault_request = {
+                "fault_model": kwargs["fault_model"],
+                "fault_target": kwargs["fault_target"],
+                "fault_bit": kwargs["fault_bit"],
+                "fault_tick": kwargs["fault_tick"],
+                "execution_plane": "gem5_scripted",
+                "implemented_in_script": True,
+                "injection_observed": True,
+            }
         else:
             status = "matched"
             faulted = "1111"
+            fault_request = {
+                "fault_model": kwargs["fault_model"],
+                "fault_target": kwargs["fault_target"],
+                "fault_bit": kwargs["fault_bit"],
+                "fault_tick": kwargs["fault_tick"],
+                "execution_plane": "manifest_only",
+                "implemented_in_script": False,
+                "injection_observed": False,
+            }
         return DifferentialResult(
             status=status,
             golden_digest="1111",
@@ -110,12 +128,7 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
             qemu=CommandResult(["qemu"], 0, "SDC_DIGEST=1111", ""),
             gem5=CommandResult(["gem5"], 0, f"SDC_DIGEST={faulted}", ""),
             mcpat={"power_total": 2.0},
-            fault_request={
-                "fault_model": kwargs["fault_model"],
-                "fault_target": kwargs["fault_target"],
-                "fault_bit": kwargs["fault_bit"],
-                "fault_tick": kwargs["fault_tick"],
-            },
+            fault_request=fault_request,
             mcpat_error=None,
         )
 
@@ -153,11 +166,26 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
         assert row["status"] == "SDC_FOUND"
         metadata = json.loads(row["metadata_json"])
         assert metadata["outer_loop"]["total_runs"] == 2
+        assert metadata["outer_loop"]["active_fault_runs"] == 2
         assert metadata["outer_loop"]["sdc_hits"] == 1
         assert metadata["outer_loop"]["fault_detection_rate"] == 0.5
+        assert metadata["outer_loop"]["observed_injection_runs"] == 1
+        assert metadata["outer_loop"]["manifest_only_runs"] == 1
+        assert metadata["outer_loop"]["injector_confidence_score"] == 0.5
+        assert metadata["outer_loop"]["promotion_ready"] is True
         assert metadata["outer_loop"]["summary_status"] == "SDC_FOUND"
         fault_runs = vault.list_fault_runs("seed-b", limit=10)
         assert len(fault_runs) >= 2
+        run_metadata = [json.loads(row["metadata_json"]) for row in fault_runs]
+        execution_planes = {
+            item["fault_execution_plane"]
+            for item in run_metadata
+            if "fault_execution_plane" in item
+        }
+        assert execution_planes == {
+            "gem5_scripted",
+            "manifest_only",
+        }
         campaigns = vault.list_fault_campaigns(limit=5)
         assert campaigns[0]["status"] == "COMPLETED"
         fetched = vault.get_fault_campaign(payload["campaign_key"])

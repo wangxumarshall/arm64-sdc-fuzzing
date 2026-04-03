@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from sdc_agent.differential import (
@@ -97,7 +98,34 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
 
     def fake_run_gem5(**kwargs):
         observed["gem5_args"] = kwargs["gem5_args"]
-        return CommandResult(["gem5"], 0, "SDC_HASH=2222", "")
+        manifest_path = kwargs["gem5_outdir"] / "sdc_fault_request.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "fault_model": "register_bit_flip",
+                    "fault_target": "x0",
+                    "fault_bit": 7,
+                    "fault_tick": 1234,
+                    "implemented_in_script": True,
+                    "binary": str((tmp_path / "case.elf").resolve()),
+                    "binary_args": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return CommandResult(
+            ["gem5"],
+            0,
+            "SDC_HASH=2222",
+            (
+                "[sdc] injected register bit flip: "
+                "cpu=0 reg=x0 bit=7 "
+                "old=0x0000000000000001 new=0x0000000000000081 "
+                "tick=1234"
+            ),
+        )
 
     class FakeBackend:
         def __init__(self, template_profile: str, mcpat_binary: Path | None = None):
@@ -128,6 +156,12 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
     assert result.golden_digest == "1111"
     assert result.faulted_digest == "2222"
     assert result.mcpat == {"power_total": 3.5, "target_dir": str((tmp_path / "m5out").resolve())}
+    assert result.fault_request is not None
+    assert result.fault_request["manifest_found"] is True
+    assert result.fault_request["implemented_in_script"] is True
+    assert result.fault_request["injection_observed"] is True
+    assert result.fault_request["execution_plane"] == "gem5_scripted"
+    assert result.fault_request["observation"]["register_name"] == "x0"
     assert observed["gem5_args"][:8] == [
         "--fault-model",
         "register_bit_flip",

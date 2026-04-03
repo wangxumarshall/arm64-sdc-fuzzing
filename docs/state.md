@@ -12,7 +12,7 @@
 
 ## 1. Current Phase
 
-日期：`2026-04-03`
+日期：`2026-04-04`
 
 当前主阶段：
 
@@ -52,6 +52,12 @@
 8. `fault_model=none` 的过滤必须继续保留，否则 inner loop 会污染 outer loop 的 `fault_runs` 历史。
 9. 当前控制平面已经足够支撑继续推进，不需要重写整体骨架。
 10. 通过 source-built `qemu-system-aarch64`、source-built `mcpat`、`aarch64-conda-linux-gnu-gcc`、`gem5` 的真实链路，`Phase 2` baseline case 已得到端到端通过。
+11. gem5 SE 路径下，支持的 register bit flip 请求已经不再只是 manifest 记录；脚本侧可以观测并打印真实注入事件。
+12. 控制面现在需要区分三类外循环 fault run：
+   - `gem5_scripted`
+   - `manifest_only`
+   - `request_only`
+13. 仅有 digest 差异还不足以支撑 promotion；还需要把 injector 是否真正被观测到收敛成独立聚合信号。
 
 ---
 
@@ -111,6 +117,12 @@
 6. 已支持 campaign 查询与按 campaign 检索 `fault_runs`。
 7. outer loop 现在会直接返回 testcase 级 `aggregates` 和 campaign 摘要。
 8. [validate_phase4_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase4_e2e.py) 已提供真实多 fault campaign 端到端验证入口。
+9. [differential.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py) 现在会读取 gem5 侧 `sdc_fault_request.json` 并解析脚本化注入观测日志。
+10. [outer_loop.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/outer_loop.py) 现在会记录：
+   - `fault_execution_plane`
+   - `injector_confidence_score`
+   - `promotion_readiness_score`
+11. outer loop 聚合结果现在可区分“真实脚本注入已观测”与“只有 manifest 记录”的 fault run。
 
 ---
 
@@ -131,6 +143,7 @@
 11. `python3 -m pytest tests/test_sdc_outer_loop.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
 12. `python3 tools/sdc_outer_loop.py --help`
 13. `python3 tools/validate_phase4_e2e.py ...`
+14. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
 
 当前结果：
 
@@ -153,6 +166,13 @@
    - matched_runs = `4`
    - summary_status = `MATCHED`
    - qemu golden digest = `2b85c03077dc5edd`
+11. 新增 fault execution plane 定向回归已通过：
+   - `tests/test_run_sdc_differential.py`
+   - `tests/test_sdc_outer_loop.py`
+12. 相邻回归仍通过：
+   - `tests/test_sdc_phase4_validation.py`
+   - `tests/test_sdc_campaign.py`
+   - `tests/test_sdc_vault_v2.py`
 
 ---
 
@@ -162,8 +182,8 @@
 
 1. `HW_AGGRESSIVE` 默认生成器尚未正式落地。
 2. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
-3. outer loop 已有首版骨架，但仍未与真实 injector 联动完成。
-4. gem5 real fault injector 尚未实现。
+3. outer loop 已能识别脚本化 fault execution plane，但更大范围的 injector 联动仍未完成。
+4. gem5 real fault injector 目前只对受支持的 register bit flip 有脚本化路径；更多 fault model 仍未实现。
 5. `opendcdiag-arm` promotion/backfill 尚未接入控制平面。
 
 ---
@@ -173,8 +193,8 @@
 推荐的后续顺序仍然是：
 
 1. 继续推进 `Phase 4`
-   - outer loop 与真实 injector 的衔接
-   - 更丰富的聚合与排序
+   - outer loop 与真实 injector 的更深衔接
+   - 将新的 injector confidence / promotion readiness 接入排序与 promotion 逻辑
 2. 推进 `Phase 5: gem5 真实 fault injector`
 3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
 

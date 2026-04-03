@@ -43,6 +43,9 @@ class FaultRunResult:
     golden_digest: Optional[str]
     faulted_digest: Optional[str]
     artifact_dir: str
+    execution_plane: str
+    implemented_in_script: bool
+    injection_observed: bool
 
 
 @dataclass(frozen=True)
@@ -50,14 +53,22 @@ class OuterLoopAggregate:
     testcase_key: str
     source_path: str
     total_runs: int
+    active_fault_runs: int
     sdc_hits: int
     matched_runs: int
     successful_runs: int
+    scripted_fault_runs: int
+    observed_injection_runs: int
+    manifest_only_runs: int
     fault_detection_rate: float
     repeatability_score: float
     outer_value_score: float
+    injector_confidence_score: float
+    promotion_readiness_score: float
+    promotion_ready: bool
     summary_status: str
     campaign_key: str
+    execution_planes: Dict[str, int]
 
 
 def _decode_metadata(row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -129,14 +140,29 @@ def _aggregate_fault_results(
     fault_results: Sequence[FaultRunResult],
 ) -> Dict[str, Any]:
     total_runs = len(fault_results)
+    active_fault_runs = sum(1 for result in fault_results if result.fault_model != "none")
     sdc_hits = sum(1 for result in fault_results if result.result_status == "sdc_found")
     matched_runs = sum(1 for result in fault_results if result.result_status == "matched")
     successful_runs = sum(
         1 for result in fault_results if result.result_status in {"matched", "sdc_found"}
     )
+    scripted_fault_runs = sum(1 for result in fault_results if result.implemented_in_script)
+    observed_injection_runs = sum(1 for result in fault_results if result.injection_observed)
+    manifest_only_runs = sum(
+        1 for result in fault_results if result.execution_plane == "manifest_only"
+    )
+    execution_planes: Dict[str, int] = {}
+    for result in fault_results:
+        execution_planes[result.execution_plane] = (
+            execution_planes.get(result.execution_plane, 0) + 1
+        )
     detection_rate = (sdc_hits / total_runs) if total_runs else 0.0
     repeatability_score = (successful_runs / total_runs) if total_runs else 0.0
     outer_value_score = candidate.fitness * detection_rate * repeatability_score
+    injector_confidence_score = (
+        observed_injection_runs / active_fault_runs if active_fault_runs else 0.0
+    )
+    promotion_readiness_score = outer_value_score * injector_confidence_score
 
     if sdc_hits > 0:
         summary_status = "SDC_FOUND"
@@ -147,13 +173,21 @@ def _aggregate_fault_results(
 
     return {
         "total_runs": total_runs,
+        "active_fault_runs": active_fault_runs,
         "sdc_hits": sdc_hits,
         "matched_runs": matched_runs,
         "successful_runs": successful_runs,
+        "scripted_fault_runs": scripted_fault_runs,
+        "observed_injection_runs": observed_injection_runs,
+        "manifest_only_runs": manifest_only_runs,
         "fault_detection_rate": detection_rate,
         "repeatability_score": repeatability_score,
         "outer_value_score": outer_value_score,
+        "injector_confidence_score": injector_confidence_score,
+        "promotion_readiness_score": promotion_readiness_score,
+        "promotion_ready": sdc_hits > 0 and observed_injection_runs > 0,
         "summary_status": summary_status,
+        "execution_planes": execution_planes,
     }
 
 
@@ -305,6 +339,17 @@ def run_outer_loop(
                     json.dumps(result_payload, indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8",
                 )
+                fault_request = dict(result.fault_request or {})
+                execution_plane = str(
+                    fault_request.get("execution_plane")
+                    or ("none" if spec.fault_model == "none" else "request_only")
+                )
+                implemented_in_script = bool(
+                    fault_request.get("implemented_in_script", False)
+                )
+                injection_observed = bool(
+                    fault_request.get("injection_observed", False)
+                )
                 vault.record_fault_run(
                     campaign_id=campaign_id,
                     testcase_key=candidate.testcase_key,
@@ -318,7 +363,10 @@ def run_outer_loop(
                     metadata={
                         "artifact_dir": str(artifact_dir.resolve()),
                         "result_json": str(result_json.resolve()),
-                        "fault_request": result.fault_request or {},
+                        "fault_request": fault_request,
+                        "fault_execution_plane": execution_plane,
+                        "implemented_in_script": implemented_in_script,
+                        "injection_observed": injection_observed,
                     },
                 )
                 run_record = FaultRunResult(
@@ -332,6 +380,9 @@ def run_outer_loop(
                     golden_digest=result.golden_digest,
                     faulted_digest=result.faulted_digest,
                     artifact_dir=str(artifact_dir.resolve()),
+                    execution_plane=execution_plane,
+                    implemented_in_script=implemented_in_script,
+                    injection_observed=injection_observed,
                 )
                 testcase_fault_results.append(run_record)
                 executed_runs.append(run_record)
@@ -352,14 +403,28 @@ def run_outer_loop(
                         testcase_key=candidate.testcase_key,
                         source_path=str(source_path.resolve()),
                         total_runs=int(aggregate["total_runs"]),
+                        active_fault_runs=int(aggregate["active_fault_runs"]),
                         sdc_hits=int(aggregate["sdc_hits"]),
                         matched_runs=int(aggregate["matched_runs"]),
                         successful_runs=int(aggregate["successful_runs"]),
+                        scripted_fault_runs=int(aggregate["scripted_fault_runs"]),
+                        observed_injection_runs=int(
+                            aggregate["observed_injection_runs"]
+                        ),
+                        manifest_only_runs=int(aggregate["manifest_only_runs"]),
                         fault_detection_rate=float(aggregate["fault_detection_rate"]),
                         repeatability_score=float(aggregate["repeatability_score"]),
                         outer_value_score=float(aggregate["outer_value_score"]),
+                        injector_confidence_score=float(
+                            aggregate["injector_confidence_score"]
+                        ),
+                        promotion_readiness_score=float(
+                            aggregate["promotion_readiness_score"]
+                        ),
+                        promotion_ready=bool(aggregate["promotion_ready"]),
                         summary_status=str(aggregate["summary_status"]),
                         campaign_key=campaign_key,
+                        execution_planes=dict(aggregate["execution_planes"]),
                     )
                 )
 
@@ -375,6 +440,7 @@ def run_outer_loop(
                 metadata={
                     "fault_specs": [asdict(spec) for spec in fault_specs],
                     "counts": counts,
+                    "aggregates": [asdict(aggregate) for aggregate in aggregates],
                 },
             )
             campaign_row = vault.get_fault_campaign(campaign_key)

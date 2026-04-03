@@ -24,8 +24,8 @@
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
 | Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 92% |
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
-| Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 65% |
-| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 10% |
+| Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 70% |
+| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 20% |
 | Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 早期 | 10% |
 | Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 规划中 | 10% |
 
@@ -258,9 +258,9 @@
 
 ### 当前阻塞
 
-1. `outer_loop.py` 已落地首版骨架，并已完成真实多 fault campaign baseline 验证，但还缺与真实 injector 的深度耦合。
-2. 当前 fault matrix 仍是 planner 层级，尚未与真实 gem5 injector 联动。
-3. `outer_value_score` 已有基础聚合，但还需要更丰富的稳定性/多样性权重。
+1. `outer_loop.py` 已落地首版骨架，并已完成真实多 fault campaign baseline 验证；控制面现已能区分 `gem5_scripted` 与 `manifest_only` fault run，但更深的 injector 联动仍未完成。
+2. 当前 fault matrix 已能表达并记录 fault execution plane，但支持面仍集中在 register bit flip，尚未扩展到更多 fault model。
+3. `outer_value_score` 仍保持基础聚合；当前新增的是 `injector_confidence_score / promotion_readiness_score`，后续还需要更丰富的稳定性/多样性权重。
 
 ### 交付物
 
@@ -278,6 +278,8 @@
 5. 已支持基础的 `fault_detection_rate / repeatability_score / outer_value_score` 聚合。
 6. 已新增 outer loop 定向测试。
 7. 已新增 `Phase 4` 真实端到端验证入口。
+8. `run_differential()` 现在会读取 gem5 侧 `sdc_fault_request.json`，并解析脚本化注入观测信息。
+9. outer loop 现在会把 `fault_execution_plane / injector_confidence_score / promotion_readiness_score` 写入 fault run 与 testcase 聚合结果。
 
 ### 验收标准
 
@@ -302,7 +304,7 @@
    - register bit flip
    - memory bit flip
 4. 增加 injector 自测与金丝雀用例。
-5. 把 `implemented_in_script=False` 升级为真实实现状态。
+5. 将“manifest-only”路径进一步收敛为真实实现状态，并扩展到更多 fault model。
 
 ### 子项目映射
 
@@ -316,6 +318,12 @@
 1. gem5 C++/Python 注入扩展
 2. 注入正确性测试
 3. 与 outer loop 的联调报告
+
+### 当前已完成
+
+1. gem5 `BaseCPU` 已暴露 ARM 整数寄存器读取与 bit flip helper。
+2. `sdc_kunpeng920_se.py` 已支持对可脚本化的 register bit flip 请求执行并打印注入观测日志。
+3. 控制面现在会记录 fault manifest、fault execution plane，以及 injector confidence / promotion readiness 聚合信号。
 
 ### 验收标准
 
