@@ -29,7 +29,14 @@ def test_sdc_agent_summarizes_vault(tmp_path):
                         "normalized_status": "SDC_FOUND",
                         "sdc_signal": 1.0,
                         "power_total": 1.0,
-                    }
+                    },
+                    "outer_loop": {
+                        "outer_value_score": 0.2,
+                        "injector_confidence_score": 1.0,
+                        "promotion_readiness_score": 0.2,
+                        "promotion_ready": True,
+                        "execution_planes": {"gem5_scripted": 1},
+                    },
                 },
             )
         )
@@ -40,6 +47,8 @@ def test_sdc_agent_summarizes_vault(tmp_path):
     assert payload["counts"]["PENDING"] == 1
     assert payload["counts"]["SDC_FOUND"] == 1
     assert payload["top_candidates"][0]["testcase_key"] == "sdc-seed"
+    assert payload["top_candidates"][0]["promotion_ready"] is True
+    assert payload["top_promotion_candidates"][0]["testcase_key"] == "sdc-seed"
 
 
 def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, tmp_path):

@@ -54,14 +54,20 @@ def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
                 "testcase_key": candidate.testcase_key,
                 "status": candidate.status,
                 "fitness": candidate.fitness,
+                "outer_value_score": candidate.outer_value_score,
+                "injector_confidence_score": candidate.injector_confidence_score,
+                "promotion_readiness_score": candidate.promotion_readiness_score,
+                "promotion_ready": candidate.promotion_ready,
                 "risk_score": candidate.row.get("risk_score", 0.0),
             }
             for candidate in scheduler.select_candidates(vault, limit)
         ]
+        top_promotion_candidates = scheduler.promotion_plan(vault, limit)
     return {
         "db": str(db_path),
         "counts": counts,
         "top_candidates": top_candidates,
+        "top_promotion_candidates": top_promotion_candidates,
     }
 
 

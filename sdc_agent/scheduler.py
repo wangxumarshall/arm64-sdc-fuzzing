@@ -27,6 +27,7 @@ class SchedulerConfig:
     """Tunable knobs for seed ranking and feedback integration."""
 
     candidate_statuses: Sequence[str] = DEFAULT_CANDIDATE_STATUSES
+    promotion_candidate_statuses: Sequence[str] = ("SDC_FOUND", "MATCHED")
     scan_limit_per_status: int = 128
     memory_bonus_weight: float = 0.25
     pending_signal: float = 0.35
@@ -48,6 +49,10 @@ class RankedCandidate:
     sdc_signal: float
     power_total: float
     fitness: float
+    outer_value_score: float
+    injector_confidence_score: float
+    promotion_readiness_score: float
+    promotion_ready: bool
     metadata: Dict[str, Any]
     row: Mapping[str, Any]
 
@@ -74,6 +79,29 @@ def _command_summary(payload: Any) -> Dict[str, Any]:
         "timed_out": bool(payload.get("timed_out", False)),
         "status": "ok" if payload.get("returncode") == 0 else "failed",
     }
+
+
+def _float_or_default(value: Any, default: float = 0.0) -> float:
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _bool_or_default(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return default
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
 
 
 def normalize_runner_status(status: str) -> str:
@@ -157,9 +185,52 @@ class FeedbackScheduler:
         }
         return priorities.get(normalized, 0)
 
+    def _outer_loop_metrics(self, metadata: Mapping[str, Any]) -> Dict[str, Any]:
+        outer_loop = metadata.get("outer_loop", {})
+        if not isinstance(outer_loop, Mapping):
+            outer_loop = {}
+        return {
+            "outer_value_score": _float_or_default(outer_loop.get("outer_value_score"), 0.0),
+            "injector_confidence_score": _float_or_default(
+                outer_loop.get("injector_confidence_score"), 0.0
+            ),
+            "promotion_readiness_score": _float_or_default(
+                outer_loop.get("promotion_readiness_score"), 0.0
+            ),
+            "promotion_ready": _bool_or_default(
+                outer_loop.get("promotion_ready"),
+                False,
+            ),
+        }
+
+    def _selection_sort_key(self, candidate: RankedCandidate) -> tuple[Any, ...]:
+        return (
+            self.status_priority(candidate.status),
+            candidate.promotion_ready,
+            candidate.promotion_readiness_score,
+            candidate.injector_confidence_score,
+            candidate.outer_value_score,
+            candidate.fitness,
+            float(candidate.row.get("risk_score", 0.0)),
+            float(candidate.row.get("memory_pressure_score", 0.0)),
+            -int(candidate.row.get("test_id", 0)),
+        )
+
+    def _promotion_sort_key(self, candidate: RankedCandidate) -> tuple[Any, ...]:
+        return (
+            candidate.promotion_ready,
+            candidate.promotion_readiness_score,
+            candidate.injector_confidence_score,
+            candidate.outer_value_score,
+            candidate.fitness,
+            float(candidate.row.get("risk_score", 0.0)),
+            -int(candidate.row.get("test_id", 0)),
+        )
+
     def rank_row(self, row: Mapping[str, Any]) -> RankedCandidate:
         payload = _row_to_dict(row)
         metadata = _decode_metadata(payload)
+        outer_loop_metrics = self._outer_loop_metrics(metadata)
         scheduler_metadata = metadata.get("scheduler", {})
         sdc_signal = float(
             scheduler_metadata.get(
@@ -190,6 +261,14 @@ class FeedbackScheduler:
             sdc_signal=sdc_signal,
             power_total=float(power_total or 0.0),
             fitness=fitness,
+            outer_value_score=float(outer_loop_metrics["outer_value_score"]),
+            injector_confidence_score=float(
+                outer_loop_metrics["injector_confidence_score"]
+            ),
+            promotion_readiness_score=float(
+                outer_loop_metrics["promotion_readiness_score"]
+            ),
+            promotion_ready=bool(outer_loop_metrics["promotion_ready"]),
             metadata=metadata,
             row=payload,
         )
@@ -210,16 +289,31 @@ class FeedbackScheduler:
             deduped[payload["testcase_key"]] = payload
 
         ranked = [self.rank_row(row) for row in deduped.values()]
-        ranked.sort(
-            key=lambda item: (
-                self.status_priority(item.status),
-                item.fitness,
-                float(item.row.get("risk_score", 0.0)),
-                float(item.row.get("memory_pressure_score", 0.0)),
-                -int(item.row.get("test_id", 0)),
-            ),
-            reverse=True,
-        )
+        ranked.sort(key=self._selection_sort_key, reverse=True)
+        return ranked[:limit]
+
+    def select_promotion_candidates(
+        self,
+        vault: SDCVault,
+        limit: int,
+    ) -> List[RankedCandidate]:
+        statuses = tuple(self.config.promotion_candidate_statuses)
+        rows: List[Mapping[str, Any]] = []
+        for status in statuses:
+            rows.extend(
+                vault.list_testcases(
+                    limit=self.config.scan_limit_per_status,
+                    status=status,
+                )
+            )
+
+        ranked = [self.rank_row(row) for row in rows]
+        ranked = [
+            candidate
+            for candidate in ranked
+            if candidate.outer_value_score > 0.0 or candidate.promotion_ready
+        ]
+        ranked.sort(key=self._promotion_sort_key, reverse=True)
         return ranked[:limit]
 
     def mutation_plan(self, vault: SDCVault, limit: int) -> List[Dict[str, Any]]:
@@ -236,6 +330,25 @@ class FeedbackScheduler:
                     ),
                     "instruction_names": candidate.metadata.get("instruction_names", []),
                     "status": candidate.status,
+                }
+            )
+        return plan
+
+    def promotion_plan(self, vault: SDCVault, limit: int) -> List[Dict[str, Any]]:
+        plan: List[Dict[str, Any]] = []
+        for candidate in self.select_promotion_candidates(vault, limit):
+            plan.append(
+                {
+                    "testcase_key": candidate.testcase_key,
+                    "status": candidate.status,
+                    "fitness": candidate.fitness,
+                    "outer_value_score": candidate.outer_value_score,
+                    "injector_confidence_score": candidate.injector_confidence_score,
+                    "promotion_readiness_score": candidate.promotion_readiness_score,
+                    "promotion_ready": candidate.promotion_ready,
+                    "fault_execution_plane": candidate.metadata.get("outer_loop", {}).get(
+                        "execution_planes", {}
+                    ),
                 }
             )
         return plan
@@ -330,6 +443,10 @@ def _ranked_candidate_to_dict(candidate: RankedCandidate) -> Dict[str, Any]:
         "sdc_signal": candidate.sdc_signal,
         "power_total": candidate.power_total,
         "fitness": candidate.fitness,
+        "outer_value_score": candidate.outer_value_score,
+        "injector_confidence_score": candidate.injector_confidence_score,
+        "promotion_readiness_score": candidate.promotion_readiness_score,
+        "promotion_ready": candidate.promotion_ready,
         "risk_score": candidate.row.get("risk_score", 0.0),
         "memory_pressure_score": candidate.row.get("memory_pressure_score", 0.0),
         "metadata": candidate.metadata,
@@ -342,7 +459,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command in ["rank", "plan"]:
+    for command in ["rank", "plan", "promotion-plan"]:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--db", type=Path, required=True, help="Vault path.")
         subparser.add_argument(
@@ -374,6 +491,8 @@ def main() -> int:
                 _ranked_candidate_to_dict(candidate)
                 for candidate in scheduler.select_candidates(vault, args.limit)
             ]
+        elif args.command == "promotion-plan":
+            payload = scheduler.promotion_plan(vault, args.limit)
         elif args.command == "plan":
             payload = scheduler.mutation_plan(vault, args.limit)
         else:

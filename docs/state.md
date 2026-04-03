@@ -123,6 +123,7 @@
    - `injector_confidence_score`
    - `promotion_readiness_score`
 11. outer loop 聚合结果现在可区分“真实脚本注入已观测”与“只有 manifest 记录”的 fault run。
+12. [scheduler.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py) 现在已经消费这些外循环聚合信号，并提供独立的 `promotion_plan()` / `promotion-plan` CLI。
 
 ---
 
@@ -144,6 +145,8 @@
 12. `python3 tools/sdc_outer_loop.py --help`
 13. `python3 tools/validate_phase4_e2e.py ...`
 14. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
+15. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py -q`
+16. `python3 tools/sdc_scheduler.py promotion-plan --help`
 
 当前结果：
 
@@ -173,6 +176,9 @@
    - `tests/test_sdc_phase4_validation.py`
    - `tests/test_sdc_campaign.py`
    - `tests/test_sdc_vault_v2.py`
+13. 调度层与 agent 汇总现在也已接通 promotion 信号：
+   - `tests/test_sdc_scheduler.py`
+   - `tests/test_sdc_agent.py`
 
 ---
 
@@ -194,8 +200,9 @@
 
 1. 继续推进 `Phase 4`
    - outer loop 与真实 injector 的更深衔接
-   - 将新的 injector confidence / promotion readiness 接入排序与 promotion 逻辑
+   - 已将新的 injector confidence / promotion readiness 接入排序与 promotion 逻辑
 2. 推进 `Phase 5: gem5 真实 fault injector`
+   - 将 `promotion_plan` 与真实 hardware promotion 记录打通
 3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
 
 ---

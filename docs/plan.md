@@ -260,7 +260,7 @@
 
 1. `outer_loop.py` 已落地首版骨架，并已完成真实多 fault campaign baseline 验证；控制面现已能区分 `gem5_scripted` 与 `manifest_only` fault run，但更深的 injector 联动仍未完成。
 2. 当前 fault matrix 已能表达并记录 fault execution plane，但支持面仍集中在 register bit flip，尚未扩展到更多 fault model。
-3. `outer_value_score` 仍保持基础聚合；当前新增的是 `injector_confidence_score / promotion_readiness_score`，后续还需要更丰富的稳定性/多样性权重。
+3. `outer_value_score` 仍保持基础聚合；当前新增的 `injector_confidence_score / promotion_readiness_score` 已接入 scheduler 排序与 promotion plan，后续还需要更丰富的稳定性/多样性权重。
 
 ### 交付物
 
@@ -280,6 +280,7 @@
 7. 已新增 `Phase 4` 真实端到端验证入口。
 8. `run_differential()` 现在会读取 gem5 侧 `sdc_fault_request.json`，并解析脚本化注入观测信息。
 9. outer loop 现在会把 `fault_execution_plane / injector_confidence_score / promotion_readiness_score` 写入 fault run 与 testcase 聚合结果。
+10. scheduler 现在已支持基于外循环聚合信号的 `promotion-plan`。
 
 ### 验收标准
 
