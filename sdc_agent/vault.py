@@ -408,6 +408,10 @@ class SDCVault:
         add("campaign_artifact_dir", campaign.get("artifact_dir"), campaign)
         add("campaign_result_json", campaign.get("result_json"), campaign)
 
+        inner_loop = _mapping(metadata.get("inner_loop"))
+        add("inner_loop_artifact_dir", inner_loop.get("artifact_dir"), inner_loop)
+        add("inner_loop_gem5_outdir", inner_loop.get("gem5_outdir"), inner_loop)
+
         return [(kind, path_value, payload) for (kind, path_value), payload in rows.items()]
 
     def _upsert_testcase_projection(self, row: Mapping[str, Any]) -> None:
@@ -676,9 +680,11 @@ class SDCVault:
         metadata = _json_loads(row.get("metadata_json"))
         fault_request = _mapping(metadata.get("fault_request"))
         scheduler = _mapping(metadata.get("scheduler"))
+        fault_model = str(fault_request.get("fault_model", "") or "").strip().lower()
+        fault_request_active = fault_model not in {"", "none"}
         has_fault_signal = bool(
             row.get("gem5_fault_hash")
-            or fault_request
+            or fault_request_active
             or row.get("status") in self.OUTER_LOOP_STATUSES
             or scheduler.get("source_status")
         )

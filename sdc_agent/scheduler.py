@@ -12,7 +12,14 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from .vault import SDCVault
 
 
-DEFAULT_CANDIDATE_STATUSES = ("PENDING", "GOLDEN_READY", "MATCHED", "SDC_FOUND")
+DEFAULT_CANDIDATE_STATUSES = (
+    "INNER_READY",
+    "POWER_READY",
+    "PENDING",
+    "GOLDEN_READY",
+    "MATCHED",
+    "SDC_FOUND",
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,8 @@ class SchedulerConfig:
     memory_bonus_weight: float = 0.25
     pending_signal: float = 0.35
     golden_ready_signal: float = 0.45
+    power_ready_signal: float = 0.50
+    inner_ready_signal: float = 0.60
     matched_signal: float = 0.25
     sdc_signal: float = 1.0
     invalid_signal: float = 0.0
@@ -124,6 +133,10 @@ class FeedbackScheduler:
         normalized = normalize_runner_status(status)
         if normalized == "SDC_FOUND":
             return self.config.sdc_signal
+        if normalized == "INNER_READY":
+            return self.config.inner_ready_signal
+        if normalized == "POWER_READY":
+            return self.config.power_ready_signal
         if normalized == "GOLDEN_READY":
             return self.config.golden_ready_signal
         if normalized == "MATCHED":
@@ -136,9 +149,11 @@ class FeedbackScheduler:
         normalized = normalize_runner_status(status)
         priorities = {
             "SDC_FOUND": 4,
-            "GOLDEN_READY": 3,
-            "PENDING": 2,
-            "MATCHED": 1,
+            "INNER_READY": 3,
+            "POWER_READY": 2,
+            "GOLDEN_READY": 2,
+            "PENDING": 1,
+            "MATCHED": 0,
         }
         return priorities.get(normalized, 0)
 

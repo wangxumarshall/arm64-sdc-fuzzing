@@ -21,8 +21,8 @@
 | Phase | 目标 | 主要子项目 | 当前状态 | 完成度 |
 | --- | --- | --- | --- | --- |
 | Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
-| Phase 1 | Vault v2 与数据契约升级 | Control plane | 待执行 | 20% |
-| Phase 2 | 高频内循环产品化 | Sub-P1、Sub-P2-1、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 45% |
+| Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
+| Phase 2 | 高频内循环产品化 | Sub-P1、Sub-P2-1、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 65% |
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
 | Phase 4 | 低频外循环产品化 | Sub-P2-1、Sub-P2-2、Sub-P4 Control plane | 部分完成 | 35% |
 | Phase 5 | gem5 真实 fault injector | Sub-P2-2 | 早期 | 10% |
@@ -162,9 +162,9 @@
 
 ### 当前阻塞
 
-1. `cycle()` 只是串联函数，不是正式 inner loop。
-2. 功耗链路还没有成为标准步骤。
-3. 当前 profile 仍然以 `SIM_SAFE` 为主。
+1. `inner_loop.py` 已落地，但仍是首版 orchestrator，artifact cache 还不完整。
+2. 功耗链路已进入标准步骤，但仍缺更细粒度批处理与复用。
+3. 当前 profile 仍然以 `SIM_SAFE` 为主，`HW_AGGRESSIVE` 尚未正式落地。
 
 ### 交付物
 
@@ -172,6 +172,14 @@
 2. `tools/sdc_inner_loop.py`
 3. Inner loop integration tests
 4. 批量运行报告与状态汇总
+
+### 当前已完成
+
+1. `sdc_agent/inner_loop.py` 已实现正式 inner loop orchestrator。
+2. `tools/sdc_inner_loop.py` 已提供 CLI 入口。
+3. `GOLDEN_READY / POWER_READY / INNER_READY` 状态已接入 summary 流程。
+4. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
+5. 已新增 inner-loop 定向测试。
 
 ### 验收标准
 

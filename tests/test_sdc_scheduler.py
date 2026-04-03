@@ -104,3 +104,41 @@ def test_scheduler_select_candidates_prefers_sdc_hits_over_pending(tmp_path):
         ]
     finally:
         vault.close()
+
+
+def test_scheduler_select_candidates_prefers_inner_ready_over_pending(tmp_path):
+    vault = SDCVault(tmp_path / "vault.sqlite3")
+    try:
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="pending-seed",
+                asm_content="// pending",
+                target_name="arm64",
+                ace_score=0.95,
+                ibr_score=0.95,
+                memory_pressure_score=0.95,
+                risk_score=0.99,
+                status="PENDING",
+            )
+        )
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="inner-ready-seed",
+                asm_content="// ready",
+                target_name="arm64",
+                ace_score=0.7,
+                ibr_score=0.8,
+                memory_pressure_score=0.5,
+                risk_score=0.75,
+                status="INNER_READY",
+            )
+        )
+
+        scheduler = FeedbackScheduler()
+        ranked = scheduler.select_candidates(vault, 2)
+        assert [candidate.testcase_key for candidate in ranked] == [
+            "inner-ready-seed",
+            "pending-seed",
+        ]
+    finally:
+        vault.close()
