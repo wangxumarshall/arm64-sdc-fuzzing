@@ -110,7 +110,7 @@
    - `outer_value_score`
 6. 已支持 campaign 查询与按 campaign 检索 `fault_runs`。
 7. outer loop 现在会直接返回 testcase 级 `aggregates` 和 campaign 摘要。
-8. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
+8. [validate_phase4_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase4_e2e.py) 已提供真实多 fault campaign 端到端验证入口。
 
 ---
 
@@ -130,10 +130,11 @@
 10. `python3 tools/validate_phase2_e2e.py --candidate-kind baseline ...`
 11. `python3 -m pytest tests/test_sdc_outer_loop.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
 12. `python3 tools/sdc_outer_loop.py --help`
+13. `python3 tools/validate_phase4_e2e.py ...`
 
 当前结果：
 
-1. 主仓测试：`36 passed`
+1. 主仓测试：`40 passed`
 2. `microprobe` 定向测试：`8 passed`
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
@@ -146,6 +147,12 @@
    - `11 passed`
 8. `sdc_outer_loop.py --help` 已 smoke 通过
 9. outer loop campaign 查询与 aggregate 返回值测试已通过
+10. Phase 4 真实端到端验证已通过：
+   - campaign_key = `e743bd816067edd4`
+   - total_runs = `4`
+   - matched_runs = `4`
+   - summary_status = `MATCHED`
+   - qemu golden digest = `2b85c03077dc5edd`
 
 ---
 

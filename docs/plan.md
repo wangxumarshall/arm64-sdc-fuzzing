@@ -24,7 +24,7 @@
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
 | Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 92% |
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
-| Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 50% |
+| Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 65% |
 | Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 10% |
 | Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 早期 | 10% |
 | Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 规划中 | 10% |
@@ -258,7 +258,7 @@
 
 ### 当前阻塞
 
-1. `outer_loop.py` 已落地首版骨架，但还缺与真实 injector 的深度耦合。
+1. `outer_loop.py` 已落地首版骨架，并已完成真实多 fault campaign baseline 验证，但还缺与真实 injector 的深度耦合。
 2. 当前 fault matrix 仍是 planner 层级，尚未与真实 gem5 injector 联动。
 3. `outer_value_score` 已有基础聚合，但还需要更丰富的稳定性/多样性权重。
 
@@ -277,6 +277,7 @@
 4. 已支持多 fault run 写入 `fault_runs` 与 campaign 主表。
 5. 已支持基础的 `fault_detection_rate / repeatability_score / outer_value_score` 聚合。
 6. 已新增 outer loop 定向测试。
+7. 已新增 `Phase 4` 真实端到端验证入口。
 
 ### 验收标准
 
