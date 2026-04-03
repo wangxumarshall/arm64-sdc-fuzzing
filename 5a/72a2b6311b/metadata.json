@@ -1,0 +1,25 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "5a72a2b6311b",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "artifacts/sdc_vault.sqlite3"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5a/72a2b6311b/0/metadata.json",
+      "transcript": "/5a/72a2b6311b/0/full.jsonl",
+      "content_hash": "/5a/72a2b6311b/0/content_hash.txt",
+      "prompt": "/5a/72a2b6311b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7320332,
+    "cache_creation_tokens": 177978,
+    "cache_read_tokens": 210827212,
+    "output_tokens": 520635,
+    "api_call_count": 1873
+  }
+}
