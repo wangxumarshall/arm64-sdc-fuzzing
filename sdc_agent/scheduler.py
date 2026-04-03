@@ -56,6 +56,17 @@ def _decode_metadata(row: Mapping[str, Any]) -> Dict[str, Any]:
     return json.loads(raw_value)
 
 
+def _command_summary(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    return {
+        "command": list(payload.get("command", [])),
+        "returncode": payload.get("returncode"),
+        "timed_out": bool(payload.get("timed_out", False)),
+        "status": "ok" if payload.get("returncode") == 0 else "failed",
+    }
+
+
 def normalize_runner_status(status: str) -> str:
     normalized = status.strip().lower()
     mapping = {
@@ -253,6 +264,13 @@ class FeedbackScheduler:
                 "golden_digest": result.get("golden_digest"),
                 "faulted_digest": result.get("faulted_digest"),
                 "scheduler": scheduler_metadata,
+                "mcpat": mcpat_summary,
+                "fault_request": result.get("fault_request") or {},
+                "execution": {
+                    "compile": _command_summary(result.get("compile")),
+                    "qemu": _command_summary(result.get("qemu")),
+                    "gem5": _command_summary(result.get("gem5")),
+                },
             }
         )
 

@@ -42,6 +42,7 @@ class DifferentialResult:
     qemu: CommandResult
     gem5: Optional[CommandResult]
     mcpat: Optional[Dict[str, Any]]
+    fault_request: Optional[Dict[str, Any]] = None
     mcpat_error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -332,6 +333,13 @@ def run_differential(
             except Exception as exc:  # pragma: no cover - runtime environment dependent
                 mcpat_error = str(exc)
 
+    fault_request = {
+        "fault_model": fault_model,
+        "fault_target": fault_target,
+        "fault_bit": fault_bit,
+        "fault_tick": fault_tick,
+    }
+
     return DifferentialResult(
         status=classify(
             compile_result=compile_result,
@@ -346,6 +354,7 @@ def run_differential(
         qemu=qemu_result,
         gem5=gem5_result,
         mcpat=mcpat_result,
+        fault_request=fault_request,
         mcpat_error=mcpat_error,
     )
 

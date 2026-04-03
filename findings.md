@@ -2,16 +2,15 @@
 
 ## Summary
 
-这轮源码审阅后的结论可以收敛为五点：
+本阶段新增的关键发现与结论：
 
-1. 当前项目已经有一条强控制平面骨架：`generation -> vault -> campaign/differential -> scheduler -> genetic`。
-2. 高频内循环、低频外循环、硬件验证环必须显式拆层，不能继续混写。
-3. 当前生成路径本质上偏 `SIM_SAFE`，不足以独立兑现 README 中更激进的硬件覆盖愿景。
-4. 当前 Vault 单表模型不够承载多次 fault run、功耗版本和真机回灌。
-5. `gem5` fault control plane 已通，但真实 injector，以及 `opendcdiag-arm` promotion/backfill 仍未落地。
+1. `offline_testcases` 可以继续作为 summary 层保留，而不必在 Phase 1 直接废弃。
+2. 只要在 `upsert_testcase()` 和 `update_execution_result()` 中做自动投影，同步成本就能保持很低。
+3. `fault_request / execution / mcpat` 这三类元数据必须尽早进入结果合同，否则 v2 历史表会长期失真。
+4. metadata-only 更新必须避免重复写历史，否则 campaign 后处理会制造伪运行记录。
+5. 现在已经具备继续推进 `Phase 2: 高频内循环产品化` 的数据库基础。
 
 ## Pointers
 
-- 全量发现见 [doc/findings.md](/Users/wangxu/1-project/sdc-fuzzing/doc/findings.md)
-- 完整目标架构见 [doc/spec.md](/Users/wangxu/1-project/sdc-fuzzing/doc/spec.md)
-- 分阶段执行方案见 [doc/plan.md](/Users/wangxu/1-project/sdc-fuzzing/doc/plan.md)
+- 当前阶段实现见 [sdc_agent/vault.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/vault.py)
+- 当前阶段进度见 [progress.md](/Users/wangxu/1-project/sdc-fuzzing/progress.md)
