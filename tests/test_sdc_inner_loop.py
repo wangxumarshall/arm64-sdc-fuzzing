@@ -201,3 +201,90 @@ def test_inner_loop_reuses_source_elf_and_golden_cache(monkeypatch, tmp_path):
         "skip_qemu": True,
         "cached_golden_digest": "face",
     }
+
+
+def test_inner_loop_falls_back_to_artifact_index_when_metadata_paths_are_missing(
+    monkeypatch, tmp_path
+):
+    db_path = tmp_path / "vault.sqlite3"
+    output_root = tmp_path / "inner"
+    source_path = tmp_path / "artifact-source.c"
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    elf_path = tmp_path / "artifact-seed.elf"
+    elf_path.write_text("cached elf", encoding="utf-8")
+
+    with SDCVault(db_path) as vault:
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="artifact-seed",
+                asm_content="mov x0, x0",
+                target_name="armv8_common-armv8_common-aarch64_linux_gcc",
+                ace_score=0.8,
+                ibr_score=0.7,
+                memory_pressure_score=0.3,
+                risk_score=0.8,
+                status="GOLDEN_READY",
+                qemu_golden_hash="cafe",
+                metadata={
+                    "source_path": str(source_path),
+                    "golden_digest": "cafe",
+                    "execution": {
+                        "compile": {"status": "ok", "returncode": 0},
+                        "qemu": {"status": "ok", "returncode": 0},
+                    },
+                    "inner_loop": {
+                        "elf_path": str(elf_path),
+                    },
+                },
+            )
+        )
+        vault.update_execution_result(
+            "artifact-seed",
+            metadata={
+                "golden_digest": "cafe",
+                "execution": {
+                    "compile": {"status": "ok", "returncode": 0},
+                    "qemu": {"status": "ok", "returncode": 0},
+                },
+            },
+        )
+
+    observed = {}
+
+    def fake_run_differential(**kwargs):
+        observed["source"] = str(kwargs["source"])
+        observed["elf"] = str(kwargs["elf"])
+        observed["skip_compile"] = kwargs["skip_compile"]
+        observed["skip_qemu"] = kwargs["skip_qemu"]
+        return DifferentialResult(
+            status="matched",
+            golden_digest="cafe",
+            faulted_digest="cafe",
+            compile=CommandResult([], 0, "", ""),
+            qemu=CommandResult([], 0, "SDC_DIGEST=cafe", ""),
+            gem5=CommandResult(["gem5"], 0, "SDC_DIGEST=cafe", ""),
+            mcpat={"power_total": 1.2},
+            fault_request={"fault_model": "none", "fault_target": ""},
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_agent.inner_loop.run_differential", fake_run_differential)
+
+    payload = run_inner_loop(
+        db_path=db_path,
+        output_root=output_root,
+        process_limit=1,
+        power_limit=1,
+        process_statuses=("GOLDEN_READY",),
+        skip_preflight=True,
+        enable_evolution=False,
+    )
+
+    assert payload["counts"]["processed"] == 1
+    assert payload["counts"]["cached_source"] == 1
+    assert payload["counts"]["cached_elf"] == 1
+    assert observed["source"] == str(source_path.resolve())
+    assert observed["elf"] == str(elf_path.resolve())
+    assert observed["skip_compile"] is True
+    assert observed["skip_qemu"] is True

@@ -22,7 +22,7 @@
 
 1. `Phase 0` 已完成。
 2. `Phase 1` 已完成。
-3. `Phase 2` 进行中，已完成约 `80%`。
+3. `Phase 2` 进行中，已完成约 `92%`。
 
 当前阶段的核心目标：
 
@@ -45,8 +45,11 @@
    - `cached_golden_digest`
    就足以承载 Phase 2 所需的 ELF 与 golden cache 复用。
 4. source / ELF / golden 三层 cache 已经能显著减少重复执行时的内循环开销。
-5. `fault_model=none` 的过滤必须继续保留，否则 inner loop 会污染 outer loop 的 `fault_runs` 历史。
-6. 当前控制平面已经足够支撑继续推进，不需要重写整体骨架。
+5. `SIM_SAFE / HW_AGGRESSIVE` 现在已经是显式 profile contract，而不是隐式约定。
+6. 当前 `HW_AGGRESSIVE` 默认生成路径仍会诚实回退到 `SIM_SAFE`，直到激进生成器真正实现。
+7. inner loop 现在会优先从 artifacts 索引恢复 source / ELF，而不是只依赖 metadata 路径。
+8. `fault_model=none` 的过滤必须继续保留，否则 inner loop 会污染 outer loop 的 `fault_runs` 历史。
+9. 当前控制平面已经足够支撑继续推进，不需要重写整体骨架。
 
 ---
 
@@ -87,8 +90,10 @@
    - `POWER_READY`
    - `INNER_READY`
 4. source / ELF / golden digest cache 已接入 inner loop 主路径。
-5. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
-6. evolution 继续可作为 inner loop 的尾段使用。
+5. `SIM_SAFE / HW_AGGRESSIVE` profile contract 已进入 generation / inner loop / CLI。
+6. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
+7. artifacts 索引现在可为 inner loop 提供 source / ELF fallback。
+8. evolution 继续可作为 inner loop 的尾段使用。
 
 ---
 
@@ -101,12 +106,18 @@
 3. `python3 -m pytest tests -q`
 4. `python3 tools/sdc_inner_loop.py --help`
 5. `python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3 --limit 1`
+6. `python3 tools/sdc_agent.py generate --help`
+7. `python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py --help`
+8. 最小 `HW_AGGRESSIVE` profile generation smoke
+9. `python3 -m pytest microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py -q`
 
 当前结果：
 
-1. `32 passed`
-2. 新 CLI 正常暴露参数
-3. 现有 `status` 汇总仍可用
+1. 主仓测试：`36 passed`
+2. `microprobe` 定向测试：`8 passed`
+3. 新 CLI 正常暴露参数
+4. 现有 `status` 汇总仍可用
+5. `HW_AGGRESSIVE` 请求会被正确记录为“requested=HW_AGGRESSIVE, effective=SIM_SAFE”
 
 ---
 
@@ -114,8 +125,8 @@
 
 当前最主要的未完成项和风险如下：
 
-1. `HW_AGGRESSIVE` profile 尚未正式落地。
-2. inner loop 已具备基础缓存，但更细粒度的 artifact/index 体系仍可继续增强。
+1. `HW_AGGRESSIVE` 默认生成器尚未正式落地。
+2. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
 3. outer loop 仍未产品化：
    - 缺少 `fault matrix planner`
    - 缺少正式 `outer_loop.py`

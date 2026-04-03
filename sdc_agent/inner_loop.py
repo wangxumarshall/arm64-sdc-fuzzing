@@ -16,6 +16,7 @@ from .differential import (
 )
 from .generation import (
     DEFAULT_POLICY,
+    PROFILE_SIM_SAFE,
     DEFAULT_TARGET,
     DEFAULT_WRAPPER,
     generate_batch,
@@ -106,7 +107,34 @@ def _resolve_source_path(
         source_path = Path(str(explicit)).expanduser().resolve()
         if source_path.exists():
             return source_path, True
+    artifact = vault.find_existing_artifact(
+        testcase_key,
+        ("source", "materialized_source", "rendered"),
+    )
+    if artifact is not None:
+        source_path = Path(str(artifact["artifact_path"])).expanduser().resolve()
+        if source_path.suffix == ".c":
+            return source_path, True
     return materialize_testcase(vault, testcase_key, output_root=output_root), False
+
+
+def _resolve_elf_path(
+    vault: SDCVault,
+    testcase_key: str,
+    *,
+    default_elf_path: Path,
+) -> tuple[Path, bool]:
+    artifact = vault.get_latest_artifact(
+        testcase_key,
+        "inner_loop_elf",
+        existing_only=True,
+    )
+    if artifact is not None:
+        return Path(str(artifact["artifact_path"])).expanduser().resolve(), True
+    resolved_default = default_elf_path.resolve()
+    if resolved_default.exists():
+        return resolved_default, True
+    return resolved_default, False
 
 
 def _cache_flags(
@@ -114,6 +142,7 @@ def _cache_flags(
     metadata: Mapping[str, Any],
     *,
     source_cache_hit: bool,
+    elf_cache_hint: bool,
     elf_path: Path,
 ) -> Dict[str, Any]:
     execution = metadata.get("execution", {})
@@ -129,7 +158,8 @@ def _cache_flags(
         qemu_meta = {}
 
     elf_cache_hit = bool(
-        elf_path.exists()
+        elf_cache_hint
+        and elf_path.exists()
         and compile_meta.get("status") == "ok"
     )
     cached_golden_digest = (
@@ -179,6 +209,7 @@ def _build_case_metadata(
     prior_metadata: Mapping[str, Any],
     *,
     source_path: Path,
+    elf_path: Path,
     artifact_dir: Path,
     gem5_outdir: Path,
     result: DifferentialResult,
@@ -204,6 +235,7 @@ def _build_case_metadata(
             "artifact_dir": str(artifact_dir.resolve()),
             "gem5_outdir": str(gem5_outdir.resolve()),
             "source_path": str(source_path.resolve()),
+            "elf_path": str(elf_path.resolve()),
             "golden_digest": result.golden_digest,
             "gem5_digest": result.faulted_digest,
             "power_total": power_total,
@@ -322,6 +354,7 @@ def run_inner_loop(
     target: str = DEFAULT_TARGET,
     policy: str = DEFAULT_POLICY,
     wrapper: str = DEFAULT_WRAPPER,
+    profile_name: str = PROFILE_SIM_SAFE,
     sequence_length: int = 8,
     benchmark_size: int = 64,
     dependency_distance: int = 1,
@@ -348,6 +381,7 @@ def run_inner_loop(
             db_path=db_path,
             target=target,
             policy=policy,
+            profile_name=profile_name,
             wrapper=wrapper,
             count=generate_count,
             jobs=generate_jobs,
@@ -414,11 +448,16 @@ def run_inner_loop(
                 metadata,
                 output_root=output_root / "materialized",
             )
-            elf_path = candidate_output / f"{testcase_key}.elf"
+            elf_path, elf_cache_hint = _resolve_elf_path(
+                vault,
+                testcase_key,
+                default_elf_path=candidate_output / f"{testcase_key}.elf",
+            )
             cache_flags = _cache_flags(
                 candidate,
                 metadata,
                 source_cache_hit=source_cache_hit,
+                elf_cache_hint=elf_cache_hint,
                 elf_path=elf_path,
             )
             power_requested = (not skip_power) and index < power_limit
@@ -453,6 +492,7 @@ def run_inner_loop(
                 updated_metadata = _build_case_metadata(
                     metadata,
                     source_path=source_path,
+                    elf_path=elf_path,
                     artifact_dir=candidate_output,
                     gem5_outdir=candidate_output / "gem5",
                     result=result,
@@ -583,6 +623,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--target", default=DEFAULT_TARGET)
     parser.add_argument("--policy", default=DEFAULT_POLICY)
+    parser.add_argument("--profile", default=PROFILE_SIM_SAFE)
     parser.add_argument("--wrapper", default=DEFAULT_WRAPPER)
     parser.add_argument("--sequence-length", type=int, default=8)
     parser.add_argument("--benchmark-size", type=int, default=64)
@@ -615,6 +656,7 @@ def main() -> int:
         process_statuses=tuple(args.process_status or DEFAULT_PROCESS_STATUSES),
         target=args.target,
         policy=args.policy,
+        profile_name=args.profile,
         wrapper=args.wrapper,
         sequence_length=args.sequence_length,
         benchmark_size=args.benchmark_size,

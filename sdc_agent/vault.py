@@ -411,6 +411,7 @@ class SDCVault:
         inner_loop = _mapping(metadata.get("inner_loop"))
         add("inner_loop_artifact_dir", inner_loop.get("artifact_dir"), inner_loop)
         add("inner_loop_gem5_outdir", inner_loop.get("gem5_outdir"), inner_loop)
+        add("inner_loop_elf", inner_loop.get("elf_path"), inner_loop)
 
         return [(kind, path_value, payload) for (kind, path_value), payload in rows.items()]
 
@@ -954,6 +955,44 @@ class SDCVault:
             """,
             (testcase_key, limit),
         ).fetchall()
+
+    def get_latest_artifact(
+        self,
+        testcase_key: str,
+        artifact_kind: str,
+        *,
+        existing_only: bool = False,
+    ) -> Optional[sqlite3.Row]:
+        rows = self._conn.execute(
+            """
+            SELECT *
+            FROM artifacts
+            WHERE testcase_key = ? AND artifact_kind = ?
+            ORDER BY updated_at DESC, artifact_id DESC
+            """,
+            (testcase_key, artifact_kind),
+        ).fetchall()
+        if not existing_only:
+            return rows[0] if rows else None
+        for row in rows:
+            if Path(str(row["artifact_path"])).expanduser().exists():
+                return row
+        return None
+
+    def find_existing_artifact(
+        self,
+        testcase_key: str,
+        artifact_kinds: Sequence[str],
+    ) -> Optional[sqlite3.Row]:
+        for artifact_kind in artifact_kinds:
+            row = self.get_latest_artifact(
+                testcase_key,
+                artifact_kind,
+                existing_only=True,
+            )
+            if row is not None:
+                return row
+        return None
 
     def list_inner_runs(self, testcase_key: str, *, limit: int = 50) -> List[sqlite3.Row]:
         return self._conn.execute(

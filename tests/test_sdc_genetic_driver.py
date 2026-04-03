@@ -12,6 +12,7 @@ def test_sdc_genetic_driver_emits_offspring_into_vault(tmp_path):
             "target": "armv8_common-armv8_common-aarch64_linux_gcc",
             "policy": "sdc_fuzzing",
             "wrapper": "Arm64AsmWrapper",
+            "profile_name": "SIM_SAFE",
             "sequence_length": 4,
             "benchmark_size": 32,
             "dependency_distance": 1,
@@ -49,3 +50,4 @@ def test_sdc_genetic_driver_emits_offspring_into_vault(tmp_path):
         assert metadata["lineage"]["driver"] == "SDCFuzzingGeneticDriver"
         assert metadata["lineage"]["generation"] == 1
         assert metadata["preferred_stride_bytes"] >= 8192
+        assert metadata["requested_profile_name"] == "SIM_SAFE"

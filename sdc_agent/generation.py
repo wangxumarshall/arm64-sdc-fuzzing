@@ -20,6 +20,9 @@ TARGETS_ROOT = MICROPROBE_ROOT / "targets"
 DEFAULT_TARGET = "armv8_common-armv8_common-aarch64_linux_gcc"
 DEFAULT_POLICY = "sdc_fuzzing"
 DEFAULT_WRAPPER = "Arm64AsmWrapper"
+PROFILE_SIM_SAFE = "SIM_SAFE"
+PROFILE_HW_AGGRESSIVE = "HW_AGGRESSIVE"
+SUPPORTED_PROFILES = (PROFILE_SIM_SAFE, PROFILE_HW_AGGRESSIVE)
 
 
 def bootstrap_microprobe_paths() -> None:
@@ -56,6 +59,43 @@ class GeneratedTestcase:
     output_file: Optional[str]
     wrapper_name: str
     metadata: Dict[str, Any]
+
+
+def normalize_profile_name(profile_name: Optional[str]) -> str:
+    if not profile_name:
+        return PROFILE_SIM_SAFE
+    normalized = str(profile_name).strip().upper()
+    if normalized not in SUPPORTED_PROFILES:
+        raise ValueError(
+            f"Unsupported profile_name: {profile_name}. "
+            f"Expected one of: {', '.join(SUPPORTED_PROFILES)}"
+        )
+    return normalized
+
+
+def resolve_profile_contract(
+    *,
+    profile_name: Optional[str],
+    instruction_names: Optional[Sequence[str]],
+) -> Dict[str, Any]:
+    requested = normalize_profile_name(profile_name)
+    effective = requested
+    fallback_reason: Optional[str] = None
+
+    # The aggressive profile contract exists now, but its default generator path
+    # still shares the sim-safe instruction picker until the aggressive policy
+    # is implemented. Explicit instruction names are treated as an advanced
+    # caller contract and are allowed through unchanged.
+    if requested == PROFILE_HW_AGGRESSIVE and not instruction_names:
+        effective = PROFILE_SIM_SAFE
+        fallback_reason = "aggressive_default_generator_not_yet_implemented"
+
+    return {
+        "requested_profile_name": requested,
+        "effective_profile_name": effective,
+        "fallback_reason": fallback_reason,
+        "contract_version": 1,
+    }
 
 
 def _merge_nested_dicts(
@@ -177,6 +217,10 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
     output_dir_raw = task.get("output_dir")
     instruction_names = task.get("instruction_names")
     metadata_extra = task.get("metadata_extra")
+    profile_contract = resolve_profile_contract(
+        profile_name=task.get("profile_name"),
+        instruction_names=instruction_names,
+    )
 
     target = import_definition(target_name)
     wrapper_cls, resolved_wrapper_name = resolve_wrapper(wrapper_name)
@@ -204,6 +248,15 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
     testcase_key = hashlib.sha1(rendered.encode("utf-8")).hexdigest()
 
     metadata = dict(getattr(benchmark, "metadata", {}))
+    metadata["profile_name"] = profile_contract["effective_profile_name"]
+    metadata["requested_profile_name"] = profile_contract["requested_profile_name"]
+    metadata["effective_profile_name"] = profile_contract["effective_profile_name"]
+    metadata["profile_contract"] = {
+        "contract_version": profile_contract["contract_version"],
+        "requested_profile_name": profile_contract["requested_profile_name"],
+        "effective_profile_name": profile_contract["effective_profile_name"],
+        "fallback_reason": profile_contract["fallback_reason"],
+    }
     metadata["wrapper_name"] = resolved_wrapper_name
     metadata["instruction_names"] = [instruction.name for instruction in instructions]
     metadata["seed"] = seed
@@ -269,11 +322,13 @@ def build_generation_tasks(
     strict_validation: bool,
     seed: int,
     output_dir: Optional[Path],
+    profile_name: str,
 ) -> Iterable[Dict[str, Any]]:
     for index in range(count):
         yield {
             "target": target,
             "policy": policy,
+            "profile_name": profile_name,
             "wrapper": wrapper,
             "sequence_length": sequence_length,
             "benchmark_size": benchmark_size,
@@ -300,6 +355,7 @@ def generate_batch(
     strict_validation: bool = False,
     seed: int = 13,
     output_dir: Optional[Path] = None,
+    profile_name: str = PROFILE_SIM_SAFE,
 ) -> Dict[str, Any]:
     successes = 0
     failures: List[Dict[str, Any]] = []
@@ -310,6 +366,7 @@ def generate_batch(
             build_generation_tasks(
                 target=target,
                 policy=policy,
+                profile_name=profile_name,
                 wrapper=wrapper,
                 count=count,
                 sequence_length=sequence_length,

@@ -22,7 +22,7 @@
 | --- | --- | --- | --- | --- |
 | Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
-| Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 80% |
+| Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 92% |
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
 | Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 部分完成 | 35% |
 | Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 10% |
@@ -162,9 +162,9 @@
 
 ### 当前阻塞
 
-1. source / ELF / golden digest cache 已接入，但更细粒度 artifact/index 仍可继续增强。
+1. source / ELF / golden digest cache 与 artifact index 已接入，但更细粒度 artifact/index 仍可继续增强。
 2. 功耗链路已进入标准步骤，但仍缺更大规模批处理复用。
-3. 当前 profile 仍然以 `SIM_SAFE` 为主，`HW_AGGRESSIVE` 尚未正式落地。
+3. profile contract 已显式化，但 `HW_AGGRESSIVE` 默认生成器尚未正式实现。
 
 ### 交付物
 
@@ -179,8 +179,9 @@
 2. `tools/sdc_inner_loop.py` 已提供 CLI 入口。
 3. `STATIC_DONE / GOLDEN_READY / POWER_READY / INNER_READY` 状态流已接入。
 4. source / ELF / golden digest cache 已接入 inner loop 主路径。
-5. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
-6. 已新增 inner-loop 定向测试与 cache 复用测试。
+5. `SIM_SAFE / HW_AGGRESSIVE` profile contract 已进入 generation / inner loop / CLI。
+6. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
+7. 已新增 inner-loop 定向测试、cache 复用测试与 profile 合同测试。
 
 ### 验收标准
 

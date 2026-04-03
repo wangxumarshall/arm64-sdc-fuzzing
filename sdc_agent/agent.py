@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from .generation import (
     DEFAULT_POLICY,
+    PROFILE_SIM_SAFE,
     DEFAULT_TARGET,
     DEFAULT_WRAPPER,
     bootstrap_microprobe_paths,
@@ -116,6 +117,7 @@ def run_cycle(
     max_offspring: int,
     target: str,
     policy: str,
+    generate_profile: str,
     generate_wrapper: str,
     evolve_wrapper: str,
     sequence_length: int,
@@ -142,6 +144,7 @@ def run_cycle(
         db_path=db_path,
         target=target,
         policy=policy,
+        profile_name=generate_profile,
         wrapper=generate_wrapper,
         count=generate_count,
         jobs=generate_jobs,
@@ -204,6 +207,7 @@ def run_cycle(
 def _add_common_generation_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--target", default=DEFAULT_TARGET)
     parser.add_argument("--policy", default=DEFAULT_POLICY)
+    parser.add_argument("--profile", default=PROFILE_SIM_SAFE)
     parser.add_argument("--wrapper", default=DEFAULT_WRAPPER)
     parser.add_argument("--sequence-length", type=int, default=8)
     parser.add_argument("--benchmark-size", type=int, default=64)
@@ -279,6 +283,7 @@ def main() -> int:
             db_path=args.db,
             target=args.target,
             policy=args.policy,
+            profile_name=args.profile,
             wrapper=args.wrapper,
             count=args.count,
             jobs=args.jobs,
@@ -315,6 +320,7 @@ def main() -> int:
             max_offspring=args.max_offspring,
             target=args.target,
             policy=args.policy,
+            generate_profile=args.profile,
             generate_wrapper=args.wrapper,
             evolve_wrapper=args.evolve_wrapper,
             sequence_length=args.sequence_length,
