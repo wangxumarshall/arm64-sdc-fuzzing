@@ -11,8 +11,8 @@
    - `Sub-P1 microprobe-arm`
    - `Sub-P2-1 qemu`
    - `Sub-P2-2 gem5`
-   - `mcpat-arm`
-   - `SDC-Agent control plane`
+   - `Sub-P3 mcpat-arm`
+   - `Sub-P4 SDC-Agent control plane`
 
 ---
 
@@ -22,9 +22,9 @@
 | --- | --- | --- | --- | --- |
 | Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 待执行 | 20% |
-| Phase 2 | 高频内循环产品化 | Sub-P1、Sub-P2-1、mcpat-arm、Control plane | 部分完成 | 45% |
-| Phase 3 | 功耗驱动的进化闭环 | Sub-P1、mcpat-arm、Control plane | 部分完成 | 30% |
-| Phase 4 | 低频外循环产品化 | Sub-P2-1、Sub-P2-2、Control plane | 部分完成 | 35% |
+| Phase 2 | 高频内循环产品化 | Sub-P1、Sub-P2-1、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 45% |
+| Phase 3 | 功耗驱动的进化闭环 | Sub-P1、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
+| Phase 4 | 低频外循环产品化 | Sub-P2-1、Sub-P2-2、Sub-P4 Control plane | 部分完成 | 35% |
 | Phase 5 | gem5 真实 fault injector | Sub-P2-2 | 早期 | 10% |
 | Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0、Control plane | 早期 | 10% |
 | Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1、Control plane | 规划中 | 10% |
@@ -155,9 +155,9 @@
    - 生成 testcase、计算静态指标
 2. `Sub-P2-1 qemu`
    - 快速合法性验证与 golden digest
-3. `mcpat-arm`
+3. `Sub-P3 mcpat-arm`
    - 对 shortlist 样本打功耗标签
-4. `Control plane`
+4. `Sub-P4 Control plane`
    - orchestrator、缓存、状态迁移、批处理
 
 ### 当前阻塞
@@ -197,9 +197,9 @@
 
 1. `Sub-P1 microprobe-arm`
    - profile-aware instruction family weighting
-2. `mcpat-arm`
+2. `Sub-P3 mcpat-arm`
    - 稳定的功耗字段与模板版本
-3. `Control plane`
+3. `Sub-P4 Control plane`
    - scheduler scoring、offspring ranking、feedback log
 
 ### 交付物
@@ -385,9 +385,9 @@
 | `Sub-P1 microprobe-arm` | 双 profile、metadata contract | template/PCFG/LLM 接入 | 持续生成高价值 ARM64 样本 |
 | `Sub-P2-1 qemu` | golden digest 缓存、非法指令分类 | batch executor | 高频 legality/golden 验证 |
 | `Sub-P2-2 gem5` | fault matrix runner 对接 | 真实 injector | 外循环主执行面 |
-| `mcpat-arm` | 稳定模板与字段 | batch backfill | 功耗主标签器 |
+| `Sub-P3 mcpat-arm` | 稳定模板与字段 | batch backfill | 功耗主标签器 |
 | `Sub-P0 opendcdiag-arm` | promotion contract | 结果回灌 | 真机验证终端 |
-| `Control plane` | Vault v2、inner/outer orchestrator | hardware lane、reporting | 全局编排总线 |
+| `Sub-P4 Control plane` | Vault v2、inner/outer orchestrator | hardware lane、reporting | 全局编排总线 |
 
 ---
 
