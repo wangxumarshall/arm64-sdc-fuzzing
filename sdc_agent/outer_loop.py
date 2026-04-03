@@ -45,6 +45,21 @@ class FaultRunResult:
     artifact_dir: str
 
 
+@dataclass(frozen=True)
+class OuterLoopAggregate:
+    testcase_key: str
+    source_path: str
+    total_runs: int
+    sdc_hits: int
+    matched_runs: int
+    successful_runs: int
+    fault_detection_rate: float
+    repeatability_score: float
+    outer_value_score: float
+    summary_status: str
+    campaign_key: str
+
+
 def _decode_metadata(row: Mapping[str, Any]) -> Dict[str, Any]:
     payload = dict(row)
     raw_value = payload.get("metadata_json", "{}")
@@ -209,6 +224,9 @@ def run_outer_loop(
     }
     planned_runs: List[Dict[str, Any]] = []
     executed_runs: List[FaultRunResult] = []
+    aggregates: List[OuterLoopAggregate] = []
+
+    campaign_summary: Dict[str, Any] = {}
 
     with SDCVault(db_path) as vault:
         campaign_id = vault.upsert_fault_campaign(
@@ -329,6 +347,21 @@ def run_outer_loop(
                 )
                 vault.mark_status(candidate.testcase_key, aggregate["summary_status"])
                 counts["aggregated"] += 1
+                aggregates.append(
+                    OuterLoopAggregate(
+                        testcase_key=candidate.testcase_key,
+                        source_path=str(source_path.resolve()),
+                        total_runs=int(aggregate["total_runs"]),
+                        sdc_hits=int(aggregate["sdc_hits"]),
+                        matched_runs=int(aggregate["matched_runs"]),
+                        successful_runs=int(aggregate["successful_runs"]),
+                        fault_detection_rate=float(aggregate["fault_detection_rate"]),
+                        repeatability_score=float(aggregate["repeatability_score"]),
+                        outer_value_score=float(aggregate["outer_value_score"]),
+                        summary_status=str(aggregate["summary_status"]),
+                        campaign_key=campaign_key,
+                    )
+                )
 
         if not dry_run:
             vault.upsert_fault_campaign(
@@ -344,14 +377,33 @@ def run_outer_loop(
                     "counts": counts,
                 },
             )
+            campaign_row = vault.get_fault_campaign(campaign_key)
+            if campaign_row is not None:
+                campaign_summary = {
+                    "campaign_id": int(campaign_row["campaign_id"]),
+                    "campaign_key": str(campaign_row["campaign_key"]),
+                    "status": str(campaign_row["status"]),
+                    "fault_run_count": len(vault.list_fault_runs_for_campaign(int(campaign_row["campaign_id"]))),
+                }
+        elif dry_run:
+            campaign_row = vault.get_fault_campaign(campaign_key)
+            if campaign_row is not None:
+                campaign_summary = {
+                    "campaign_id": int(campaign_row["campaign_id"]),
+                    "campaign_key": str(campaign_row["campaign_key"]),
+                    "status": str(campaign_row["status"]),
+                    "fault_run_count": 0,
+                }
 
     return {
         "ok": True,
         "dry_run": dry_run,
         "preflight": preflight,
         "campaign_key": campaign_key,
+        "campaign": campaign_summary,
         "fault_specs": [asdict(spec) for spec in fault_specs],
         "counts": counts,
+        "aggregates": [asdict(aggregate) for aggregate in aggregates],
         "planned_runs": planned_runs,
         "executed_runs": [asdict(run) for run in executed_runs],
     }

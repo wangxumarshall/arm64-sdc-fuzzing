@@ -74,10 +74,14 @@ def test_outer_loop_dry_run_plans_multiple_faults(monkeypatch, tmp_path):
     assert payload["counts"]["selected"] == 1
     assert payload["counts"]["planned_runs"] == 4
     assert len(payload["planned_runs"]) == 4
+    assert payload["campaign"]["status"] == "PLANNED"
     with SDCVault(db_path) as vault:
         campaigns = vault.list_fault_campaigns(limit=5)
         assert len(campaigns) == 1
         assert campaigns[0]["status"] == "PLANNED"
+        fetched = vault.get_fault_campaign(payload["campaign_key"])
+        assert fetched is not None
+        assert fetched["campaign_key"] == payload["campaign_key"]
 
 
 def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
@@ -137,6 +141,11 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
 
     assert payload["counts"]["executed_runs"] == 2
     assert payload["counts"]["aggregated"] == 1
+    assert len(payload["aggregates"]) == 1
+    assert payload["aggregates"][0]["testcase_key"] == "seed-b"
+    assert payload["aggregates"][0]["summary_status"] == "SDC_FOUND"
+    assert payload["campaign"]["status"] == "COMPLETED"
+    assert payload["campaign"]["fault_run_count"] >= 2
 
     with SDCVault(db_path) as vault:
         row = vault.get_testcase("seed-b")
@@ -151,3 +160,7 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
         assert len(fault_runs) >= 2
         campaigns = vault.list_fault_campaigns(limit=5)
         assert campaigns[0]["status"] == "COMPLETED"
+        fetched = vault.get_fault_campaign(payload["campaign_key"])
+        assert fetched is not None
+        by_campaign = vault.list_fault_runs_for_campaign(int(fetched["campaign_id"]), limit=10)
+        assert len(by_campaign) >= 2

@@ -1116,6 +1116,36 @@ class SDCVault:
             (status, limit),
         ).fetchall()
 
+    def get_fault_campaign(
+        self,
+        campaign_key: str,
+    ) -> Optional[sqlite3.Row]:
+        return self._conn.execute(
+            """
+            SELECT *
+            FROM fault_campaigns
+            WHERE campaign_key = ?
+            """,
+            (campaign_key,),
+        ).fetchone()
+
+    def list_fault_runs_for_campaign(
+        self,
+        campaign_id: int,
+        *,
+        limit: int = 200,
+    ) -> List[sqlite3.Row]:
+        return self._conn.execute(
+            """
+            SELECT *
+            FROM fault_runs
+            WHERE campaign_id = ?
+            ORDER BY created_at DESC, fault_run_id DESC
+            LIMIT ?
+            """,
+            (campaign_id, limit),
+        ).fetchall()
+
     def record_fault_run(
         self,
         *,

@@ -108,7 +108,9 @@
    - `fault_detection_rate`
    - `repeatability_score`
    - `outer_value_score`
-9. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
+6. 已支持 campaign 查询与按 campaign 检索 `fault_runs`。
+7. outer loop 现在会直接返回 testcase 级 `aggregates` 和 campaign 摘要。
+8. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
 
 ---
 
@@ -143,6 +145,7 @@
 7. Phase 4 定向测试已通过：
    - `11 passed`
 8. `sdc_outer_loop.py --help` 已 smoke 通过
+9. outer loop campaign 查询与 aggregate 返回值测试已通过
 
 ---
 
