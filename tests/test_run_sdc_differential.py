@@ -61,6 +61,28 @@ def test_classify_reports_golden_only_without_gem5():
     )
 
 
+def test_classify_rejects_fault_runs_without_observed_injection():
+    compile_result = CommandResult(["cc"], 0, "", "")
+    qemu_result = CommandResult(["qemu"], 0, "", "")
+    gem5_result = CommandResult(["gem5"], 0, "", "")
+
+    assert (
+        classify(
+            compile_result=compile_result,
+            qemu_result=qemu_result,
+            gem5_result=gem5_result,
+            golden_digest="1111",
+            faulted_digest="1111",
+            fault_request={
+                "fault_model": "register_bit_flip",
+                "execution_plane": "manifest_only",
+                "injection_observed": False,
+            },
+        )
+        == "no_injection"
+    )
+
+
 def test_build_fault_args_renders_optional_fields():
     assert build_fault_args(fault_model="none", fault_target="") == [
         "--fault-model",
@@ -172,3 +194,64 @@ def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
         "--fault-tick",
         "1234",
     ]
+
+
+def test_run_differential_marks_manifest_only_faults_as_no_injection(monkeypatch, tmp_path):
+    source = tmp_path / "case-no-inject.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    def fake_compile_static_elf(**kwargs):
+        return CommandResult(["cc"], 0, "", "")
+
+    def fake_run_qemu(**kwargs):
+        return CommandResult(["qemu"], 0, "SDC_DIGEST=1111", "")
+
+    def fake_run_gem5(**kwargs):
+        manifest_path = kwargs["gem5_outdir"] / "sdc_fault_request.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "fault_model": "register_bit_flip",
+                    "fault_target": "x0",
+                    "fault_bit": 3,
+                    "fault_tick": 100,
+                    "implemented_in_script": False,
+                    "binary": str((tmp_path / "case-no-inject.elf").resolve()),
+                    "binary_args": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return CommandResult(["gem5"], 0, "SDC_HASH=1111", "")
+
+    class FakeBackend:
+        def __init__(self, template_profile: str, mcpat_binary: Path | None = None):
+            self.template_profile = template_profile
+            self.mcpat_binary = mcpat_binary
+
+        def run(self, target_dir: Path):
+            return {"power_total": 1.0, "target_dir": str(target_dir)}
+
+    monkeypatch.setattr(
+        "sdc_agent.differential.compile_static_elf", fake_compile_static_elf
+    )
+    monkeypatch.setattr("sdc_agent.differential.run_qemu", fake_run_qemu)
+    monkeypatch.setattr("sdc_agent.differential.run_gem5", fake_run_gem5)
+    monkeypatch.setattr("sdc_agent.differential.McPATBackend", FakeBackend)
+
+    result = run_differential(
+        source=source,
+        elf=tmp_path / "case-no-inject.elf",
+        gem5_outdir=tmp_path / "m5out-no-inject",
+        fault_model="register_bit_flip",
+        fault_target="x0",
+        fault_bit=3,
+        fault_tick=100,
+    )
+
+    assert result.status == "no_injection"
+    assert result.fault_request is not None
+    assert result.fault_request["execution_plane"] == "manifest_only"
+    assert result.fault_request["injection_observed"] is False

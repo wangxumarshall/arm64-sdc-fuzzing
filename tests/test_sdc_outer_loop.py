@@ -192,3 +192,80 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
         assert fetched is not None
         by_campaign = vault.list_fault_runs_for_campaign(int(fetched["campaign_id"]), limit=10)
         assert len(by_campaign) >= 2
+
+
+def test_outer_loop_retries_create_distinct_campaign_records(monkeypatch, tmp_path):
+    db_path = tmp_path / "vault.sqlite3"
+    source_path = tmp_path / "seed-c.c"
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    _seed_inner_ready(db_path, testcase_key="seed-c", source_path=source_path)
+
+    monkeypatch.setattr(
+        "sdc_agent.outer_loop.run_preflight",
+        lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
+    )
+
+    def fake_run_differential(**kwargs):
+        return DifferentialResult(
+            status="matched",
+            golden_digest="1111",
+            faulted_digest="1111",
+            compile=CommandResult(["cc"], 0, "", ""),
+            qemu=CommandResult(["qemu"], 0, "SDC_DIGEST=1111", ""),
+            gem5=CommandResult(["gem5"], 0, "SDC_DIGEST=1111", ""),
+            mcpat={"power_total": 2.0},
+            fault_request={
+                "fault_model": kwargs["fault_model"],
+                "fault_target": kwargs["fault_target"],
+                "fault_bit": kwargs["fault_bit"],
+                "fault_tick": kwargs["fault_tick"],
+                "execution_plane": "gem5_scripted",
+                "implemented_in_script": True,
+                "injection_observed": True,
+            },
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_agent.outer_loop.run_differential", fake_run_differential)
+
+    first = run_outer_loop(
+        db_path=db_path,
+        limit=1,
+        source_root=None,
+        output_root=tmp_path / "outer",
+        fault_models=("register_bit_flip",),
+        fault_targets=("x0",),
+        fault_bits=(0,),
+        fault_ticks=(100,),
+        dry_run=False,
+        skip_preflight=False,
+        compiler="cc",
+        qemu_binary="qemu-aarch64",
+        gem5_binary="gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        timeout=30,
+    )
+    second = run_outer_loop(
+        db_path=db_path,
+        limit=1,
+        source_root=None,
+        output_root=tmp_path / "outer",
+        fault_models=("register_bit_flip",),
+        fault_targets=("x0",),
+        fault_bits=(0,),
+        fault_ticks=(100,),
+        dry_run=False,
+        skip_preflight=False,
+        compiler="cc",
+        qemu_binary="qemu-aarch64",
+        gem5_binary="gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        timeout=30,
+    )
+
+    assert first["matrix_hash"] == second["matrix_hash"]
+    assert first["campaign_key"] != second["campaign_key"]
+
+    with SDCVault(db_path) as vault:
+        campaigns = vault.list_fault_campaigns(limit=10)
+        assert len(campaigns) == 2

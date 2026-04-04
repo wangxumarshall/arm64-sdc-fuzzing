@@ -63,6 +63,10 @@
 14. 重新核对已完成 phases 后，最明显的遗漏并不在 `Phase 0/1/2` 主链，而在 `Phase 6` 控制面完全未起步。
 15. `promotion_plan` 只有在真正落地成 `hardware_promotions + artifact bundle` 后，才算进入硬件验证环，而不是仅停留在 scheduler 输出。
 16. `hardware_promotions / hardware_runs` 表此前已经存在，但没有对应的 source artifact 与控制面入口；这条缺口现已补上第一段。
+17. 对已实现 phase 做对抗性复盘后，确认 `manifest_only / request_only` 这类无实际注入运行如果被当作 `MATCHED/SDC_FOUND`，会直接污染 outer-loop 结论；现在这类运行会 fail closed 为 `no_injection / INVALID`。
+18. 先前 `Phase 4` 的 semihost validation 在请求 fault 但没有实际 injector 证据时，存在“同一 workload 跑多次也能绿”的风险；现在这条路径已改为诚实地返回 `INVALID`。
+19. `materialize.py` 与 `phase2_validation.py` 之前共享的 digest harness 只初始化了部分寄存器并在 capture 阶段自我污染；现在两条路径都已改成 defined-state harness。
+20. `hardware_lane.py` 生成的 promotion source 之前是无条件 `EXIT_SUCCESS` 的占位物；现在会真实执行 promoted asm 并对比 golden digest。
 
 ---
 
@@ -137,6 +141,14 @@
    - opendcdiag-shaped `cpp`
    - `meson.build.fragment`
 16. Vault artifacts 投影现在已纳入 hardware lane 产物，便于统一查询。
+17. `outer_loop` 现在会拒绝把无实际注入证据的运行当作有效 fault campaign 成功。
+18. `outer_loop` campaign 现在按执行实例生成唯一 `campaign_key`，重试不会覆盖历史 campaign。
+19. `phase4_validation` 现在只有在 fault request 真正带来注入证据时才会报 faulted success；请求 fault 但无 injector 的 semihost 路径会返回 `INVALID`。
+20. `materialize.py` 与 `phase2_validation.py` 现在都使用 defined-state digest harness：
+   - 初始化 `x0-x30`
+   - 绑定到 `sdc_memory`
+   - capture 时不再覆盖原始寄存器值
+21. `hardware_lane.py` 生成的 promotion source 现在会执行 promoted asm 并对比 `qemu_golden_hash`。
 
 ---
 
@@ -164,10 +176,12 @@
 18. `python3 tools/sdc_promote_hw.py --help`
 19. `python3 tools/sdc_agent.py promote-hw --help`
 20. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_hardware_lane.py -q`
+21. `python3 -m pytest tests/test_sdc_phase2_validation.py tests/test_sdc_phase4_validation.py tests/test_sdc_materialize.py -q`
+22. `python3 -m pytest tests -q`
 
 当前结果：
 
-1. 主仓测试：`40 passed`
+1. 主仓测试：`49 passed`
 2. `microprobe` 定向测试：`8 passed`
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
@@ -180,12 +194,7 @@
    - `11 passed`
 8. `sdc_outer_loop.py --help` 已 smoke 通过
 9. outer loop campaign 查询与 aggregate 返回值测试已通过
-10. Phase 4 真实端到端验证已通过：
-   - campaign_key = `e743bd816067edd4`
-   - total_runs = `4`
-   - matched_runs = `4`
-   - summary_status = `MATCHED`
-   - qemu golden digest = `2b85c03077dc5edd`
+10. `Phase 4` semihost validation 现在会对“请求 fault 但无 injector 证据”的情况诚实返回 `INVALID`，不再把这类运行记为 `MATCHED`。
 11. 新增 fault execution plane 定向回归已通过：
    - `tests/test_run_sdc_differential.py`
    - `tests/test_sdc_outer_loop.py`
@@ -198,7 +207,9 @@
    - `tests/test_sdc_agent.py`
 14. 硬件 promotion lane bootstrap 已通过：
    - `tests/test_sdc_hardware_lane.py`
-15. 当前相关回归总计：`28 passed`
+15. `Phase 2` semihost harness defined-state 回归已通过：
+   - `tests/test_sdc_phase2_validation.py`
+16. 当前相关回归总计：`49 passed`
 
 ---
 
@@ -211,7 +222,7 @@
 3. outer loop 已能识别脚本化 fault execution plane，但更大范围的 injector 联动仍未完成。
 4. gem5 real fault injector 目前只对受支持的 register bit flip 有脚本化路径；更多 fault model 仍未实现。
 5. `opendcdiag-arm` promotion 已接入控制面的 bootstrap 版，但真实 build/run 与 result ingest 仍未完成。
-6. 当前生成的 opendcdiag source artifact 仍是 phase-bootstrap 版本，尚未执行真实 testcase 序列。
+6. 当前生成的 opendcdiag source artifact 已能执行 promoted asm + golden digest 对比，但还未接入真实 opendcdiag build/run/result-ingest 主链。
 
 ---
 

@@ -10,7 +10,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from .outer_loop import FaultSpec, plan_fault_matrix
+from .differential import (
+    fault_request_has_observed_injection,
+    fault_request_requires_injection,
+)
+from .outer_loop import FaultSpec, build_campaign_identity, plan_fault_matrix
 from .phase2_validation import (
     DEFAULT_CONDA_COMPILER,
     DEFAULT_DB,
@@ -46,6 +50,8 @@ class Phase4FaultRun:
     golden_digest: Optional[str]
     faulted_digest: Optional[str]
     artifact_dir: str
+    execution_plane: str
+    injection_observed: bool
 
 
 @dataclass(frozen=True)
@@ -120,6 +126,52 @@ def _aggregate_fault_runs(
     }
 
 
+def _build_phase4_fault_request(
+    spec: FaultSpec,
+    gem5_result: Mapping[str, Any],
+) -> Dict[str, Any]:
+    payload = dict(asdict(spec))
+    raw_fault_request = gem5_result.get("fault_request")
+    if isinstance(raw_fault_request, Mapping):
+        payload.update(dict(raw_fault_request))
+    payload["implemented_in_script"] = bool(
+        payload.get("implemented_in_script", gem5_result.get("implemented_in_script", False))
+    )
+    payload["injection_observed"] = bool(
+        payload.get("injection_observed", gem5_result.get("injection_observed", False))
+    )
+    payload["execution_plane"] = str(
+        payload.get("execution_plane")
+        or gem5_result.get("fault_execution_plane")
+        or ("none" if spec.fault_model == "none" else "phase4_no_injector")
+    )
+    return payload
+
+
+def _classify_phase4_fault_run(
+    *,
+    qemu_result: Mapping[str, Any],
+    gem5_result: Mapping[str, Any],
+    fault_request: Mapping[str, Any],
+) -> str:
+    if int(qemu_result.get("returncode", -1)) != 0:
+        return "golden_failed"
+    if int(gem5_result.get("returncode", -1)) != 0:
+        return "gem5_failed"
+    if fault_request_requires_injection(fault_request) and not fault_request_has_observed_injection(
+        fault_request
+    ):
+        return "no_injection"
+
+    golden_digest = qemu_result.get("golden_digest")
+    faulted_digest = gem5_result.get("gem5_digest")
+    if golden_digest is None or faulted_digest is None:
+        return "digest_missing"
+    if str(golden_digest) != str(faulted_digest):
+        return "sdc_found"
+    return "matched"
+
+
 def run_phase4_validation(
     *,
     db_path: Path = DEFAULT_DB,
@@ -168,9 +220,7 @@ def run_phase4_validation(
         fault_bits=fault_bits,
         fault_ticks=fault_ticks,
     )
-    campaign_key = hashlib.sha1(
-        json.dumps([asdict(spec) for spec in fault_specs], sort_keys=True).encode("utf-8")
-    ).hexdigest()[:16]
+    matrix_hash, campaign_key = build_campaign_identity(fault_specs)
 
     with SDCVault(db_path) as vault:
         campaign_id = vault.upsert_fault_campaign(
@@ -179,7 +229,7 @@ def run_phase4_validation(
                 "validation": "phase4_real_e2e",
                 "testcase_key": testcase_key,
             },
-            matrix_hash=campaign_key,
+            matrix_hash=matrix_hash,
             status="RUNNING",
             metadata={"fault_specs": [asdict(spec) for spec in fault_specs]},
         )
@@ -197,19 +247,23 @@ def run_phase4_validation(
                 output_root=gem5_outdir,
                 timeout=timeout,
             )
-            mcpat_result = McPATBackend(
-                template_profile="arm64-kunpeng920",
-                mcpat_binary=mcpat_binary.resolve(),
-            ).run(gem5_outdir)
-            latest_mcpat_power = float(mcpat_result["power_total"])
-            result_status = (
-                "matched"
-                if qemu_result["golden_digest"] == gem5_result["gem5_digest"]
-                else "sdc_found"
+            fault_request = _build_phase4_fault_request(spec, gem5_result)
+            result_status = _classify_phase4_fault_run(
+                qemu_result=qemu_result,
+                gem5_result=gem5_result,
+                fault_request=fault_request,
             )
+            mcpat_result: Dict[str, Any] = {}
+            if int(gem5_result.get("returncode", -1)) == 0:
+                mcpat_result = McPATBackend(
+                    template_profile="arm64-kunpeng920",
+                    mcpat_binary=mcpat_binary.resolve(),
+                ).run(gem5_outdir)
+                latest_mcpat_power = float(mcpat_result["power_total"])
             result_json = run_dir / "result.json"
             run_payload = {
                 "fault_spec": asdict(spec),
+                "fault_request": fault_request,
                 "qemu": qemu_result,
                 "gem5": gem5_result,
                 "mcpat": {
@@ -217,7 +271,7 @@ def run_phase4_validation(
                     for key, value in mcpat_result.items()
                 },
                 "result_status": result_status,
-                "fault_execution_plane": "phase4_real_e2e_placeholder_no_injector",
+                "fault_execution_plane": fault_request["execution_plane"],
             }
             result_json.parent.mkdir(parents=True, exist_ok=True)
             result_json.write_text(
@@ -237,8 +291,9 @@ def run_phase4_validation(
                 metadata={
                     "artifact_dir": str(run_dir.resolve()),
                     "result_json": str(result_json.resolve()),
-                    "fault_request": asdict(spec),
-                    "fault_execution_plane": "phase4_real_e2e_placeholder_no_injector",
+                    "fault_request": fault_request,
+                    "fault_execution_plane": fault_request["execution_plane"],
+                    "injection_observed": bool(fault_request["injection_observed"]),
                 },
             )
             run_records.append(
@@ -252,6 +307,8 @@ def run_phase4_validation(
                     golden_digest=qemu_result["golden_digest"],
                     faulted_digest=gem5_result["gem5_digest"],
                     artifact_dir=str(run_dir.resolve()),
+                    execution_plane=str(fault_request["execution_plane"]),
+                    injection_observed=bool(fault_request["injection_observed"]),
                 )
             )
 
@@ -277,12 +334,16 @@ def run_phase4_validation(
                 "validation": "phase4_real_e2e",
                 "testcase_key": testcase_key,
             },
-            matrix_hash=campaign_key,
+            matrix_hash=matrix_hash,
             status="COMPLETED",
             metadata={
                 "fault_specs": [asdict(spec) for spec in fault_specs],
                 "aggregate": aggregate,
-                "fault_execution_plane": "phase4_real_e2e_placeholder_no_injector",
+                "fault_execution_plane": (
+                    "phase4_real_e2e"
+                    if any(run.injection_observed for run in run_records)
+                    else "phase4_no_injector"
+                ),
             },
         )
         campaign = vault.get_fault_campaign(campaign_key)
@@ -310,7 +371,11 @@ def run_phase4_validation(
         "fault_specs": [asdict(spec) for spec in fault_specs],
         "fault_runs": [asdict(run) for run in run_records],
         "qemu": qemu_result,
-        "fault_execution_plane": "phase4_real_e2e_placeholder_no_injector",
+        "fault_execution_plane": (
+            "phase4_real_e2e"
+            if any(run.injection_observed for run in run_records)
+            else "phase4_no_injector"
+        ),
     }
     report_path = Path(report.report_path)
     report_path.write_text(

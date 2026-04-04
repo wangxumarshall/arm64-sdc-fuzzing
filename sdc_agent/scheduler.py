@@ -110,6 +110,7 @@ def normalize_runner_status(status: str) -> str:
         "golden_only": "GOLDEN_READY",
         "matched": "MATCHED",
         "sdc_found": "SDC_FOUND",
+        "no_injection": "INVALID",
         "gem5_timeout": "TIMEOUT",
         "compile_failed": "INVALID",
         "golden_failed": "INVALID",

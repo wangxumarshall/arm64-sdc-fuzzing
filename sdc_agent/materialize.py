@@ -13,6 +13,9 @@ from .vault import SDCVault
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "materialized"
+SDC_MEMORY_SIZE = 8192
+SDC_MEMORY_BASE_OFFSET = 1024
+SDC_REGISTER_STRIDE = 96
 
 
 def _escape_c_string(value: str) -> str:
@@ -23,99 +26,103 @@ def _asm_block(lines: Iterable[str]) -> str:
     return "\n".join(f'"{_escape_c_string(line)}\\n"' for line in lines if line.strip())
 
 
-def render_materialized_source(asm_content: str, testcase_key: str) -> str:
-    asm_lines = [line.rstrip() for line in asm_content.splitlines() if line.strip()]
-    if not asm_lines:
-        asm_lines = ["nop"]
+def _prepare_asm_lines(asm_content: str) -> List[str]:
+    lines = [line.rstrip() for line in asm_content.splitlines() if line.strip()]
+    return lines or ["nop"]
 
-    benchmark_body = [
+
+def _register_initialization_lines() -> List[str]:
+    lines = [
+        "adrp x18, sdc_memory",
+        "add x18, x18, :lo12:sdc_memory",
+    ]
+    for reg_index in range(31):
+        offset = SDC_MEMORY_BASE_OFFSET + (reg_index * SDC_REGISTER_STRIDE)
+        if reg_index == 18:
+            continue
+        lines.extend(
+            [
+                f"mov x{reg_index}, x18",
+                f"add x{reg_index}, x{reg_index}, #{offset}",
+            ]
+        )
+    lines.append(
+        f"add x18, x18, #{SDC_MEMORY_BASE_OFFSET + (18 * SDC_REGISTER_STRIDE)}"
+    )
+    for reg_index in range(8):
+        lines.append(f"movi v{reg_index}.16b, #0")
+    return lines
+
+
+def _register_capture_lines() -> List[str]:
+    lines = [
+        "sub sp, sp, #16",
+        "stp x16, x17, [sp]",
+        "adrp x16, sdc_gprs",
+        "add x16, x16, :lo12:sdc_gprs",
+    ]
+    for reg_index in range(16):
+        lines.append(f"str x{reg_index}, [x16, #{reg_index * 8}]")
+    lines.extend(
+        [
+            "ldr x17, [sp, #0]",
+            "str x17, [x16, #128]",
+            "ldr x17, [sp, #8]",
+            "str x17, [x16, #136]",
+        ]
+    )
+    for reg_index in range(18, 31):
+        lines.append(f"str x{reg_index}, [x16, #{reg_index * 8}]")
+    lines.extend(
+        [
+            "add sp, sp, #16",
+            "adrp x16, sdc_nzcv",
+            "add x16, x16, :lo12:sdc_nzcv",
+            "mrs x17, nzcv",
+            "str x17, [x16]",
+            "adrp x16, sdc_simd",
+            "add x16, x16, :lo12:sdc_simd",
+        ]
+    )
+    for reg_index in range(8):
+        lines.append(f"str q{reg_index}, [x16, #{reg_index * 16}]")
+    lines.extend(
+        [
+            "ret",
+            ".size sdc_benchmark_body, .-sdc_benchmark_body",
+        ]
+    )
+    return lines
+
+
+def _benchmark_body_lines(asm_content: str) -> List[str]:
+    lines = [
         ".text",
         ".align 4",
         ".global sdc_benchmark_body",
         ".type sdc_benchmark_body, %function",
         "sdc_benchmark_body:",
-        "adr x16, sdc_gprs",
-        "mov x0, #0",
-        "mov x1, #0",
-        "mov x2, #0",
-        "mov x3, #0",
-        "mov x4, #0",
-        "mov x5, #0",
-        "mov x6, #0",
-        "mov x7, #0",
-        "movi v0.16b, #0",
-        "movi v1.16b, #0",
-        "movi v2.16b, #0",
-        "movi v3.16b, #0",
-        "movi v4.16b, #0",
-        "movi v5.16b, #0",
-        "movi v6.16b, #0",
-        "movi v7.16b, #0",
     ]
-    benchmark_body.extend(asm_lines)
-    benchmark_body.extend(
-        [
-            "adr x16, sdc_gprs",
-            "str x0, [x16, #0]",
-            "str x1, [x16, #8]",
-            "str x2, [x16, #16]",
-            "str x3, [x16, #24]",
-            "str x4, [x16, #32]",
-            "str x5, [x16, #40]",
-            "str x6, [x16, #48]",
-            "str x7, [x16, #56]",
-            "str x8, [x16, #64]",
-            "str x9, [x16, #72]",
-            "str x10, [x16, #80]",
-            "str x11, [x16, #88]",
-            "str x12, [x16, #96]",
-            "str x13, [x16, #104]",
-            "str x14, [x16, #112]",
-            "str x15, [x16, #120]",
-            "str x16, [x16, #128]",
-            "str x17, [x16, #136]",
-            "str x18, [x16, #144]",
-            "str x19, [x16, #152]",
-            "str x20, [x16, #160]",
-            "str x21, [x16, #168]",
-            "str x22, [x16, #176]",
-            "str x23, [x16, #184]",
-            "str x24, [x16, #192]",
-            "str x25, [x16, #200]",
-            "str x26, [x16, #208]",
-            "str x27, [x16, #216]",
-            "str x28, [x16, #224]",
-            "str x29, [x16, #232]",
-            "str x30, [x16, #240]",
-            "adr x16, sdc_nzcv",
-            "mrs x17, nzcv",
-            "str x17, [x16]",
-            "adr x16, sdc_simd",
-            "str q0, [x16, #0]",
-            "str q1, [x16, #16]",
-            "str q2, [x16, #32]",
-            "str q3, [x16, #48]",
-            "str q4, [x16, #64]",
-            "str q5, [x16, #80]",
-            "str q6, [x16, #96]",
-            "str q7, [x16, #112]",
-            "ret",
-            ".size sdc_benchmark_body, .-sdc_benchmark_body",
-        ]
-    )
+    lines.extend(_register_initialization_lines())
+    lines.extend(_prepare_asm_lines(asm_content))
+    lines.extend(_register_capture_lines())
+    return lines
 
+
+def render_materialized_source(asm_content: str, testcase_key: str) -> str:
     return "\n".join(
         [
             "#include <inttypes.h>",
             "#include <stdint.h>",
             "#include <stdio.h>",
             "#include <stdlib.h>",
+            "#include <string.h>",
             "",
             f"/* Materialized from vault testcase: {testcase_key} */",
             "static uint64_t sdc_gprs[31] = {0};",
             "static uint64_t sdc_nzcv = 0;",
             "static uint8_t sdc_simd[8 * 16] = {0};",
-            "static uint8_t sdc_memory[256] = {0};",
+            f"static uint8_t sdc_memory[{SDC_MEMORY_SIZE}] = {{0}};",
             "",
             "static inline uint64_t sdc_rotl64(uint64_t value, unsigned shift)",
             "{",
@@ -140,14 +147,26 @@ def render_materialized_source(asm_content: str, testcase_key: str) -> str:
             "    return state;",
             "}",
             "",
+            "static void sdc_prepare_memory(void)",
+            "{",
+            "    memset(sdc_gprs, 0, sizeof(sdc_gprs));",
+            "    sdc_nzcv = 0;",
+            "    memset(sdc_simd, 0, sizeof(sdc_simd));",
+            "    for (size_t index = 0; index < sizeof(sdc_memory); ++index)",
+            "    {",
+            "        sdc_memory[index] = (uint8_t)(((index * 131U) + 17U) & 0xffU);",
+            "    }",
+            "}",
+            "",
             "extern void sdc_benchmark_body(void);",
             "__asm__(",
-            _asm_block(benchmark_body),
+            _asm_block(_benchmark_body_lines(asm_content)),
             ");",
             "",
             "int main(void)",
             "{",
             "    uint64_t sdc_digest = 0xcbf29ce484222325ULL;",
+            "    sdc_prepare_memory();",
             "    sdc_benchmark_body();",
             "    for (size_t sdc_index = 0; sdc_index < 31; ++sdc_index)",
             "    {",

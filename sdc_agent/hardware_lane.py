@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
+from .materialize import SDC_MEMORY_SIZE, _asm_block, _benchmark_body_lines
 from .scheduler import FeedbackScheduler, RankedCandidate
 from .vault import SDCVault
 
@@ -75,6 +76,19 @@ def default_external_test_name(testcase_key: str) -> str:
     return f"arm64_sdc_{_sanitize_identifier(testcase_key)}"
 
 
+def _expected_golden_digest(candidate: RankedCandidate) -> Optional[str]:
+    for value in (
+        candidate.row.get("qemu_golden_hash"),
+        candidate.metadata.get("golden_digest"),
+        candidate.metadata.get("outer_loop", {}).get("qemu_golden_digest")
+        if isinstance(candidate.metadata.get("outer_loop"), Mapping)
+        else None,
+    ):
+        if value:
+            return str(value).strip().lower()
+    return None
+
+
 def compute_promotion_score(
     candidate: RankedCandidate,
     *,
@@ -119,8 +133,8 @@ def render_opendcdiag_promotion_source(
     asm_content: str,
     metadata: Mapping[str, Any],
     promotion_components: Mapping[str, Any],
+    expected_golden_digest: Optional[str],
 ) -> str:
-    escaped_asm = json.dumps(asm_content)
     escaped_key = json.dumps(testcase_key)
     escaped_profile = json.dumps(_profile_name(metadata))
     escaped_name = _sanitize_identifier(external_test_name)
@@ -128,34 +142,101 @@ def render_opendcdiag_promotion_source(
         f"Promoted ARM64 SDC testcase {testcase_key} prepared by the SDC-Agent hardware lane"
     )
     promotion_score = _float_or_default(promotion_components.get("promotion_score"))
+    expected_digest_literal = (
+        f"0x{expected_golden_digest}ULL"
+        if expected_golden_digest is not None
+        else "0ULL"
+    )
+    has_expected_digest = "true" if expected_golden_digest is not None else "false"
 
     return "\n".join(
         [
             '#include "sandstone.h"',
             "",
             "#ifdef __aarch64__",
+            "#include <cinttypes>",
             "#include <cstdint>",
             "#include <cstdlib>",
+            "#include <cstring>",
             "#endif",
             "",
             f"static const char kPromotedTestcaseKey[] = {escaped_key};",
             f"static const char kPromotedProfileName[] = {escaped_profile};",
-            f"static const char kPromotedAsm[] = {escaped_asm};",
             f"static const double kPromotionScore = {promotion_score:.12f};",
+            f"static const bool kHasExpectedDigest = {has_expected_digest};",
+            f"static const uint64_t kExpectedDigest = {expected_digest_literal};",
+            "",
+            "static uint64_t sdc_gprs[31] = {0};",
+            "static uint64_t sdc_nzcv = 0;",
+            "static uint8_t sdc_simd[8 * 16] = {0};",
+            f"static uint8_t sdc_memory[{SDC_MEMORY_SIZE}] = {{0}};",
+            "",
+            "static inline uint64_t sdc_rotl64(uint64_t value, unsigned shift)",
+            "{",
+            "    return (value << shift) | (value >> (64 - shift));",
+            "}",
+            "",
+            "static inline uint64_t sdc_mix_u64(uint64_t state, uint64_t value)",
+            "{",
+            "    state ^= value + 0x9e3779b97f4a7c15ULL + (state << 6) + (state >> 2);",
+            "    return sdc_rotl64(state, 17);",
+            "}",
+            "",
+            "static inline uint64_t sdc_mix_bytes(uint64_t state, const uint8_t *buffer, size_t size)",
+            "{",
+            "    for (size_t index = 0; index < size; ++index) {",
+            "        state ^= (uint64_t)buffer[index] << ((index & 7U) * 8U);",
+            "        state *= 0x100000001b3ULL;",
+            "        state = sdc_rotl64(state, 9);",
+            "    }",
+            "    return state;",
+            "}",
+            "",
+            "static void sdc_prepare_memory(void)",
+            "{",
+            "    std::memset(sdc_gprs, 0, sizeof(sdc_gprs));",
+            "    sdc_nzcv = 0;",
+            "    std::memset(sdc_simd, 0, sizeof(sdc_simd));",
+            "    for (size_t index = 0; index < sizeof(sdc_memory); ++index) {",
+            "        sdc_memory[index] = (uint8_t)(((index * 131U) + 17U) & 0xffU);",
+            "    }",
+            "}",
+            "",
+            'extern "C" void sdc_benchmark_body(void);',
+            "__asm__(",
+            _asm_block(_benchmark_body_lines(asm_content)),
+            ");",
+            "",
+            "static uint64_t sdc_compute_digest(void)",
+            "{",
+            "    uint64_t digest = 0xcbf29ce484222325ULL;",
+            "    sdc_prepare_memory();",
+            "    sdc_benchmark_body();",
+            "    for (size_t index = 0; index < 31; ++index) {",
+            "        digest = sdc_mix_u64(digest, sdc_gprs[index]);",
+            "    }",
+            "    digest = sdc_mix_u64(digest, sdc_nzcv);",
+            "    digest = sdc_mix_bytes(digest, sdc_simd, sizeof(sdc_simd));",
+            "    digest = sdc_mix_bytes(digest, sdc_memory, sizeof(sdc_memory));",
+            "    return digest;",
+            "}",
             "",
             f"static int {escaped_name}_run(struct test *test, int cpu)",
             "{",
             "    (void)test;",
             "    (void)cpu;",
             "#ifdef __aarch64__",
-            "    // Phase-6 bootstrap artifact: keep the exact promoted asm sequence",
-            "    // attached to an opendcdiag-shaped test source so the hardware lane",
-            "    // has a stable source artifact before the final execution hook lands.",
-            "    if (kPromotedAsm[0] == '\\0') {",
+            "    if (!kHasExpectedDigest) {",
             "        return EXIT_FAILURE;",
             "    }",
-            "#endif",
+            "    const uint64_t observed_digest = sdc_compute_digest();",
+            "    if (observed_digest != kExpectedDigest) {",
+            "        return EXIT_FAILURE;",
+            "    }",
             "    return EXIT_SUCCESS;",
+            "#else",
+            "    return EXIT_FAILURE;",
+            "#endif",
             "}",
             "",
             f"DECLARE_TEST({escaped_name}, {description})",
@@ -196,6 +277,7 @@ def emit_promotion_bundle(
     meson_fragment_path = bundle_dir / "meson.build.fragment"
 
     asm_content = str(candidate.row.get("asm_content", "") or "")
+    expected_golden_digest = _expected_golden_digest(candidate)
     asm_path.write_text(asm_content.rstrip() + "\n", encoding="utf-8")
     test_source_path.write_text(
         render_opendcdiag_promotion_source(
@@ -204,6 +286,7 @@ def emit_promotion_bundle(
             asm_content=asm_content,
             metadata=candidate.metadata,
             promotion_components=promotion_components,
+            expected_golden_digest=expected_golden_digest,
         ),
         encoding="utf-8",
     )
@@ -224,6 +307,7 @@ def emit_promotion_bundle(
             "promotion_readiness_score": candidate.promotion_readiness_score,
             "promotion_ready": candidate.promotion_ready,
         },
+        "expected_golden_digest": expected_golden_digest,
         "profile_name": _profile_name(candidate.metadata),
         "paths": {
             "bundle_dir": str(bundle_dir),
@@ -293,6 +377,7 @@ def run_hardware_promotion(
                 }
                 counts["planned"] += 1
             else:
+                expected_golden_digest = _expected_golden_digest(candidate)
                 bundle_paths = emit_promotion_bundle(
                     output_root=output_root,
                     candidate=candidate,
@@ -303,6 +388,7 @@ def run_hardware_promotion(
                 promotion_metadata = {
                     **bundle_paths,
                     **promotion_components,
+                    "expected_golden_digest": expected_golden_digest,
                     "scheduler": {
                         "fitness": candidate.fitness,
                         "outer_value_score": candidate.outer_value_score,
@@ -330,6 +416,7 @@ def run_hardware_promotion(
                     "status": status,
                     **bundle_paths,
                     **promotion_components,
+                    "expected_golden_digest": expected_golden_digest,
                 }
                 vault.update_execution_result(candidate.testcase_key, metadata=metadata)
                 counts["emitted"] += 1

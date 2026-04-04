@@ -9,7 +9,7 @@ import re
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from .power_backends import McPATBackend
 
@@ -20,6 +20,7 @@ DEFAULT_GEM5_CONFIG = (
 DEFAULT_GEM5_OUTDIR = REPO_ROOT / "m5out-sdc"
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 FAULT_MANIFEST_NAME = "sdc_fault_request.json"
+INJECTED_EXECUTION_PLANES = {"gem5_scripted"}
 INJECTION_LOG_PATTERN = re.compile(
     r"\[sdc\] injected register bit flip: "
     r"cpu=(?P<cpu_index>\d+) "
@@ -181,6 +182,28 @@ def _infer_fault_execution_plane(
     return "request_only"
 
 
+def fault_request_requires_injection(
+    fault_request: Optional[Mapping[str, Any]],
+) -> bool:
+    if not isinstance(fault_request, Mapping):
+        return False
+    fault_model = str(fault_request.get("fault_model", "none")).strip().lower()
+    return fault_model not in {"", "none"}
+
+
+def fault_request_has_observed_injection(
+    fault_request: Optional[Mapping[str, Any]],
+) -> bool:
+    if not fault_request_requires_injection(fault_request):
+        return False
+    if not isinstance(fault_request, Mapping):
+        return False
+    return bool(fault_request.get("injection_observed", False)) and (
+        str(fault_request.get("execution_plane", "")).strip().lower()
+        in INJECTED_EXECUTION_PLANES
+    )
+
+
 def build_fault_request_summary(
     *,
     gem5_outdir: Optional[Path],
@@ -337,17 +360,24 @@ def classify(
     gem5_result: Optional[CommandResult],
     golden_digest: Optional[str],
     faulted_digest: Optional[str],
+    fault_request: Optional[Mapping[str, Any]] = None,
 ) -> str:
     if compile_result.returncode != 0:
         return "compile_failed"
     if qemu_result.returncode != 0:
         return "golden_failed"
     if gem5_result is None:
+        if fault_request_requires_injection(fault_request):
+            return "no_injection"
         return "golden_only"
     if gem5_result.timed_out:
         return "gem5_timeout"
     if gem5_result.returncode != 0:
         return "gem5_failed"
+    if fault_request_requires_injection(fault_request) and not fault_request_has_observed_injection(
+        fault_request
+    ):
+        return "no_injection"
     if golden_digest is None or faulted_digest is None:
         return "digest_missing"
     if golden_digest != faulted_digest:
@@ -474,6 +504,7 @@ def run_differential(
             gem5_result=gem5_result,
             golden_digest=golden_digest,
             faulted_digest=faulted_digest,
+            fault_request=fault_request,
         ),
         golden_digest=golden_digest,
         faulted_digest=faulted_digest,

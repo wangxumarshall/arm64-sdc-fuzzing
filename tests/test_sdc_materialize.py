@@ -11,6 +11,10 @@ def test_render_materialized_source_embeds_digest_and_asm():
     assert "mov x0, x1" in source
     assert "fmov d0, d1" in source
     assert "Materialized from vault testcase: seed-1" in source
+    assert "static void sdc_prepare_memory(void)" in source
+    assert "static uint8_t sdc_memory[8192]" in source
+    assert "str x30, [x16, #240]" in source
+    assert "adrp x18, sdc_memory" in source
 
 
 def test_materialize_testcase_writes_source_and_updates_metadata(tmp_path):

@@ -9,9 +9,15 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+from uuid import uuid4
 
 from .campaign import resolve_source_path
-from .differential import DEFAULT_GEM5_CONFIG, run_differential
+from .differential import (
+    DEFAULT_GEM5_CONFIG,
+    fault_request_has_observed_injection,
+    fault_request_requires_injection,
+    run_differential,
+)
 from .materialize import materialize_testcase
 from .preflight import DEFAULT_GEM5_BINARY, DEFAULT_MCPAT_BINARY, run_preflight
 from .scheduler import FeedbackScheduler, RankedCandidate
@@ -117,6 +123,16 @@ def plan_fault_matrix(
 def _spec_run_key(spec: FaultSpec) -> str:
     payload = json.dumps(asdict(spec), sort_keys=True)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def build_campaign_identity(
+    fault_specs: Sequence[FaultSpec],
+) -> tuple[str, str]:
+    matrix_hash = hashlib.sha1(
+        json.dumps([asdict(spec) for spec in fault_specs], sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    campaign_key = f"{matrix_hash}-{uuid4().hex[:8]}"
+    return matrix_hash, campaign_key
 
 
 def _update_outer_metadata(
@@ -245,9 +261,7 @@ def run_outer_loop(
         fault_bits=fault_bits,
         fault_ticks=fault_ticks,
     )
-    campaign_key = hashlib.sha1(
-        json.dumps([asdict(spec) for spec in fault_specs], sort_keys=True).encode("utf-8")
-    ).hexdigest()[:16]
+    matrix_hash, campaign_key = build_campaign_identity(fault_specs)
 
     counts = {
         "selected": 0,
@@ -269,7 +283,7 @@ def run_outer_loop(
                 "statuses": list(process_statuses),
                 "limit": limit,
             },
-            matrix_hash=campaign_key,
+            matrix_hash=matrix_hash,
             status="PLANNED" if dry_run else "RUNNING",
             metadata={"fault_specs": [asdict(spec) for spec in fault_specs]},
         )
@@ -350,6 +364,11 @@ def run_outer_loop(
                 injection_observed = bool(
                     fault_request.get("injection_observed", False)
                 )
+                effective_result_status = result.status
+                if fault_request_requires_injection(fault_request) and not fault_request_has_observed_injection(
+                    fault_request
+                ):
+                    effective_result_status = "no_injection"
                 vault.record_fault_run(
                     campaign_id=campaign_id,
                     testcase_key=candidate.testcase_key,
@@ -359,7 +378,7 @@ def run_outer_loop(
                     fault_tick=spec.fault_tick,
                     golden_digest=result.golden_digest,
                     faulted_digest=result.faulted_digest,
-                    result_status=result.status,
+                    result_status=effective_result_status,
                     metadata={
                         "artifact_dir": str(artifact_dir.resolve()),
                         "result_json": str(result_json.resolve()),
@@ -367,6 +386,7 @@ def run_outer_loop(
                         "fault_execution_plane": execution_plane,
                         "implemented_in_script": implemented_in_script,
                         "injection_observed": injection_observed,
+                        "source_result_status": result.status,
                     },
                 )
                 run_record = FaultRunResult(
@@ -376,7 +396,7 @@ def run_outer_loop(
                     fault_target=spec.fault_target,
                     fault_bit=spec.fault_bit,
                     fault_tick=spec.fault_tick,
-                    result_status=result.status,
+                    result_status=effective_result_status,
                     golden_digest=result.golden_digest,
                     faulted_digest=result.faulted_digest,
                     artifact_dir=str(artifact_dir.resolve()),
@@ -435,7 +455,7 @@ def run_outer_loop(
                     "statuses": list(process_statuses),
                     "limit": limit,
                 },
-                matrix_hash=campaign_key,
+                matrix_hash=matrix_hash,
                 status="COMPLETED",
                 metadata={
                     "fault_specs": [asdict(spec) for spec in fault_specs],
@@ -466,6 +486,7 @@ def run_outer_loop(
         "dry_run": dry_run,
         "preflight": preflight,
         "campaign_key": campaign_key,
+        "matrix_hash": matrix_hash,
         "campaign": campaign_summary,
         "fault_specs": [asdict(spec) for spec in fault_specs],
         "counts": counts,

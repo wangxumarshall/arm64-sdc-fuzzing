@@ -258,7 +258,7 @@
 
 ### 当前阻塞
 
-1. `outer_loop.py` 已落地首版骨架，并已完成真实多 fault campaign baseline 验证；控制面现已能区分 `gem5_scripted` 与 `manifest_only` fault run，但更深的 injector 联动仍未完成。
+1. `outer_loop.py` 已落地首版骨架；控制面现已能区分 `gem5_scripted` 与 `manifest_only` fault run，并会拒绝把未观测到真实注入的运行当作有效 campaign 成功。
 2. 当前 fault matrix 已能表达并记录 fault execution plane，但支持面仍集中在 register bit flip，尚未扩展到更多 fault model。
 3. `outer_value_score` 仍保持基础聚合；当前新增的 `injector_confidence_score / promotion_readiness_score` 已接入 scheduler 排序与 promotion plan，后续还需要更丰富的稳定性/多样性权重。
 
@@ -281,6 +281,8 @@
 8. `run_differential()` 现在会读取 gem5 侧 `sdc_fault_request.json`，并解析脚本化注入观测信息。
 9. outer loop 现在会把 `fault_execution_plane / injector_confidence_score / promotion_readiness_score` 写入 fault run 与 testcase 聚合结果。
 10. scheduler 现在已支持基于外循环聚合信号的 `promotion-plan`。
+11. 未观测到真实 fault injection 的运行现在会被显式标记为 `no_injection / INVALID`，不再参与有效 outer-loop 成功判定。
+12. outer loop campaign key 现在按执行实例唯一化，重试不会再覆盖历史 campaign 元数据。
 
 ### 验收标准
 
@@ -358,7 +360,7 @@
 ### 当前阻塞
 
 1. 控制面现在已有 `hardware_lane.py` / `sdc_promote_hw.py`，但 `OpenDCDiagBackend` 仍是 placeholder，尚未接入真实运行。
-2. 当前 emitter 生成的是可追踪的 promotion bundle 和 opendcdiag-shaped source artifact，还未接入实际 meson/build/run 主链。
+2. 当前 emitter 已会生成执行 promoted asm 并校验 golden digest 的 opendcdiag-shaped source artifact，但还未接入实际 meson/build/run 主链。
 3. 仍没有 hardware result parser / ingest importer。
 
 ### 交付物
@@ -378,7 +380,8 @@
    - 原始 `asm`
    - opendcdiag-shaped `cpp`
    - `meson.build.fragment`
-5. 控制面现在会写入 `hardware_promotions`，并把硬件 lane 产物同步到 artifacts projection。
+5. 生成的 promotion source 现在会真实执行 promoted asm，并以已有 golden digest 作为失败/通过判据，而不是无条件成功。
+6. 控制面现在会写入 `hardware_promotions`，并把硬件 lane 产物同步到 artifacts projection。
 
 ### 验收标准
 

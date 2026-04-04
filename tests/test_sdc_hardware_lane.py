@@ -17,6 +17,7 @@ def test_hardware_promotion_dry_run_plans_without_persisting(tmp_path):
                 ibr_score=0.8,
                 memory_pressure_score=0.4,
                 risk_score=0.7,
+                qemu_golden_hash="1111",
                 status="SDC_FOUND",
                 metadata={
                     "outer_loop": {
@@ -58,6 +59,7 @@ def test_hardware_promotion_emits_bundle_and_records_vault(tmp_path):
                 ibr_score=0.8,
                 memory_pressure_score=0.5,
                 risk_score=0.75,
+                qemu_golden_hash="1111",
                 status="SDC_FOUND",
                 metadata={
                     "profile_name": "HW_AGGRESSIVE",
@@ -100,6 +102,14 @@ def test_hardware_promotion_emits_bundle_and_records_vault(tmp_path):
     assert manifest_payload["testcase_key"] == "seed-hw"
     assert manifest_payload["backend_name"] == "opendcdiag"
     assert manifest_payload["promotion_components"]["promotion_score"] > 0.0
+    assert manifest_payload["expected_golden_digest"] == "1111"
+
+    source_payload = test_source_path.read_text(encoding="utf-8")
+    assert 'extern "C" void sdc_benchmark_body(void);' in source_payload
+    assert "mov x0, x0" in source_payload
+    assert "add x1, x1, x0" in source_payload
+    assert "const uint64_t observed_digest = sdc_compute_digest();" in source_payload
+    assert "static const uint64_t kExpectedDigest = 0x1111ULL;" in source_payload
 
     with SDCVault(db_path) as vault:
         promotions = vault.list_hardware_promotions("seed-hw")
