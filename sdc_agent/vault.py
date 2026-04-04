@@ -413,6 +413,17 @@ class SDCVault:
         add("inner_loop_gem5_outdir", inner_loop.get("gem5_outdir"), inner_loop)
         add("inner_loop_elf", inner_loop.get("elf_path"), inner_loop)
 
+        hardware_lane = _mapping(metadata.get("hardware_lane"))
+        add("hardware_bundle_dir", hardware_lane.get("bundle_dir"), hardware_lane)
+        add("hardware_manifest", hardware_lane.get("manifest_path"), hardware_lane)
+        add("hardware_test_source", hardware_lane.get("test_source_path"), hardware_lane)
+        add("hardware_asm", hardware_lane.get("asm_path"), hardware_lane)
+        add(
+            "hardware_meson_fragment",
+            hardware_lane.get("meson_fragment_path"),
+            hardware_lane,
+        )
+
         return [(kind, path_value, payload) for (kind, path_value), payload in rows.items()]
 
     def _upsert_testcase_projection(self, row: Mapping[str, Any]) -> None:

@@ -23,6 +23,7 @@ from microprobe.driver.genetic import EvolutionConfig, SDCFuzzingGeneticDriver
 
 from .differential import DEFAULT_GEM5_CONFIG
 from .campaign import execute_campaign
+from .hardware_lane import run_hardware_promotion
 from .preflight import DEFAULT_GEM5_BINARY, DEFAULT_MCPAT_BINARY
 from .scheduler import FeedbackScheduler
 from .vault import SDCVault
@@ -252,6 +253,17 @@ def _build_parser() -> argparse.ArgumentParser:
     evolve.add_argument("--base-seed", type=int, default=211)
     evolve.add_argument("--wrapper-name", default=DEFAULT_WRAPPER)
 
+    promote_hw = subparsers.add_parser("promote-hw")
+    promote_hw.add_argument("--db", type=Path, default=DEFAULT_VAULT)
+    promote_hw.add_argument(
+        "--output-root",
+        type=Path,
+        default=DEFAULT_AGENT_OUTPUT_ROOT / "hardware-lane",
+    )
+    promote_hw.add_argument("--limit", type=int, default=4)
+    promote_hw.add_argument("--backend-name", default="opendcdiag")
+    promote_hw.add_argument("--dry-run", action="store_true")
+
     cycle = subparsers.add_parser("cycle")
     cycle.add_argument("--db", type=Path, default=DEFAULT_VAULT)
     cycle.add_argument("--output-root", type=Path, default=DEFAULT_AGENT_OUTPUT_ROOT)
@@ -313,6 +325,14 @@ def main() -> int:
             min_memory_stride=args.min_memory_stride,
             base_seed=args.base_seed,
             wrapper_name=args.wrapper_name,
+        )
+    elif args.command == "promote-hw":
+        payload = run_hardware_promotion(
+            db_path=args.db,
+            output_root=args.output_root,
+            limit=args.limit,
+            backend_name=args.backend_name,
+            dry_run=args.dry_run,
         )
     else:
         payload = run_cycle(

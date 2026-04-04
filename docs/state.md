@@ -17,13 +17,15 @@
 当前主阶段：
 
 - `Phase 4: 低频外循环产品化`
+- `Phase 6: 硬件 promotion lane bootstrap`
 
 当前判断：
 
 1. `Phase 0` 已完成。
 2. `Phase 1` 已完成。
 3. `Phase 2` 已完成真实端到端验证。
-4. `Phase 4` 已开始首版实现。
+4. `Phase 4` 已开始首版实现，并已把 injector confidence / promotion readiness 接入调度层。
+5. `Phase 6` 已从“只有表结构和 placeholder”推进到“有 promotion selector、有 bundle emitter、有 DB 写回”的 bootstrap 阶段。
 
 当前阶段的核心目标：
 
@@ -58,6 +60,9 @@
    - `manifest_only`
    - `request_only`
 13. 仅有 digest 差异还不足以支撑 promotion；还需要把 injector 是否真正被观测到收敛成独立聚合信号。
+14. 重新核对已完成 phases 后，最明显的遗漏并不在 `Phase 0/1/2` 主链，而在 `Phase 6` 控制面完全未起步。
+15. `promotion_plan` 只有在真正落地成 `hardware_promotions + artifact bundle` 后，才算进入硬件验证环，而不是仅停留在 scheduler 输出。
+16. `hardware_promotions / hardware_runs` 表此前已经存在，但没有对应的 source artifact 与控制面入口；这条缺口现已补上第一段。
 
 ---
 
@@ -124,6 +129,14 @@
    - `promotion_readiness_score`
 11. outer loop 聚合结果现在可区分“真实脚本注入已观测”与“只有 manifest 记录”的 fault run。
 12. [scheduler.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py) 现在已经消费这些外循环聚合信号，并提供独立的 `promotion_plan()` / `promotion-plan` CLI。
+13. [hardware_lane.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_lane.py) 已落地首版硬件 promotion lane orchestrator。
+14. [sdc_promote_hw.py](/Users/wangxu/1-project/sdc-fuzzing/tools/sdc_promote_hw.py) 与 [sdc_agent.py](/Users/wangxu/1-project/sdc-fuzzing/tools/sdc_agent.py) `promote-hw` 已提供 CLI 入口。
+15. hardware lane 现在会生成 promotion bundle：
+   - `promotion.json`
+   - 原始 `asm`
+   - opendcdiag-shaped `cpp`
+   - `meson.build.fragment`
+16. Vault artifacts 投影现在已纳入 hardware lane 产物，便于统一查询。
 
 ---
 
@@ -147,6 +160,10 @@
 14. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py -q`
 15. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py -q`
 16. `python3 tools/sdc_scheduler.py promotion-plan --help`
+17. `python3 -m pytest tests/test_sdc_hardware_lane.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_vault_v2.py -q`
+18. `python3 tools/sdc_promote_hw.py --help`
+19. `python3 tools/sdc_agent.py promote-hw --help`
+20. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_hardware_lane.py -q`
 
 当前结果：
 
@@ -179,6 +196,9 @@
 13. 调度层与 agent 汇总现在也已接通 promotion 信号：
    - `tests/test_sdc_scheduler.py`
    - `tests/test_sdc_agent.py`
+14. 硬件 promotion lane bootstrap 已通过：
+   - `tests/test_sdc_hardware_lane.py`
+15. 当前相关回归总计：`28 passed`
 
 ---
 
@@ -190,7 +210,8 @@
 2. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
 3. outer loop 已能识别脚本化 fault execution plane，但更大范围的 injector 联动仍未完成。
 4. gem5 real fault injector 目前只对受支持的 register bit flip 有脚本化路径；更多 fault model 仍未实现。
-5. `opendcdiag-arm` promotion/backfill 尚未接入控制平面。
+5. `opendcdiag-arm` promotion 已接入控制面的 bootstrap 版，但真实 build/run 与 result ingest 仍未完成。
+6. 当前生成的 opendcdiag source artifact 仍是 phase-bootstrap 版本，尚未执行真实 testcase 序列。
 
 ---
 
@@ -202,8 +223,10 @@
    - outer loop 与真实 injector 的更深衔接
    - 已将新的 injector confidence / promotion readiness 接入排序与 promotion 逻辑
 2. 推进 `Phase 5: gem5 真实 fault injector`
-   - 将 `promotion_plan` 与真实 hardware promotion 记录打通
+   - 扩展 fault model，不只停留在 register bit flip
 3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
+   - 将 promotion bundle 接入真实 opendcdiag build/run
+   - 补 `hardware result ingest` 和回灌 CLI
 
 ---
 

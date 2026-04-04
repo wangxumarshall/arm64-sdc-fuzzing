@@ -26,7 +26,7 @@
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
 | Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 70% |
 | Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 20% |
-| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 早期 | 10% |
+| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 已启动 | 25% |
 | Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 规划中 | 10% |
 
 ### 2.1 关键路径
@@ -357,9 +357,9 @@
 
 ### 当前阻塞
 
-1. 当前只有 `OpenDCDiagBackend` placeholder。
-2. 没有 test emitter。
-3. 没有 hardware result parser。
+1. 控制面现在已有 `hardware_lane.py` / `sdc_promote_hw.py`，但 `OpenDCDiagBackend` 仍是 placeholder，尚未接入真实运行。
+2. 当前 emitter 生成的是可追踪的 promotion bundle 和 opendcdiag-shaped source artifact，还未接入实际 meson/build/run 主链。
+3. 仍没有 hardware result parser / ingest importer。
 
 ### 交付物
 
@@ -367,6 +367,18 @@
 2. `tools/sdc_promote_hw.py`
 3. `tools/sdc_ingest_hw_results.py`
 4. opendcdiag-arm 集成样例
+
+### 当前已完成
+
+1. `scheduler` 的 `promotion-plan` 已把外循环的 `promotion_readiness_score` 变成可消费的 promotion selector。
+2. `sdc_agent/hardware_lane.py` 已能从 Vault 选出 promotion candidates，并计算 `promotion_score`。
+3. `tools/sdc_promote_hw.py` 与 `tools/sdc_agent.py promote-hw` 已提供 CLI 入口。
+4. promotion bundle 现在会落地：
+   - `promotion.json`
+   - 原始 `asm`
+   - opendcdiag-shaped `cpp`
+   - `meson.build.fragment`
+5. 控制面现在会写入 `hardware_promotions`，并把硬件 lane 产物同步到 artifacts projection。
 
 ### 验收标准
 
