@@ -14,6 +14,11 @@ from microprobe.code.var import Variable, VariableArray
 from microprobe.exceptions import MicroprobeCodeGenerationError
 from microprobe.target.isa import GenericISA
 from microprobe.target.isa.register import Register
+from microprobe.utils.arm64_isa_catalog import (
+    DEFAULT_CATALOG_PATH,
+    load_catalog,
+    iter_catalog_encodings,
+)
 from microprobe.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -283,6 +288,11 @@ class Arm64ISA(GenericISA):
         For ARM64, no special context setup is needed.
         """
         return []
+
+    def instruction_catalog(self, profile_name="ALL_GENERATABLE"):
+        """Return the normalized ARM64 catalog encodings for the given profile."""
+        catalog = load_catalog(DEFAULT_CATALOG_PATH)
+        return list(iter_catalog_encodings(catalog, profile_name=profile_name))
 
     def set_context(self, variable=None, tmpl_path=None):
         return []

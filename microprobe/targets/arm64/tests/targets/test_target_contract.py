@@ -39,6 +39,12 @@ def test_arm64_environment_prefers_differential_wrapper(arm64_target):
     assert arm64_target.environment.preferred_diff_wrapper == "BareMetalDiffWrapper"
 
 
+def test_arm64_target_exposes_catalog_profiles(arm64_target):
+    encodings = arm64_target.isa.instruction_catalog(profile_name="EXECUTABLE_SAFE")
+    assert len(encodings) > 0
+    assert all("sample_asm" in encoding for encoding in encodings[:4])
+
+
 def test_sdc_fuzzing_policy_synthesizes_static_scores(arm64_target, arm64asm_wrapper_cls):
     wrapper = arm64asm_wrapper_cls()
     policy = find_policy(TARGET_NAME, "sdc_fuzzing")

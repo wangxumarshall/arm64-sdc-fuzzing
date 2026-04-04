@@ -14,12 +14,22 @@ from typing import Dict, Iterable, List, Tuple
 
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+MICROPROBE_SRC = REPO_ROOT / "microprobe" / "src"
+if str(REPO_ROOT) not in __import__("sys").path:
+    __import__("sys").path.insert(0, str(REPO_ROOT))
+if str(MICROPROBE_SRC) not in __import__("sys").path:
+    __import__("sys").path.insert(0, str(MICROPROBE_SRC))
+
+from microprobe.utils.arm64_isa_catalog import load_catalog  # noqa: E402
+
 OFFICIAL_XML_URL = (
     "https://developer.arm.com/-/cdn-downloads/permalink/"
     "Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2025-09_ASL1.tar.gz"
 )
 DEFAULT_XML_DIR = Path(".codex_tmp/arm_a64_xml/xml")
 DEFAULT_INSTRUCTION_FILE = Path("targets/arm64/isa/armv8-common/instruction.yaml")
+DEFAULT_CATALOG_FILE = Path("targets/arm64/isa/armv8-common/arm_a64_catalog.json")
 
 
 def _safe_extractall(tf: tarfile.TarFile, destination: Path) -> None:
@@ -97,10 +107,32 @@ def _parse_official_xml(
 
 
 def build_report(
-    instruction_file: Path, xml_dir: Path, classes: Iterable[str]
+    instruction_file: Path,
+    xml_dir: Path,
+    classes: Iterable[str],
+    catalog_file: Path | None = None,
 ) -> Dict[str, object]:
     current = _load_current_mnemonics(instruction_file)
     official, class_counts = _parse_official_xml(xml_dir, classes)
+    catalog_mnemonics: Counter = Counter()
+    catalog_classes: Dict[str, set[str]] = defaultdict(set)
+    catalog_summary: Dict[str, object] = {}
+    if catalog_file is not None and catalog_file.exists():
+        catalog = load_catalog(catalog_file)
+        catalog_summary = {
+            "catalog_instruction_count": int(catalog.get("instruction_count", 0)),
+            "catalog_encoding_count": int(catalog.get("encoding_count", 0)),
+            "catalog_unique_mnemonics": len(catalog.get("unique_mnemonics", [])),
+            "docs_pages": int(catalog.get("docs_pages", 0)),
+            "docs_mapped_pages": int(catalog.get("docs_mapped_pages", 0)),
+        }
+        for instruction in catalog.get("instructions", []):
+            mnemonic = str(instruction.get("mnemonic", ""))
+            instr_class = str(instruction.get("instr_class", ""))
+            if mnemonic:
+                catalog_mnemonics[mnemonic] += 1
+            if mnemonic and instr_class:
+                catalog_classes[instr_class].add(mnemonic)
 
     report: Dict[str, object] = {
         "instruction_file": str(instruction_file),
@@ -110,6 +142,7 @@ def build_report(
         "current_mnemonics": sorted(current),
         "classes": {},
     }
+    report.update(catalog_summary)
 
     for instr_class, entries in sorted(official.items()):
         unique: Dict[str, str] = {}
@@ -118,14 +151,22 @@ def build_report(
 
         missing = sorted(set(unique) - set(current))
         present = sorted(set(unique) & set(current))
+        catalog_present = sorted(set(unique) & set(catalog_classes.get(instr_class, set())))
+        catalog_missing = sorted(set(unique) - set(catalog_classes.get(instr_class, set())))
         report["classes"][instr_class] = {
             "xml_entries": class_counts[instr_class],
             "xml_unique_mnemonics": len(unique),
             "present_unique_mnemonics": len(present),
             "missing_unique_mnemonics": len(missing),
+            "catalog_present_unique_mnemonics": len(catalog_present),
+            "catalog_missing_unique_mnemonics": len(catalog_missing),
             "missing": [
                 {"mnemonic": mnemonic, "xml_file": unique[mnemonic]}
                 for mnemonic in missing
+            ],
+            "catalog_missing": [
+                {"mnemonic": mnemonic, "xml_file": unique[mnemonic]}
+                for mnemonic in catalog_missing
             ],
         }
 
@@ -148,6 +189,11 @@ def main() -> int:
         "--xml-dir",
         default=str(DEFAULT_XML_DIR),
         help="Path to an extracted Arm A64 XML directory.",
+    )
+    parser.add_argument(
+        "--catalog-file",
+        default=str(DEFAULT_CATALOG_FILE),
+        help="Path to a generated ARM64 catalog JSON file.",
     )
     parser.add_argument(
         "--download",
@@ -183,7 +229,12 @@ def main() -> int:
             )
         _download_official_xml(xml_dir)
 
-    report = build_report(instruction_file, xml_dir, args.classes)
+    report = build_report(
+        instruction_file,
+        xml_dir,
+        args.classes,
+        catalog_file=Path(args.catalog_file) if args.catalog_file else None,
+    )
 
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -194,12 +245,22 @@ def main() -> int:
     print(f"  official xml dir : {xml_dir}")
     print(f"  current entries  : {report['current_entries']}")
     print(f"  current mnemonics: {report['current_unique_mnemonics']}")
+    if "catalog_unique_mnemonics" in report:
+        print(f"  catalog encodings: {report['catalog_encoding_count']}")
+        print(f"  catalog mnemonics: {report['catalog_unique_mnemonics']}")
+        print(
+            f"  docs mapped      : "
+            f"{report['docs_mapped_pages']}/{report['docs_pages']}"
+        )
 
     for instr_class, payload in report["classes"].items():
         print(f"\n[{instr_class}]")
         print(f"  xml unique   : {payload['xml_unique_mnemonics']}")
         print(f"  present      : {payload['present_unique_mnemonics']}")
         print(f"  missing      : {payload['missing_unique_mnemonics']}")
+        if "catalog_present_unique_mnemonics" in payload:
+            print(f"  catalog      : {payload['catalog_present_unique_mnemonics']}")
+            print(f"  cat missing  : {payload['catalog_missing_unique_mnemonics']}")
         for missing in payload["missing"][: args.top_missing]:
             print(f"    - {missing['mnemonic']} ({missing['xml_file']})")
 

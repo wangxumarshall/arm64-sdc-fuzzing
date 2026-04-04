@@ -15,6 +15,9 @@ if str(REPO_ROOT) not in sys.path:
 from sdc_agent.generation import (
     DEFAULT_POLICY,
     PROFILE_SIM_SAFE,
+    PROFILE_ALL_GENERATABLE,
+    PROFILE_EXECUTABLE_SAFE,
+    PROFILE_KUNPENG920_STRESS,
     DEFAULT_TARGET,
     DEFAULT_WRAPPER,
     compute_risk_score as _compute_risk_score,
@@ -46,7 +49,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         default=PROFILE_SIM_SAFE,
-        help="Generation profile contract. Supported: SIM_SAFE, HW_AGGRESSIVE.",
+        help=(
+            "Generation profile contract. Supported: "
+            "SIM_SAFE, HW_AGGRESSIVE, ALL_GENERATABLE, "
+            "EXECUTABLE_SAFE, KUNPENG920_STRESS."
+        ),
     )
     parser.add_argument(
         "--count", type=int, default=16, help="Number of candidates to generate."
