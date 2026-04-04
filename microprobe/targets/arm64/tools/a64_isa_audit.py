@@ -32,6 +32,18 @@ DEFAULT_INSTRUCTION_FILE = Path("targets/arm64/isa/armv8-common/instruction.yaml
 DEFAULT_CATALOG_FILE = Path("targets/arm64/isa/armv8-common/arm_a64_catalog.json")
 
 
+def _normalize_heading(text: str) -> str:
+    return " ".join(str(text or "").replace(" -- A64", "").split()).strip()
+
+
+def _heading_mnemonics(text: str) -> List[str]:
+    heading = _normalize_heading(text)
+    if not heading:
+        return []
+    base = heading.split("(", 1)[0].strip()
+    return [token.strip() for token in base.split(",") if token.strip()]
+
+
 def _safe_extractall(tf: tarfile.TarFile, destination: Path) -> None:
     destination = destination.resolve()
     for member in tf.getmembers():
@@ -92,16 +104,40 @@ def _parse_official_xml(
         if docvars.get("isa") != "A64":
             continue
 
+        found = False
+        for encoding in root.findall(".//encoding"):
+            encoding_docvars = {
+                elem.attrib.get("key"): elem.attrib.get("value")
+                for elem in encoding.findall("./docvars/docvar")
+            }
+            instr_class = encoding_docvars.get("instr-class") or docvars.get(
+                "instr-class"
+            )
+            if instr_class not in wanted:
+                continue
+
+            mnemonic = encoding_docvars.get("alias_mnemonic") or encoding_docvars.get(
+                "mnemonic"
+            )
+            if mnemonic is None:
+                continue
+
+            by_class[instr_class].append((mnemonic, xml_file.name))
+            class_counts[instr_class] += 1
+            found = True
+
+        if found:
+            continue
+
         instr_class = docvars.get("instr-class")
         if instr_class not in wanted:
             continue
 
-        mnemonic = docvars.get("alias_mnemonic") or docvars.get("mnemonic")
-        if mnemonic is None:
-            continue
-
-        by_class[instr_class].append((mnemonic, xml_file.name))
-        class_counts[instr_class] += 1
+        for mnemonic in _heading_mnemonics(root.findtext("./heading", "")) or _heading_mnemonics(
+            root.attrib.get("title", "")
+        ):
+            by_class[instr_class].append((mnemonic, xml_file.name))
+            class_counts[instr_class] += 1
 
     return by_class, class_counts
 
@@ -127,12 +163,17 @@ def build_report(
             "docs_mapped_pages": int(catalog.get("docs_mapped_pages", 0)),
         }
         for instruction in catalog.get("instructions", []):
-            mnemonic = str(instruction.get("mnemonic", ""))
-            instr_class = str(instruction.get("instr_class", ""))
-            if mnemonic:
-                catalog_mnemonics[mnemonic] += 1
-            if mnemonic and instr_class:
-                catalog_classes[instr_class].add(mnemonic)
+            for encoding in instruction.get("encodings", []):
+                mnemonic = str(
+                    encoding.get("mnemonic") or instruction.get("mnemonic", "")
+                )
+                instr_class = str(
+                    encoding.get("instr_class") or instruction.get("instr_class", "")
+                )
+                if mnemonic:
+                    catalog_mnemonics[mnemonic] += 1
+                if mnemonic and instr_class:
+                    catalog_classes[instr_class].add(mnemonic)
 
     report: Dict[str, object] = {
         "instruction_file": str(instruction_file),

@@ -90,6 +90,24 @@ _KUNPENG_SIMD_PREFIXES = (
 )
 _WHITESPACE_RE = re.compile(r"\s+")
 _ALT_RE = re.compile(r"\(([^()|]+)\|[^()]+\)")
+_COMMA_SPACE_RE = re.compile(r"\s*,\s*")
+_CATEGORY_TO_CLASS = {
+    "Arithmetic": "general",
+    "Atomic": "general",
+    "Bit-Manipulation": "general",
+    "Branch": "general",
+    "Compare": "general",
+    "Conditional-Select": "general",
+    "Count": "general",
+    "Cryptographic": "general",
+    "Load-Store": "general",
+    "Logical": "general",
+    "Other": "general",
+    "PC-Relative": "general",
+    "Pointer-Authentication": "general",
+    "System": "system",
+    "Barrier-Hint": "system",
+}
 
 
 def _normalize_space(text: str) -> str:
@@ -102,6 +120,22 @@ def _normalize_heading(text: str) -> str:
     return text
 
 
+def _doc_key(text: str) -> str:
+    normalized = _normalize_heading(text)
+    normalized = _COMMA_SPACE_RE.sub(", ", normalized)
+    return normalized
+
+
+def _heading_mnemonics(text: str) -> List[str]:
+    normalized = _normalize_heading(text)
+    if not normalized:
+        return []
+
+    head = normalized.split("(", 1)[0].strip()
+    tokens = [token.strip() for token in head.split(",") if token.strip()]
+    return tokens or [normalized]
+
+
 def _docvars(node: ET.Element) -> Dict[str, str]:
     payload: Dict[str, str] = {}
     for elem in node.findall("./docvars/docvar"):
@@ -112,22 +146,80 @@ def _docvars(node: ET.Element) -> Dict[str, str]:
     return payload
 
 
-def _load_docs_index(docs_dir: Path) -> Dict[str, str]:
-    docs_index: Dict[str, str] = {}
+def _register_doc_entry(
+    docs_index: Dict[str, Dict[str, str]],
+    key: str,
+    path: Path,
+    category: str,
+) -> None:
+    normalized = _doc_key(key)
+    if not normalized or normalized in docs_index:
+        return
+    docs_index[normalized] = {
+        "path": str(path.resolve()),
+        "category": category,
+    }
+
+
+def _load_docs_index(docs_dir: Path) -> Dict[str, Dict[str, str]]:
+    docs_index: Dict[str, Dict[str, str]] = {}
     if not docs_dir.exists():
         return docs_index
 
     for path in sorted(docs_dir.glob("*.md")):
         lines = path.read_text(encoding="utf-8").splitlines()
         title = ""
+        category = ""
         for line in lines:
             if line.startswith("# "):
                 title = line[2:].strip()
                 break
-        if not title:
-            continue
-        docs_index[_normalize_heading(title)] = str(path.resolve())
+        for idx, line in enumerate(lines):
+            if line.strip() == "## 分类":
+                for inner in lines[idx + 1 :]:
+                    if inner.strip():
+                        category = inner.strip()
+                        break
+                break
+        _register_doc_entry(docs_index, title, path, category)
+
+        stem_alias = path.stem
+        prefix = f"{category}-" if category else ""
+        if prefix and stem_alias.startswith(prefix):
+            stem_alias = stem_alias[len(prefix) :]
+        stem_alias = stem_alias.replace("__", ", ").replace("_", ", ")
+        _register_doc_entry(docs_index, stem_alias, path, category)
     return docs_index
+
+
+def _template_text_signature(parts: Sequence[Mapping[str, str]]) -> str:
+    text = "".join(
+        part.get("text", "")
+        for part in parts
+        if part.get("kind", "text") == "text"
+    )
+    text = text.replace("[", " ").replace("]", " ").replace("{", " ").replace("}", " ")
+    return _normalize_space(text)
+
+
+def _lookup_doc_entry(
+    title: str,
+    docs_index: Mapping[str, Mapping[str, str]],
+    *,
+    encodings: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> Optional[Mapping[str, str]]:
+    candidates = [_doc_key(title)]
+    if encodings is not None:
+        for encoding in encodings:
+            signature = _template_text_signature(encoding.get("parts", []))
+            if signature:
+                candidates.append(_doc_key(signature))
+
+    for candidate in candidates:
+        entry = docs_index.get(candidate)
+        if entry is not None:
+            return entry
+    return None
 
 
 def _parse_aliases(root: ET.Element) -> List[Dict[str, str]]:
@@ -146,6 +238,38 @@ def _parse_aliases(root: ET.Element) -> List[Dict[str, str]]:
             }
         )
     return aliases
+
+
+def _mnemonic_candidates(
+    root: ET.Element,
+    *,
+    encoding: Optional[ET.Element] = None,
+) -> List[str]:
+    candidates: List[str] = []
+
+    def _append(value: Optional[str]) -> None:
+        cleaned = _normalize_space(value)
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+
+    if encoding is not None:
+        enc_docvars = _docvars(encoding)
+        _append(enc_docvars.get("alias_mnemonic"))
+        _append(enc_docvars.get("mnemonic"))
+
+    root_docvars = _docvars(root)
+    _append(root_docvars.get("alias_mnemonic"))
+    _append(root_docvars.get("mnemonic"))
+
+    if not candidates:
+        for mnemonic in _heading_mnemonics(root.findtext("./heading", "")):
+            _append(mnemonic)
+
+    if not candidates:
+        for mnemonic in _heading_mnemonics(root.attrib.get("title", "")):
+            _append(mnemonic)
+
+    return candidates
 
 
 def _parse_template_parts(asmtemplate: Optional[ET.Element]) -> List[Dict[str, str]]:
@@ -234,6 +358,27 @@ def _kunpeng_score(mnemonic: str, instr_class: str) -> float:
     if instr_class == "system":
         return 0.10
     return 0.45
+
+
+def _infer_instr_class(
+    default_class: str,
+    *,
+    mnemonic: str,
+    doc_entry: Optional[Mapping[str, str]],
+) -> str:
+    if default_class:
+        return default_class
+
+    upper = mnemonic.upper()
+    if upper.startswith(("AES", "BCAX", "BFDOT", "BFMMLA", "EOR3", "PMULL", "SHA", "SM3", "SM4", "XAR")):
+        return "advsimd"
+    if upper.startswith("CRC32"):
+        return "general"
+    if upper in _SAFE_SYSTEM_MNEMONICS or upper in {"PSB", "TSB"} or upper.endswith("CSYNC"):
+        return "system"
+
+    category = str((doc_entry or {}).get("category", ""))
+    return _CATEGORY_TO_CLASS.get(category, "")
 
 
 def _register_value(prefix: str, index: int) -> str:
@@ -489,6 +634,7 @@ def build_catalog(
     xml_root = Path(xml_dir)
     docs_root = Path(docs_dir)
     docs_index = _load_docs_index(docs_root)
+    docs_pages = len(list(docs_root.glob("*.md")))
     wanted = set(classes)
     instructions: List[Dict[str, Any]] = []
 
@@ -502,23 +648,29 @@ def build_catalog(
         if docvars.get("isa") != "A64":
             continue
 
-        instr_class = docvars.get("instr-class", "")
-        if instr_class not in wanted:
-            continue
-
-        mnemonic = docvars.get("alias_mnemonic") or docvars.get("mnemonic")
-        if not mnemonic:
-            continue
-
         title = _normalize_heading(root.attrib.get("title", "") or root.findtext("./heading", ""))
         description = _normalize_space(" ".join(root.find("./desc").itertext())) if root.find("./desc") is not None else ""
+        initial_doc_entry = _lookup_doc_entry(title, docs_index)
         encodings: List[Dict[str, Any]] = []
         for encoding in root.findall(".//encoding"):
+            encoding_docvars = _docvars(encoding)
+            mnemonic_candidates = _mnemonic_candidates(root, encoding=encoding)
+            if not mnemonic_candidates:
+                continue
+
+            instr_class = _infer_instr_class(
+                encoding_docvars.get("instr-class") or docvars.get("instr-class", ""),
+                mnemonic=mnemonic_candidates[0],
+                doc_entry=initial_doc_entry,
+            )
+            if instr_class not in wanted:
+                continue
+
             encodings.append(
                 _encoding_payload(
                     root,
                     encoding,
-                    mnemonic=mnemonic,
+                    mnemonic=mnemonic_candidates[0],
                     instr_class=instr_class,
                     title=title,
                     description=description,
@@ -528,16 +680,27 @@ def build_catalog(
         if not encodings:
             continue
 
+        page_mnemonics: List[str] = []
+        for encoding in encodings:
+            mnemonic = str(encoding.get("mnemonic", ""))
+            if mnemonic and mnemonic not in page_mnemonics:
+                page_mnemonics.append(mnemonic)
+        if not page_mnemonics:
+            page_mnemonics = _mnemonic_candidates(root)
+
+        doc_entry = _lookup_doc_entry(title, docs_index, encodings=encodings) or initial_doc_entry
+
         instructions.append(
             {
                 "xml_file": xml_file.name,
                 "xml_path": str(xml_file.resolve()),
                 "xml_id": root.attrib.get("id", xml_file.stem),
-                "mnemonic": mnemonic,
+                "mnemonic": page_mnemonics[0],
+                "mnemonics": page_mnemonics,
                 "title": title,
-                "instr_class": instr_class,
+                "instr_class": encodings[0]["instr_class"],
                 "docvars": docvars,
-                "doc_path": docs_index.get(title),
+                "doc_path": None if doc_entry is None else doc_entry["path"],
                 "aliases": _parse_aliases(root),
                 "description": description,
                 "feature_tags": sorted(
@@ -551,7 +714,13 @@ def build_catalog(
         )
 
     all_encodings = [encoding for item in instructions for encoding in item["encodings"]]
-    mapped_docs = sum(1 for item in instructions if item.get("doc_path"))
+    mapped_docs = len(
+        {
+            item["doc_path"]
+            for item in instructions
+            if item.get("doc_path")
+        }
+    )
     return {
         "catalog_version": 1,
         "xml_dir": str(xml_root.resolve()),
@@ -559,8 +728,15 @@ def build_catalog(
         "classes": sorted(wanted),
         "instruction_count": len(instructions),
         "encoding_count": len(all_encodings),
-        "unique_mnemonics": sorted({item["mnemonic"] for item in instructions}),
-        "docs_pages": len(docs_index),
+        "unique_mnemonics": sorted(
+            {
+                encoding["mnemonic"]
+                for item in instructions
+                for encoding in item["encodings"]
+                if encoding.get("mnemonic")
+            }
+        ),
+        "docs_pages": docs_pages,
         "docs_mapped_pages": mapped_docs,
         "instructions": instructions,
     }
@@ -643,7 +819,13 @@ def build_catalog_summary(catalog: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         "instruction_count": len(instructions),
         "encoding_count": len(encodings),
-        "unique_mnemonics": len({item.get("mnemonic") for item in instructions}),
+        "unique_mnemonics": len(
+            {
+                encoding.get("mnemonic")
+                for encoding in encodings
+                if encoding.get("mnemonic")
+            }
+        ),
         "docs_pages": int(catalog.get("docs_pages", 0)),
         "docs_mapped_pages": int(catalog.get("docs_mapped_pages", 0)),
         "executable_encodings": len([encoding for encoding in encodings if encoding.get("executable")]),

@@ -87,6 +87,59 @@ def _write_svc_xml(path: Path) -> None:
     )
 
 
+def _write_cas_xml(path: Path) -> None:
+    path.write_text(
+        """<?xml version="1.0"?>
+<instructionsection id="CAS" title="CAS, CASA, CASAL, CASL -- A64" type="instruction">
+  <docvars>
+    <docvar key="instr-class" value="general"/>
+    <docvar key="isa" value="A64"/>
+  </docvars>
+  <heading>CAS, CASA, CASAL, CASL</heading>
+  <desc><brief><para>Compare and swap word or doubleword</para></brief></desc>
+  <alias_list howmany="0"/>
+  <classes>
+    <iclass name="General" oneof="1" id="iclass_general" no_encodings="2" isa="A64">
+      <encoding name="CAS_32" oneofinclass="1" oneof="2" label="32-bit">
+        <docvars>
+          <docvar key="instr-class" value="general"/>
+          <docvar key="isa" value="A64"/>
+          <docvar key="mnemonic" value="CAS"/>
+        </docvars>
+        <asmtemplate>
+          <text>CAS </text>
+          <a hover="Is the 32-bit name of the first general-purpose register." link="Ws">&lt;Ws&gt;</a>
+          <text>, </text>
+          <a hover="Is the 32-bit name of the second general-purpose register." link="Wt">&lt;Wt&gt;</a>
+          <text>, [</text>
+          <a hover="Is the 64-bit name of the general-purpose base register or stack pointer." link="Xn|SP">&lt;Xn|SP&gt;</a>
+          <text>]</text>
+        </asmtemplate>
+      </encoding>
+      <encoding name="CASA_32" oneofinclass="1" oneof="2" label="32-bit">
+        <docvars>
+          <docvar key="instr-class" value="general"/>
+          <docvar key="isa" value="A64"/>
+          <docvar key="mnemonic" value="CASA"/>
+        </docvars>
+        <asmtemplate>
+          <text>CASA </text>
+          <a hover="Is the 32-bit name of the first general-purpose register." link="Ws">&lt;Ws&gt;</a>
+          <text>, </text>
+          <a hover="Is the 32-bit name of the second general-purpose register." link="Wt">&lt;Wt&gt;</a>
+          <text>, [</text>
+          <a hover="Is the 64-bit name of the general-purpose base register or stack pointer." link="Xn|SP">&lt;Xn|SP&gt;</a>
+          <text>]</text>
+        </asmtemplate>
+      </encoding>
+    </iclass>
+  </classes>
+</instructionsection>
+""",
+        encoding="utf-8",
+    )
+
+
 def test_build_catalog_parses_xml_docs_and_execution_metadata(tmp_path):
     xml_dir = tmp_path / "xml"
     docs_dir = tmp_path / "docs"
@@ -150,3 +203,24 @@ def test_catalog_can_be_saved_filtered_and_validated(tmp_path):
     validation = validate_sequence_asm(safe_encodings)
     assert validation["ok"] is True
     assert "ADD w0, w1, w2, lsl #0" in validation["asm_text"]
+
+
+def test_build_catalog_uses_encoding_level_mnemonics_when_page_root_lacks_one(tmp_path):
+    xml_dir = tmp_path / "xml"
+    docs_dir = tmp_path / "docs"
+    xml_dir.mkdir()
+    docs_dir.mkdir()
+
+    _write_cas_xml(xml_dir / "cas.xml")
+    (docs_dir / "Atomic-CAS_CASA_CASAL_CASL.md").write_text(
+        "# CAS, CASA, CASAL, CASL\n", encoding="utf-8"
+    )
+
+    catalog = build_catalog(xml_dir, docs_dir=docs_dir, classes=("general",))
+
+    assert catalog["instruction_count"] == 1
+    assert catalog["docs_mapped_pages"] == 1
+    assert set(catalog["unique_mnemonics"]) == {"CAS", "CASA"}
+    instruction = catalog["instructions"][0]
+    assert instruction["mnemonics"] == ["CAS", "CASA"]
+    assert instruction["doc_path"].endswith("Atomic-CAS_CASA_CASAL_CASL.md")

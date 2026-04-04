@@ -30,6 +30,40 @@ def _write_xml(path: Path, mnemonic: str, instr_class: str):
     )
 
 
+def _write_multi_mnemonic_xml(path: Path):
+    path.write_text(
+        (
+            '<?xml version="1.0"?>\n'
+            '<instructionsection id="CAS" title="CAS, CASA -- A64" type="instruction">\n'
+            "  <docvars>\n"
+            '    <docvar key="instr-class" value="general"/>\n'
+            '    <docvar key="isa" value="A64"/>\n'
+            "  </docvars>\n"
+            "  <heading>CAS, CASA</heading>\n"
+            "  <classes>\n"
+            '    <iclass name="General" oneof="1" id="iclass_general" no_encodings="2" isa="A64">\n'
+            '      <encoding name="CAS_32" oneofinclass="1" oneof="2" label="">\n'
+            "        <docvars>\n"
+            '          <docvar key="instr-class" value="general"/>\n'
+            '          <docvar key="isa" value="A64"/>\n'
+            '          <docvar key="mnemonic" value="CAS"/>\n'
+            "        </docvars>\n"
+            "      </encoding>\n"
+            '      <encoding name="CASA_32" oneofinclass="1" oneof="2" label="">\n'
+            "        <docvars>\n"
+            '          <docvar key="instr-class" value="general"/>\n'
+            '          <docvar key="isa" value="A64"/>\n'
+            '          <docvar key="mnemonic" value="CASA"/>\n'
+            "        </docvars>\n"
+            "      </encoding>\n"
+            "    </iclass>\n"
+            "  </classes>\n"
+            "</instructionsection>\n"
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_build_report_counts_present_and_missing(tmp_path):
     xml_dir = tmp_path / "xml"
     xml_dir.mkdir()
@@ -111,3 +145,26 @@ def test_build_report_includes_catalog_coverage(tmp_path):
     assert report["classes"]["general"]["catalog_present_unique_mnemonics"] == 1
     assert report["classes"]["system"]["catalog_present_unique_mnemonics"] == 1
     assert report["classes"]["system"]["catalog_missing_unique_mnemonics"] == 0
+
+
+def test_build_report_counts_encoding_level_mnemonics_from_official_xml(tmp_path):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    _write_multi_mnemonic_xml(xml_dir / "cas.xml")
+
+    instruction_file = tmp_path / "instruction.yaml"
+    instruction_file.write_text(
+        yaml.safe_dump(
+            [
+                {"Name": "CAS_X_V0", "Mnemonic": "CAS", "Format": "F"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_report(instruction_file, xml_dir, ["general"])
+
+    assert report["classes"]["general"]["xml_unique_mnemonics"] == 2
+    assert report["classes"]["general"]["present_unique_mnemonics"] == 1
+    assert report["classes"]["general"]["missing_unique_mnemonics"] == 1
+    assert report["classes"]["general"]["missing"][0]["mnemonic"] == "CASA"
