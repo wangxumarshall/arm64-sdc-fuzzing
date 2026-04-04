@@ -255,3 +255,76 @@ def test_run_differential_marks_manifest_only_faults_as_no_injection(monkeypatch
     assert result.fault_request is not None
     assert result.fault_request["execution_plane"] == "manifest_only"
     assert result.fault_request["injection_observed"] is False
+
+
+def test_run_differential_parses_vector_register_fault_observation(monkeypatch, tmp_path):
+    source = tmp_path / "case-vec.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    def fake_compile_static_elf(**kwargs):
+        return CommandResult(["cc"], 0, "", "")
+
+    def fake_run_qemu(**kwargs):
+        return CommandResult(["qemu"], 0, "SDC_DIGEST=aaaa", "")
+
+    def fake_run_gem5(**kwargs):
+        manifest_path = kwargs["gem5_outdir"] / "sdc_fault_request.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "fault_model": "vector_register_bit_flip",
+                    "fault_target": "v0",
+                    "fault_bit": 65,
+                    "fault_tick": 2048,
+                    "implemented_in_script": True,
+                    "binary": str((tmp_path / "case-vec.elf").resolve()),
+                    "binary_args": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return CommandResult(
+            ["gem5"],
+            0,
+            "SDC_HASH=bbbb",
+            (
+                "[sdc] injected vector register bit flip: "
+                "cpu=0 reg=v0 bit=65 "
+                "old=0x00000000000000000000000000000000 "
+                "new=0x00000000000000020000000000000000 "
+                "tick=2048"
+            ),
+        )
+
+    class FakeBackend:
+        def __init__(self, template_profile: str, mcpat_binary: Path | None = None):
+            self.template_profile = template_profile
+            self.mcpat_binary = mcpat_binary
+
+        def run(self, target_dir: Path):
+            return {"power_total": 2.0, "target_dir": str(target_dir)}
+
+    monkeypatch.setattr(
+        "sdc_agent.differential.compile_static_elf", fake_compile_static_elf
+    )
+    monkeypatch.setattr("sdc_agent.differential.run_qemu", fake_run_qemu)
+    monkeypatch.setattr("sdc_agent.differential.run_gem5", fake_run_gem5)
+    monkeypatch.setattr("sdc_agent.differential.McPATBackend", FakeBackend)
+
+    result = run_differential(
+        source=source,
+        elf=tmp_path / "case-vec.elf",
+        gem5_outdir=tmp_path / "m5out-vec",
+        fault_model="vector_register_bit_flip",
+        fault_target="v0",
+        fault_bit=65,
+        fault_tick=2048,
+    )
+
+    assert result.status == "sdc_found"
+    assert result.fault_request is not None
+    assert result.fault_request["execution_plane"] == "gem5_scripted"
+    assert result.fault_request["observation"]["target_kind"] == "vector_register"
+    assert result.fault_request["observation"]["register_name"] == "v0"

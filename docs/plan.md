@@ -14,6 +14,11 @@
    - `Sub-P3 mcpat-arm`
    - `Sub-P4 SDC-Agent control plane`
 
+补充规则：
+
+1. 上述子项目现在统一纳入 root monorepo 管理。
+2. phase 跟踪和代码审阅必须同时覆盖 root control plane 与核心子项目路径域。
+
 ---
 
 ## 2. 计划全景
@@ -22,12 +27,20 @@
 | --- | --- | --- | --- | --- |
 | Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
-| Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 92% |
+| Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 96% |
 | Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
 | Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 70% |
-| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 早期 | 20% |
-| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 已启动 | 25% |
+| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 进行中 | 30% |
+| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 进行中 | 40% |
 | Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 规划中 | 10% |
+
+### 2.2 横向基础设施
+
+除功能 phase 外，仓库治理现在还包含一个横向基础设施目标：
+
+1. `Monorepo Governance`
+   - 统一管理 root + `microprobe/qemu/gem5/mcpat/opendcdiag`
+   - 统一输出 domain 级状态、diff、审阅边界与 phase 映射
 
 ### 2.1 关键路径
 
@@ -164,7 +177,7 @@
 
 1. source / ELF / golden digest cache 与 artifact index 已接入，但更细粒度 artifact/index 仍可继续增强。
 2. 功耗链路已进入标准步骤，但仍缺更大规模批处理复用。
-3. profile contract 已显式化，但 `HW_AGGRESSIVE` 默认生成器尚未正式实现。
+3. `HW_AGGRESSIVE` 已有真实默认 instruction picker，但其生成结果仍需更大规模验证和 profile-specific 评分收敛。
 
 ### 交付物
 
@@ -182,6 +195,7 @@
 5. `SIM_SAFE / HW_AGGRESSIVE` profile contract 已进入 generation / inner loop / CLI。
 6. `fault_model=none` 的 inner loop 运行不会污染 `fault_runs`。
 7. 已新增 inner-loop 定向测试、cache 复用测试与 profile 合同测试。
+8. `HW_AGGRESSIVE` 现在已不再默认回退到 `SIM_SAFE`，而是走 profile-aware instruction picker。
 
 ### 验收标准
 
@@ -327,6 +341,8 @@
 1. gem5 `BaseCPU` 已暴露 ARM 整数寄存器读取与 bit flip helper。
 2. `sdc_kunpeng920_se.py` 已支持对可脚本化的 register bit flip 请求执行并打印注入观测日志。
 3. 控制面现在会记录 fault manifest、fault execution plane，以及 injector confidence / promotion readiness 聚合信号。
+4. gem5 现在已扩到第二类脚本化 fault model：`vector_register_bit_flip`。
+5. `sdc_kunpeng920_se.py` 现在支持对 `v0/q0` 这类 ARM 向量寄存器执行 128-bit 范围内 bit flip，并输出注入观测日志。
 
 ### 验收标准
 
@@ -359,9 +375,9 @@
 
 ### 当前阻塞
 
-1. 控制面现在已有 `hardware_lane.py` / `sdc_promote_hw.py`，但 `OpenDCDiagBackend` 仍是 placeholder，尚未接入真实运行。
-2. 当前 emitter 已会生成执行 promoted asm 并校验 golden digest 的 opendcdiag-shaped source artifact，但还未接入实际 meson/build/run 主链。
-3. 仍没有 hardware result parser / ingest importer。
+1. 当前 `OpenDCDiagBackend` 已能执行 staging workspace + `meson setup/compile` + `sandstone --beta -e ...` 主链，但仍缺真实硬件环境下的稳定性验证。
+2. 当前 build/run 发生在 promotion bundle 派生出的 runtime workspace，还未和真实机器部署流程绑定。
+3. 结果 ingest 已接入 Vault，但仍缺更丰富的 detector 解析与机器环境元数据回灌。
 
 ### 交付物
 
@@ -382,6 +398,21 @@
    - `meson.build.fragment`
 5. 生成的 promotion source 现在会真实执行 promoted asm，并以已有 golden digest 作为失败/通过判据，而不是无条件成功。
 6. 控制面现在会写入 `hardware_promotions`，并把硬件 lane 产物同步到 artifacts projection。
+7. `OpenDCDiagBackend` 现在已支持：
+   - staging workspace copy
+   - 注入 promoted source 到 `tests/cpu/arm64`
+   - patch `meson.build`
+   - `meson setup`
+   - `meson compile`
+   - `sandstone --beta -e <test>`
+8. 已新增 `sdc_agent/hardware_results.py` 与 `tools/sdc_ingest_hw_results.py`。
+9. `tools/sdc_agent.py` 现在已支持：
+   - `run-hw`
+   - `ingest-hw`
+10. hardware 结果现在可自动写回：
+   - `hardware_runs`
+   - `hardware_promotions.status`
+   - testcase `metadata.hardware_lane`
 
 ### 验收标准
 

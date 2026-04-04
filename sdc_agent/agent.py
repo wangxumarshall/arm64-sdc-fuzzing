@@ -24,6 +24,8 @@ from microprobe.driver.genetic import EvolutionConfig, SDCFuzzingGeneticDriver
 from .differential import DEFAULT_GEM5_CONFIG
 from .campaign import execute_campaign
 from .hardware_lane import run_hardware_promotion
+from .hardware_results import execute_hardware_promotions, ingest_hardware_result
+from .managed_domains import collect_domain_statuses, diff_for_domain, summarize_managed_domains
 from .preflight import DEFAULT_GEM5_BINARY, DEFAULT_MCPAT_BINARY
 from .scheduler import FeedbackScheduler
 from .vault import SDCVault
@@ -69,6 +71,7 @@ def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
         "counts": counts,
         "top_candidates": top_candidates,
         "top_promotion_candidates": top_promotion_candidates,
+        "managed_domains_summary": summarize_managed_domains(REPO_ROOT),
     }
 
 
@@ -232,6 +235,12 @@ def _build_parser() -> argparse.ArgumentParser:
     status.add_argument("--db", type=Path, default=DEFAULT_VAULT)
     status.add_argument("--limit", type=int, default=5)
 
+    domains = subparsers.add_parser("domains")
+    domains.add_argument("--recent-limit", type=int, default=5)
+
+    diff = subparsers.add_parser("diff")
+    diff.add_argument("--domain", required=True)
+
     generate = subparsers.add_parser("generate")
     generate.add_argument("--db", type=Path, default=DEFAULT_VAULT)
     _add_common_generation_args(generate)
@@ -263,6 +272,23 @@ def _build_parser() -> argparse.ArgumentParser:
     promote_hw.add_argument("--limit", type=int, default=4)
     promote_hw.add_argument("--backend-name", default="opendcdiag")
     promote_hw.add_argument("--dry-run", action="store_true")
+
+    run_hw = subparsers.add_parser("run-hw")
+    run_hw.add_argument("--db", type=Path, default=DEFAULT_VAULT)
+    run_hw.add_argument("--limit", type=int, default=4)
+    run_hw.add_argument("--backend-name", default="opendcdiag")
+    run_hw.add_argument("--machine-id", default="local-opendcdiag")
+    run_hw.add_argument(
+        "--runtime-root",
+        type=Path,
+        default=DEFAULT_AGENT_OUTPUT_ROOT / "hardware-runtime",
+    )
+    run_hw.add_argument("--no-auto-ingest", action="store_true")
+
+    ingest_hw = subparsers.add_parser("ingest-hw")
+    ingest_hw.add_argument("--db", type=Path, default=DEFAULT_VAULT)
+    ingest_hw.add_argument("--result-json", type=Path, required=True)
+    ingest_hw.add_argument("--machine-id", default=None)
 
     cycle = subparsers.add_parser("cycle")
     cycle.add_argument("--db", type=Path, default=DEFAULT_VAULT)
@@ -296,6 +322,16 @@ def main() -> int:
 
     if args.command == "status":
         payload = summarize_vault(args.db, limit=args.limit)
+    elif args.command == "domains":
+        payload = {
+            "repo_root": str(REPO_ROOT),
+            "domains": [
+                status.to_dict()
+                for status in collect_domain_statuses(REPO_ROOT, recent_limit=args.recent_limit)
+            ],
+        }
+    elif args.command == "diff":
+        payload = diff_for_domain(args.domain, REPO_ROOT)
     elif args.command == "generate":
         payload = generate_batch(
             db_path=args.db,
@@ -333,6 +369,21 @@ def main() -> int:
             limit=args.limit,
             backend_name=args.backend_name,
             dry_run=args.dry_run,
+        )
+    elif args.command == "run-hw":
+        payload = execute_hardware_promotions(
+            db_path=args.db,
+            limit=args.limit,
+            backend_name=args.backend_name,
+            machine_id=args.machine_id,
+            runtime_root=args.runtime_root,
+            auto_ingest=not args.no_auto_ingest,
+        )
+    elif args.command == "ingest-hw":
+        payload = ingest_hardware_result(
+            db_path=args.db,
+            result_json=args.result_json,
+            machine_id=args.machine_id,
         )
     else:
         payload = run_cycle(

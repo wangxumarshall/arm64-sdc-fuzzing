@@ -9,10 +9,6 @@ __pycache__/
 .entire
 out.area
 out.ptrace
-artifacts/runtime/
+qemu/build-user/
 artifacts/materialized/
-gem5/
-microprobe/
-mcpat/
-opendcdiag/
-qemu/
+artifacts/runtime/

@@ -1306,6 +1306,48 @@ class SDCVault:
             (testcase_key, limit),
         ).fetchall()
 
+    def list_all_hardware_promotions(
+        self,
+        *,
+        limit: int = 200,
+        status: Optional[str] = None,
+        backend_name: Optional[str] = None,
+    ) -> List[sqlite3.Row]:
+        clauses: List[str] = []
+        params: List[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if backend_name is not None:
+            clauses.append("backend_name = ?")
+            params.append(backend_name)
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT *
+            FROM hardware_promotions
+            {where_clause}
+            ORDER BY updated_at DESC, promotion_id DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        return self._conn.execute(query, params).fetchall()
+
+    def get_hardware_promotion(
+        self,
+        testcase_key: str,
+        *,
+        backend_name: str,
+        external_test_name: str,
+    ) -> Optional[sqlite3.Row]:
+        return self._conn.execute(
+            """
+            SELECT *
+            FROM hardware_promotions
+            WHERE testcase_key = ? AND backend_name = ? AND external_test_name = ?
+            """,
+            (testcase_key, backend_name, external_test_name),
+        ).fetchone()
+
     def list_hardware_runs(
         self, testcase_key: str, *, limit: int = 50
     ) -> List[sqlite3.Row]:

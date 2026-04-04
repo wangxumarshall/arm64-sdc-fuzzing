@@ -1,0 +1,44 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Executables
+*.exe
+*.out
+*.app
+
+# McPAT custom
+mcpat
+obj_opt/
+obj_dbg/
+McPAT_input/
+results/
+
+# Standalone CACTI build outputs
+cacti/cacti
+cacti/obj_opt/
+cacti/obj_dbg/

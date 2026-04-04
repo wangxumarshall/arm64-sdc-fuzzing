@@ -1,0 +1,18 @@
+# Copyright 2026
+# Licensed under the Apache License, Version 2.0
+
+Name: armv8_common
+Description: ARMv8 Common Microarchitecture
+Microarchitecture:
+  Class: Arm64Microarchitecture
+  Module: ./microarchitecture.py
+Element:
+  Class: Arm64MicroarchitectureElement
+  Module: ./element.py
+  YAML: ./element.yaml
+Element_type:
+  Class: Arm64MicroarchitectureElementType
+  Module: ./element_type.py
+  YAML: ./element_type.yaml
+Instruction_properties:
+  Path: ./instruction_props

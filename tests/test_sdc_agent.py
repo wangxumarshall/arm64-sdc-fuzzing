@@ -49,6 +49,7 @@ def test_sdc_agent_summarizes_vault(tmp_path):
     assert payload["top_candidates"][0]["testcase_key"] == "sdc-seed"
     assert payload["top_candidates"][0]["promotion_ready"] is True
     assert payload["top_promotion_candidates"][0]["testcase_key"] == "sdc-seed"
+    assert payload["managed_domains_summary"]["domain_count"] == 6
 
 
 def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, tmp_path):

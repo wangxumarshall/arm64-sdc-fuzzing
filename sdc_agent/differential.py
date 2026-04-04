@@ -22,12 +22,12 @@ DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 FAULT_MANIFEST_NAME = "sdc_fault_request.json"
 INJECTED_EXECUTION_PLANES = {"gem5_scripted"}
 INJECTION_LOG_PATTERN = re.compile(
-    r"\[sdc\] injected register bit flip: "
+    r"\[sdc\] injected (?P<target_kind>register|vector register) bit flip: "
     r"cpu=(?P<cpu_index>\d+) "
     r"reg=(?P<register_name>[A-Za-z0-9_]+) "
     r"bit=(?P<fault_bit>\d+) "
-    r"old=0x(?P<old_value>[0-9a-fA-F]+) "
-    r"new=0x(?P<new_value>[0-9a-fA-F]+) "
+    r"old=(?P<old_value>0x[0-9a-fA-F]+) "
+    r"new=(?P<new_value>0x[0-9a-fA-F]+) "
     r"tick=(?P<fault_tick>\d+)"
 )
 
@@ -157,11 +157,12 @@ def parse_injection_observation(
         groups = match.groupdict()
         return {
             "cpu_index": int(groups["cpu_index"]),
+            "target_kind": groups["target_kind"].replace(" ", "_"),
             "register_name": groups["register_name"],
             "fault_bit": int(groups["fault_bit"]),
             "fault_tick": int(groups["fault_tick"]),
-            "old_value": f"0x{groups['old_value'].lower()}",
-            "new_value": f"0x{groups['new_value'].lower()}",
+            "old_value": groups["old_value"].lower(),
+            "new_value": groups["new_value"].lower(),
         }
     return None
 

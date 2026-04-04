@@ -25,7 +25,8 @@
 2. `Phase 1` 已完成。
 3. `Phase 2` 已完成真实端到端验证。
 4. `Phase 4` 已开始首版实现，并已把 injector confidence / promotion readiness 接入调度层。
-5. `Phase 6` 已从“只有表结构和 placeholder”推进到“有 promotion selector、有 bundle emitter、有 DB 写回”的 bootstrap 阶段。
+5. `Phase 6` 已从“只有表结构和 placeholder”推进到“有 promotion selector、有 bundle emitter、有 build/run backend、有结果 ingest 写回”的阶段。
+6. 仓库治理层面，`root + microprobe + qemu + gem5 + mcpat + opendcdiag` 现已合并到单一 monorepo 管理。
 
 当前阶段的核心目标：
 
@@ -49,24 +50,29 @@
    就足以承载 Phase 2 所需的 ELF 与 golden cache 复用。
 4. source / ELF / golden 三层 cache 已经能显著减少重复执行时的内循环开销。
 5. `SIM_SAFE / HW_AGGRESSIVE` 现在已经是显式 profile contract，而不是隐式约定。
-6. 当前 `HW_AGGRESSIVE` 默认生成路径仍会诚实回退到 `SIM_SAFE`，直到激进生成器真正实现。
+6. `HW_AGGRESSIVE` 默认生成路径现在已具备 profile-aware instruction picker，不再默认回退到 `SIM_SAFE`。
 7. inner loop 现在会优先从 artifacts 索引恢复 source / ELF，而不是只依赖 metadata 路径。
 8. `fault_model=none` 的过滤必须继续保留，否则 inner loop 会污染 outer loop 的 `fault_runs` 历史。
 9. 当前控制平面已经足够支撑继续推进，不需要重写整体骨架。
 10. 通过 source-built `qemu-system-aarch64`、source-built `mcpat`、`aarch64-conda-linux-gnu-gcc`、`gem5` 的真实链路，`Phase 2` baseline case 已得到端到端通过。
 11. gem5 SE 路径下，支持的 register bit flip 请求已经不再只是 manifest 记录；脚本侧可以观测并打印真实注入事件。
-12. 控制面现在需要区分三类外循环 fault run：
+12. 当前脚本化 injector 已扩到第二类 fault model：`vector_register_bit_flip`，可对 `v0/q0` 这类 ARM 向量寄存器执行 128-bit 范围内 bit flip。
+13. 控制面现在需要区分三类外循环 fault run：
    - `gem5_scripted`
    - `manifest_only`
    - `request_only`
-13. 仅有 digest 差异还不足以支撑 promotion；还需要把 injector 是否真正被观测到收敛成独立聚合信号。
-14. 重新核对已完成 phases 后，最明显的遗漏并不在 `Phase 0/1/2` 主链，而在 `Phase 6` 控制面完全未起步。
-15. `promotion_plan` 只有在真正落地成 `hardware_promotions + artifact bundle` 后，才算进入硬件验证环，而不是仅停留在 scheduler 输出。
-16. `hardware_promotions / hardware_runs` 表此前已经存在，但没有对应的 source artifact 与控制面入口；这条缺口现已补上第一段。
-17. 对已实现 phase 做对抗性复盘后，确认 `manifest_only / request_only` 这类无实际注入运行如果被当作 `MATCHED/SDC_FOUND`，会直接污染 outer-loop 结论；现在这类运行会 fail closed 为 `no_injection / INVALID`。
-18. 先前 `Phase 4` 的 semihost validation 在请求 fault 但没有实际 injector 证据时，存在“同一 workload 跑多次也能绿”的风险；现在这条路径已改为诚实地返回 `INVALID`。
-19. `materialize.py` 与 `phase2_validation.py` 之前共享的 digest harness 只初始化了部分寄存器并在 capture 阶段自我污染；现在两条路径都已改成 defined-state harness。
-20. `hardware_lane.py` 生成的 promotion source 之前是无条件 `EXIT_SUCCESS` 的占位物；现在会真实执行 promoted asm 并对比 golden digest。
+14. 仅有 digest 差异还不足以支撑 promotion；还需要把 injector 是否真正被观测到收敛成独立聚合信号。
+15. 重新核对已完成 phases 后，最明显的遗漏并不在 `Phase 0/1/2` 主链，而在 `Phase 6` 控制面完全未起步。
+16. `promotion_plan` 只有在真正落地成 `hardware_promotions + artifact bundle` 后，才算进入硬件验证环，而不是仅停留在 scheduler 输出。
+17. `hardware_promotions / hardware_runs` 表此前已经存在，但没有对应的 source artifact 与控制面入口；这条缺口现已补上第一段。
+18. 对已实现 phase 做对抗性复盘后，确认 `manifest_only / request_only` 这类无实际注入运行如果被当作 `MATCHED/SDC_FOUND`，会直接污染 outer-loop 结论；现在这类运行会 fail closed 为 `no_injection / INVALID`。
+19. 先前 `Phase 4` 的 semihost validation 在请求 fault 但没有实际 injector 证据时，存在“同一 workload 跑多次也能绿”的风险；现在这条路径已改为诚实地返回 `INVALID`。
+20. `materialize.py` 与 `phase2_validation.py` 之前共享的 digest harness 只初始化了部分寄存器并在 capture 阶段自我污染；现在两条路径都已改成 defined-state harness。
+21. `hardware_lane.py` 生成的 promotion source 之前是无条件 `EXIT_SUCCESS` 的占位物；现在会真实执行 promoted asm 并对比 golden digest。
+22. 此前 `gem5/mcpat/microprobe/opendcdiag/qemu` 只是 root 外部的 nested repo；现在这些核心子项目源码已被正式导入 root monorepo 历史。
+23. `qemu` 内部 submodule 保留不变，但现在作为 root monorepo 内部的 gitlink 路径存在。
+24. `OpenDCDiagBackend` 已不再是 placeholder；控制面现已具备 staging build/run 主链。
+25. `hardware result ingest` 与 `run-hw / ingest-hw` CLI 已接入，硬件 lane 现在能把运行结果回写到 `hardware_runs`。
 
 ---
 
@@ -80,6 +86,7 @@
    - [state.md](/Users/wangxu/1-project/sdc-fuzzing/docs/state.md)
 2. `doc/` 已重命名为 `docs/`。
 3. 状态类文档已合并，不再保留 root 级镜像。
+4. 已新增 [monorepo.md](/Users/wangxu/1-project/sdc-fuzzing/docs/monorepo.md) 作为单仓治理规则文档。
 
 ### 3.2 Phase 1
 
@@ -112,6 +119,7 @@
 7. artifacts 索引现在可为 inner loop 提供 source / ELF fallback。
 8. evolution 继续可作为 inner loop 的尾段使用。
 9. [validate_phase2_e2e.py](/Users/wangxu/1-project/sdc-fuzzing/tools/validate_phase2_e2e.py) 已提供真实端到端验证入口。
+10. `HW_AGGRESSIVE` 现在已会保留 `requested/effective = HW_AGGRESSIVE`，并使用独立的激进指令选择集合。
 
 ### 3.4 Phase 4
 
@@ -149,6 +157,33 @@
    - 绑定到 `sdc_memory`
    - capture 时不再覆盖原始寄存器值
 21. `hardware_lane.py` 生成的 promotion source 现在会执行 promoted asm 并对比 `qemu_golden_hash`。
+22. gem5 现在已支持第二类脚本化 fault model：`vector_register_bit_flip`。
+23. `differential.py` 现在能解析向量寄存器 bit flip 的注入观测日志。
+
+### 3.5 Monorepo Governance
+
+1. `microprobe/`、`qemu/`、`gem5/`、`mcpat/`、`opendcdiag/` 的完整历史已通过 subtree 导入 root。
+2. root 不再整目录忽略这些核心子项目。
+3. 新增 monorepo managed domains：
+   - `root-control-plane`
+   - `microprobe`
+   - `qemu`
+   - `gem5`
+   - `mcpat`
+   - `opendcdiag`
+4. `tools/sdc_agent.py status` 现在会输出 `managed_domains_summary`。
+5. `tools/sdc_agent.py domains` 与 `tools/sdc_agent.py diff --domain <id>` 已提供单仓域视图。
+
+### 3.6 Phase 6 Runtime
+
+1. [opendcdiag_backend.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/power_backends/opendcdiag_backend.py) 现在已支持 staging workspace build/run。
+2. [hardware_results.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py) 现在已支持：
+   - 执行已发出的 promotion
+   - ingest `result.json`
+   - 写回 `hardware_runs`
+3. [sdc_ingest_hw_results.py](/Users/wangxu/1-project/sdc-fuzzing/tools/sdc_ingest_hw_results.py) 与 [sdc_agent.py](/Users/wangxu/1-project/sdc-fuzzing/tools/sdc_agent.py) 已提供：
+   - `run-hw`
+   - `ingest-hw`
 
 ---
 
@@ -178,10 +213,15 @@
 20. `python3 -m pytest tests/test_run_sdc_differential.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py tests/test_sdc_campaign.py tests/test_sdc_vault_v2.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_hardware_lane.py -q`
 21. `python3 -m pytest tests/test_sdc_phase2_validation.py tests/test_sdc_phase4_validation.py tests/test_sdc_materialize.py -q`
 22. `python3 -m pytest tests -q`
+23. `python3 tools/sdc_agent.py domains`
+24. `python3 tools/sdc_agent.py diff --domain microprobe`
+25. `python3 tools/sdc_ingest_hw_results.py --help`
+26. `python3 tools/sdc_agent.py run-hw --help`
+27. `python3 tools/sdc_agent.py ingest-hw --help`
 
 当前结果：
 
-1. 主仓测试：`49 passed`
+1. 主仓测试：`54 passed`
 2. `microprobe` 定向测试：`8 passed`
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
@@ -210,6 +250,17 @@
 15. `Phase 2` semihost harness defined-state 回归已通过：
    - `tests/test_sdc_phase2_validation.py`
 16. 当前相关回归总计：`49 passed`
+17. monorepo domain 管理回归已补齐：
+   - `tests/test_managed_domains.py`
+18. `Phase 6 build/run + ingest` 回归已通过：
+   - `tests/test_power_backends.py`
+   - `tests/test_hardware_results.py`
+19. 当前相关回归总计：`53 passed`
+20. `Phase 5 vector fault model` 控制面回归已通过：
+   - `tests/test_run_sdc_differential.py`
+21. 当前相关回归总计：`54 passed`
+22. `HW_AGGRESSIVE` profile 回归已通过：
+   - `tests/test_sdc_generation_profiles.py`
 
 ---
 
@@ -217,12 +268,12 @@
 
 当前最主要的未完成项和风险如下：
 
-1. `HW_AGGRESSIVE` 默认生成器尚未正式落地。
-2. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
+1. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
 3. outer loop 已能识别脚本化 fault execution plane，但更大范围的 injector 联动仍未完成。
-4. gem5 real fault injector 目前只对受支持的 register bit flip 有脚本化路径；更多 fault model 仍未实现。
-5. `opendcdiag-arm` promotion 已接入控制面的 bootstrap 版，但真实 build/run 与 result ingest 仍未完成。
-6. 当前生成的 opendcdiag source artifact 已能执行 promoted asm + golden digest 对比，但还未接入真实 opendcdiag build/run/result-ingest 主链。
+4. gem5 real fault injector 目前已支持 `register_bit_flip` 与 `vector_register_bit_flip` 两类脚本化路径；更多 fault model 仍未实现。
+5. `opendcdiag-arm` promotion 已接入控制面的 build/run + ingest 版，但仍缺真实硬件环境下的稳定性验证。
+6. 当前 opendcdiag runtime 仍依赖 staging workspace build，而不是目标机器上的长期部署流程。
+7. `qemu` 内部 submodule 仍保留，不属于本轮单仓扁平化范围。
 
 ---
 
@@ -236,8 +287,10 @@
 2. 推进 `Phase 5: gem5 真实 fault injector`
    - 扩展 fault model，不只停留在 register bit flip
 3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
-   - 将 promotion bundle 接入真实 opendcdiag build/run
-   - 补 `hardware result ingest` 和回灌 CLI
+   - 将 staging build/run 升级为真实机器部署流程
+   - 增强 detector 解析与机器元数据回灌
+4. 持续推进 `Monorepo Governance`
+   - 用 domain 级视图承接后续所有跨子项目开发和审阅
 
 ---
 

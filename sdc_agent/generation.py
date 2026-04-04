@@ -82,14 +82,6 @@ def resolve_profile_contract(
     effective = requested
     fallback_reason: Optional[str] = None
 
-    # The aggressive profile contract exists now, but its default generator path
-    # still shares the sim-safe instruction picker until the aggressive policy
-    # is implemented. Explicit instruction names are treated as an advanced
-    # caller contract and are allowed through unchanged.
-    if requested == PROFILE_HW_AGGRESSIVE and not instruction_names:
-        effective = PROFILE_SIM_SAFE
-        fallback_reason = "aggressive_default_generator_not_yet_implemented"
-
     return {
         "requested_profile_name": requested,
         "effective_profile_name": effective,
@@ -152,13 +144,17 @@ def resolve_instruction_names(target: Any, instruction_names: Sequence[str]) -> 
     return resolved
 
 
-def collect_sensitive_instructions(target: Any) -> List[Any]:
+def collect_sensitive_instructions(
+    target: Any,
+    *,
+    profile_name: str = PROFILE_SIM_SAFE,
+) -> List[Any]:
     try:
         from microprobe.targets.arm64.policies.sdc_fuzzing_policy import (
             SDCSensitiveAnalyzer,
         )
 
-        return SDCSensitiveAnalyzer(target).collect()
+        return SDCSensitiveAnalyzer(target).collect(profile_name=profile_name)
     except Exception:
         instructions = list(getattr(target.isa, "instructions", {}).values())
         instructions.sort(key=lambda item: item.name)
@@ -170,6 +166,7 @@ def select_instructions(
     *,
     sequence_length: int,
     seed: int,
+    profile_name: str = PROFILE_SIM_SAFE,
     instruction_names: Optional[Sequence[str]] = None,
 ) -> List[Any]:
     rng = random.Random(seed)
@@ -178,7 +175,7 @@ def select_instructions(
         if instruction_names is not None
         else []
     )
-    sensitive = collect_sensitive_instructions(target)
+    sensitive = collect_sensitive_instructions(target, profile_name=profile_name)
     candidates = sensitive or list(getattr(target.isa, "instructions", {}).values())
 
     if not candidates and not preferred:
@@ -230,6 +227,7 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
         target,
         sequence_length=sequence_length,
         seed=seed,
+        profile_name=profile_contract["effective_profile_name"],
         instruction_names=instruction_names,
     )
 
@@ -237,6 +235,7 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
         target,
         wrapper,
         instructions=instructions,
+        profile_name=profile_contract["effective_profile_name"],
         benchmark_size=benchmark_size,
         dependency_distance=dependency_distance,
         sequence_length=sequence_length,

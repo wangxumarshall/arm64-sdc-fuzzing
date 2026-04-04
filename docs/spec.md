@@ -4,6 +4,17 @@
 
 本规范定义 `SDC-Agent` 的完成态架构：把 `microprobe-arm`、`qemu`、`gem5`、`mcpat-arm`、`opendcdiag-arm` 组织成一套围绕 ARM64 指令流持续演进的 SDC 自动化发现系统。
 
+当前仓库管理模型已经升级为单一 monorepo：
+
+1. root 仓现在直接承载并追踪：
+   - `microprobe/`
+   - `qemu/`
+   - `gem5/`
+   - `mcpat/`
+   - `opendcdiag/`
+2. 这些核心子项目不再作为 root 之外的独立管理边界使用。
+3. phase、状态、审阅与变更归属统一按 monorepo 内路径域管理，详见 [monorepo.md](/Users/wangxu/1-project/sdc-fuzzing/docs/monorepo.md)。
+
 这里所说的“100% 实现 README 中的目标和愿景”，不是宣称当前仓库已经完成，而是要求：
 
 1. 目标架构必须与现有源码事实一致。
@@ -44,15 +55,15 @@
 ### 2.1 子项目边界
 
 1. `Sub-P1 microprobe-arm`
-   - 当前是生成与静态分析的真实来源。
+   - 当前是 monorepo 内生成与静态分析的真实来源。
 2. `Sub-P2-1 qemu`
-   - 当前角色是 golden legality validator；主仓库尚未依赖 qemu fork 级修改。
+   - 当前是 monorepo 内 golden legality validator。
 3. `Sub-P2-2 gem5`
-   - 当前角色是 fault-side simulator 和 stats producer；真实 injector 尚未落地。
+   - 当前是 monorepo 内 fault-side simulator 和 stats producer；真实 injector 尚未落地。
 4. `Sub-P3 mcpat-arm`
-   - 当前通过 `pypat` 与 gem5 输出对接。
+   - 当前在 monorepo 内通过 `pypat` 与 gem5 输出对接。
 5. `Sub-P0 opendcdiag-arm`
-   - 当前拥有 ARM64 SDC 检测资产，但还未承担 promotion/backfill 流程。
+   - 当前在 monorepo 内拥有 ARM64 SDC 检测资产，但还未承担完整 promotion/backfill 流程。
 
 ---
 

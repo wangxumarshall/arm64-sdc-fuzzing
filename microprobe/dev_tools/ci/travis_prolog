@@ -1,0 +1,10 @@
+set -e
+pip3 install -U -r requirements_devel.txt
+pip3 install -U -r requirements.txt
+pip3 install -U $(pip3 list | grep "\." | cut -d " " -f 1)
+pip3 install -U $(pip3 list | grep "\." | cut -d " " -f 1)
+pip3 install -U $(pip3 list | grep "\." | cut -d " " -f 1)
+export NEEDINSTALL=False
+export PATH=$PATH:$(pwd)/toolchain_riscv/install/bin
+export PATH=$PATH:/opt/at14.0/bin
+for file in ./targets/*/dev_tools/ci/travis.sh ; do if [ -f $file ]; then . $file; fi; done;

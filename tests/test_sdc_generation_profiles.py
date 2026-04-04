@@ -12,15 +12,15 @@ def test_normalize_profile_name_accepts_supported_profiles():
     assert normalize_profile_name("HW_AGGRESSIVE") == PROFILE_HW_AGGRESSIVE
 
 
-def test_resolve_profile_contract_falls_back_for_default_aggressive_generation():
+def test_resolve_profile_contract_keeps_aggressive_profile_active():
     contract = resolve_profile_contract(
         profile_name=PROFILE_HW_AGGRESSIVE,
         instruction_names=None,
     )
 
     assert contract["requested_profile_name"] == PROFILE_HW_AGGRESSIVE
-    assert contract["effective_profile_name"] == PROFILE_SIM_SAFE
-    assert contract["fallback_reason"] == "aggressive_default_generator_not_yet_implemented"
+    assert contract["effective_profile_name"] == PROFILE_HW_AGGRESSIVE
+    assert contract["fallback_reason"] is None
 
 
 def test_generate_testcase_records_requested_and_effective_profile(tmp_path):
@@ -42,8 +42,6 @@ def test_generate_testcase_records_requested_and_effective_profile(tmp_path):
 
     metadata = generated["metadata"]
     assert metadata["requested_profile_name"] == PROFILE_HW_AGGRESSIVE
-    assert metadata["profile_name"] == PROFILE_SIM_SAFE
-    assert metadata["effective_profile_name"] == PROFILE_SIM_SAFE
-    assert metadata["profile_contract"]["fallback_reason"] == (
-        "aggressive_default_generator_not_yet_implemented"
-    )
+    assert metadata["profile_name"] == PROFILE_HW_AGGRESSIVE
+    assert metadata["effective_profile_name"] == PROFILE_HW_AGGRESSIVE
+    assert metadata["profile_contract"]["fallback_reason"] is None
