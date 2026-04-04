@@ -1,0 +1,42 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "296b114cf63f",
+  "session_id": "53933468-7680-4c6a-82a5-05a3daccbf75",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-04T16:10:33.36992Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "microprobe/src/microprobe/utils/arm64_isa_catalog.py",
+    "microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json",
+    "microprobe/targets/arm64/isa/armv8-common/isa.py",
+    "microprobe/targets/arm64/tests/targets/test_target_contract.py",
+    "microprobe/targets/arm64/tests/tools/test_a64_isa_audit.py",
+    "microprobe/targets/arm64/tests/tools/test_a64_isa_catalog.py",
+    "microprobe/targets/arm64/tools/a64_isa_audit.py",
+    "microprobe/targets/arm64/tools/a64_isa_catalog.py",
+    "microprobe/targets/generic/tools/mp_sdc_offline_gen.py"
+  ],
+  "agent": "Claude Code",
+  "model": "qwen3-max-2026-01-23",
+  "turn_id": "f004cbdba898",
+  "token_usage": {
+    "input_tokens": 230390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 826,
+    "api_call_count": 5
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-04T16:10:33.349298Z",
+    "agent_lines": 119792,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 62,
+    "total_committed": 119792,
+    "agent_percentage": 100
+  }
+}

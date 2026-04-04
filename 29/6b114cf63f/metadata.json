@@ -1,0 +1,33 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "296b114cf63f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "microprobe/src/microprobe/utils/arm64_isa_catalog.py",
+    "microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json",
+    "microprobe/targets/arm64/isa/armv8-common/isa.py",
+    "microprobe/targets/arm64/tests/targets/test_target_contract.py",
+    "microprobe/targets/arm64/tests/tools/test_a64_isa_audit.py",
+    "microprobe/targets/arm64/tests/tools/test_a64_isa_catalog.py",
+    "microprobe/targets/arm64/tools/a64_isa_audit.py",
+    "microprobe/targets/arm64/tools/a64_isa_catalog.py",
+    "microprobe/targets/generic/tools/mp_sdc_offline_gen.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/29/6b114cf63f/0/metadata.json",
+      "transcript": "/29/6b114cf63f/0/full.jsonl",
+      "content_hash": "/29/6b114cf63f/0/content_hash.txt",
+      "prompt": "/29/6b114cf63f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 230390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 826,
+    "api_call_count": 5
+  }
+}
