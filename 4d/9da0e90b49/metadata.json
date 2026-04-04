@@ -1,0 +1,31 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "4d9da0e90b49",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "mcpat/XML_Parse.cc",
+    "mcpat/gem5_mcpat_parser/kunpeng920_profile.json",
+    "mcpat/gem5_mcpat_parser/template_arm64_kunpeng920.xml",
+    "mcpat/memoryctrl.cc",
+    "mcpat/processor.cc",
+    "mcpat/pypat/conversion/arm64_kunpeng920.py",
+    "mcpat/pypat/conversion/convert.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4d/9da0e90b49/0/metadata.json",
+      "transcript": "/4d/9da0e90b49/0/full.jsonl",
+      "content_hash": "/4d/9da0e90b49/0/content_hash.txt",
+      "prompt": "/4d/9da0e90b49/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 230390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 826,
+    "api_call_count": 5
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "4d9da0e90b49",
+  "session_id": "53933468-7680-4c6a-82a5-05a3daccbf75",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-04T16:19:44.134152Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "mcpat/XML_Parse.cc",
+    "mcpat/gem5_mcpat_parser/kunpeng920_profile.json",
+    "mcpat/gem5_mcpat_parser/template_arm64_kunpeng920.xml",
+    "mcpat/memoryctrl.cc",
+    "mcpat/processor.cc",
+    "mcpat/pypat/conversion/arm64_kunpeng920.py",
+    "mcpat/pypat/conversion/convert.py"
+  ],
+  "agent": "Claude Code",
+  "model": "qwen3-max-2026-01-23",
+  "turn_id": "f004cbdba898",
+  "token_usage": {
+    "input_tokens": 230390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 826,
+    "api_call_count": 5
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-04T16:19:44.115521Z",
+    "agent_lines": 1295,
+    "human_added": 416,
+    "human_modified": 53,
+    "human_removed": 0,
+    "total_committed": 1764,
+    "agent_percentage": 73.4126984126984
+  }
+}
