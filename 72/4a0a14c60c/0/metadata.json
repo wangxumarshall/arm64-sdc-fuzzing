@@ -1,0 +1,42 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "724a0a14c60c",
+  "session_id": "53933468-7680-4c6a-82a5-05a3daccbf75",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-04T16:31:24.197093Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "gem5/configs/example/arm/sdc_fault_request.py",
+    "gem5/configs/example/arm/sdc_kunpeng920_se.py",
+    "gem5/tests/test_sdc_fault_request.py",
+    "sdc_agent/differential.py",
+    "sdc_agent/generation.py",
+    "sdc_agent/hardware_results.py",
+    "tests/test_hardware_results.py",
+    "tests/test_run_sdc_differential.py",
+    "tests/test_sdc_generation_profiles.py"
+  ],
+  "agent": "Claude Code",
+  "model": "qwen3-max-2026-01-23",
+  "turn_id": "f004cbdba898",
+  "token_usage": {
+    "input_tokens": 230390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 826,
+    "api_call_count": 5
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-04T16:31:24.180993Z",
+    "agent_lines": 709,
+    "human_added": 167578,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 168287,
+    "agent_percentage": 0.4213040817175421
+  }
+}
