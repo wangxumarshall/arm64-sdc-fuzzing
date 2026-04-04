@@ -65,6 +65,7 @@
 #include "debug/SyscallVerbose.hh"
 #include "debug/Thread.hh"
 #include "mem/page_table.hh"
+#include "mem/se_translating_port_proxy.hh"
 #include "params/BaseCPU.hh"
 #include "sim/clocked_object.hh"
 #include "sim/full_system.hh"
@@ -927,6 +928,45 @@ BaseCPU::injectArmVecRegisterBitFlip(ThreadID tid,
     bytes[byte_index] ^= static_cast<uint8_t>(1u << bit_offset);
     tc->setReg(reg, &updated);
     return formatArmVecRegHex(updated);
+}
+
+uint8_t
+BaseCPU::readArmVirtMemoryByte(ThreadID tid, Addr vaddr) const
+{
+    panic_if(FullSystem,
+             "Virtual-memory fault injection helper is only supported in SE mode");
+    panic_if(tid >= threadContexts.size(),
+             "Invalid thread id %d for virtual memory read", tid);
+    ThreadContext *tc = threadContexts[tid];
+    panic_if(tc == nullptr, "Null thread context for id %d", tid);
+    panic_if(tc->getProcessPtr() == nullptr,
+             "Thread id %d does not have an active SE process", tid);
+
+    uint8_t current = 0;
+    SETranslatingPortProxy proxy(tc, SETranslatingPortProxy::Never);
+    panic_if(!proxy.tryReadBlob(vaddr, &current, sizeof(current)),
+             "Failed to translate guest virtual address %#x for memory read",
+             vaddr);
+    return current;
+}
+
+uint8_t
+BaseCPU::injectArmVirtMemoryBitFlip(ThreadID tid,
+                                    Addr vaddr,
+                                    unsigned bit_index)
+{
+    panic_if(bit_index >= 8,
+             "Invalid bit index %u for byte-scoped virtual memory flip",
+             bit_index);
+    const uint8_t current = readArmVirtMemoryByte(tid, vaddr);
+    const uint8_t updated = current ^ static_cast<uint8_t>(1u << bit_index);
+
+    ThreadContext *tc = threadContexts[tid];
+    SETranslatingPortProxy proxy(tc, SETranslatingPortProxy::Never);
+    panic_if(!proxy.tryWriteBlob(vaddr, &updated, sizeof(updated)),
+             "Failed to translate guest virtual address %#x for memory write",
+             vaddr);
+    return updated;
 }
 
 AddressMonitor::AddressMonitor()

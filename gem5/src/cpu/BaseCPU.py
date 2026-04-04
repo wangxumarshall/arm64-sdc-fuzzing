@@ -76,6 +76,8 @@ class BaseCPU(ClockedObject):
         PyBindMethod("readArmVecRegisterByName"),
         PyBindMethod("injectArmIntRegisterBitFlip"),
         PyBindMethod("injectArmVecRegisterBitFlip"),
+        PyBindMethod("readArmVirtMemoryByte"),
+        PyBindMethod("injectArmVirtMemoryBitFlip"),
     ]
 
     @classmethod

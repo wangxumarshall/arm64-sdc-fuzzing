@@ -99,6 +99,23 @@
   - `tests/test_sdc_generation_strategies.py` (created)
   - `tests/test_sdc_scheduler.py` (updated)
 
+### PR Check Follow-up
+- **Status:** complete
+- Actions taken:
+  - Reworked `memory_bit_flip` semantics so `mem:0x...` is treated as guest virtual memory in SE mode instead of raw physical memory.
+  - Added strict validation for malformed CPU-qualified fault targets and incompatible fault-model/target-kind combinations.
+  - Added BaseCPU helpers for virtual-memory byte read/bit-flip and updated the gem5 ARM64 SE runner to use them.
+  - Re-ran differential, gem5 helper, outer-loop, and phase4 validation regressions after the fix.
+- Files created/modified:
+  - `gem5/configs/example/arm/sdc_fault_request.py` (updated)
+  - `gem5/configs/example/arm/sdc_kunpeng920_se.py` (updated)
+  - `gem5/src/cpu/base.hh` (updated)
+  - `gem5/src/cpu/base.cc` (updated)
+  - `gem5/src/cpu/BaseCPU.py` (updated)
+  - `sdc_agent/differential.py` (updated)
+  - `gem5/tests/test_sdc_fault_request.py` (updated)
+  - `tests/test_run_sdc_differential.py` (updated)
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
@@ -122,6 +139,7 @@
 | Phase 7 strategy regressions | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_strategies.py tests/test_sdc_generation_profiles.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_genetic_driver.py` | Template/PCFG generation and mutation advice integrate cleanly | `23 passed` | PASS |
 | Expanded root test suite after Phase 5/6/7 work | `/Users/wangxu/anaconda3/bin/pytest -q tests` | Entire root suite remains green after new work | `65 passed` | PASS |
 | Expanded targeted subtree tests | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py gem5/tests/test_sdc_fault_request.py` | Microprobe target contract and gem5 helper stay green | `13 passed` | PASS |
+| PR-check follow-up regressions | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_run_sdc_differential.py gem5/tests/test_sdc_fault_request.py tests/test_sdc_outer_loop.py tests/test_sdc_phase4_validation.py` | Guest-virtual memory injection semantics and fail-fast parsing do not break orchestration | `22 passed` | PASS |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
@@ -131,6 +149,7 @@
 | 2026-04-04 | `/usr/bin/python3 -m pytest` lacked `pytest` | 1 | Switched to identifying the intended Python environment instead of repeating the same failing invocation |
 | 2026-04-04 | Initial catalog sample validation picked feature-gated `ABS` encodings and failed on default `.arch armv8-a` | 1 | Kept clang validation as best-effort metadata for catalog sequences instead of using it as the sole acceptance criterion for full-catalog generation |
 | 2026-04-04 | Initial `neon_fma_heavy` template used `LD1`/`ST1` and failed during wrapper assembly generation | 1 | Replaced unstable mnemonics with aggressive but wrapper-stable `LDP/STP` in the first template version |
+| 2026-04-05 | First `memory_bit_flip` path wrote through physical memory and could target the wrong byte in SE mode | 1 | Switched the injector to an SE-translating virtual-memory helper and tightened fault-target validation |
 
 ## 5-Question Reboot Check
 | Question | Answer |

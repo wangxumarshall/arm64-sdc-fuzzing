@@ -367,6 +367,7 @@ def test_run_differential_parses_memory_fault_observation(monkeypatch, tmp_path)
                     "fault_tick": 4096,
                     "implemented_in_script": True,
                     "target_kind": "memory",
+                    "address_space": "guest_virtual",
                     "memory_address": 4096,
                     "memory_address_hex": "0x1000",
                     "binary": str((tmp_path / "case-mem.elf").resolve()),
@@ -382,7 +383,7 @@ def test_run_differential_parses_memory_fault_observation(monkeypatch, tmp_path)
             "SDC_HASH=5678",
             (
                 "[sdc] injected memory bit flip: "
-                "cpu=0 addr=0x0000000000001001 bit=9 "
+                "cpu=0 base=0x0000000000001000 addr=0x0000000000001001 bit=9 "
                 "old=0xaa new=0xa8 tick=4096"
             ),
         )
@@ -415,5 +416,7 @@ def test_run_differential_parses_memory_fault_observation(monkeypatch, tmp_path)
     assert result.status == "sdc_found"
     assert result.fault_request is not None
     assert result.fault_request["execution_plane"] == "gem5_scripted"
+    assert result.fault_request["address_space"] == "guest_virtual"
     assert result.fault_request["observation"]["target_kind"] == "memory"
+    assert result.fault_request["observation"]["memory_base_address"] == "0x0000000000001000"
     assert result.fault_request["observation"]["memory_address"] == "0x0000000000001001"

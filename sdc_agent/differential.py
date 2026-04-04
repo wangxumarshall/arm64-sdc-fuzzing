@@ -33,6 +33,7 @@ REGISTER_INJECTION_LOG_PATTERN = re.compile(
 MEMORY_INJECTION_LOG_PATTERN = re.compile(
     r"\[sdc\] injected memory bit flip: "
     r"cpu=(?P<cpu_index>\d+) "
+    r"base=(?P<memory_base_address>0x[0-9a-fA-F]+) "
     r"addr=(?P<memory_address>0x[0-9a-fA-F]+) "
     r"bit=(?P<fault_bit>\d+) "
     r"old=(?P<old_value>0x[0-9a-fA-F]+) "
@@ -168,6 +169,7 @@ def parse_injection_observation(
                 return {
                     "cpu_index": int(groups["cpu_index"]),
                     "target_kind": "memory",
+                    "memory_base_address": groups["memory_base_address"].lower(),
                     "memory_address": groups["memory_address"].lower(),
                     "fault_bit": int(groups["fault_bit"]),
                     "fault_tick": int(groups["fault_tick"]),

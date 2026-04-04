@@ -543,6 +543,21 @@ class BaseCPU : public ClockedObject
                                             const std::string &reg_name,
                                             unsigned bit_index);
 
+    /**
+     * Read a guest virtual-memory byte through the active SE translation path.
+     */
+    uint8_t readArmVirtMemoryByte(ThreadID tid, Addr vaddr) const;
+
+    /**
+     * Flip a bit in a guest virtual-memory byte through the active SE
+     * translation path.
+     *
+     * @return The byte value after the bit flip.
+     */
+    uint8_t injectArmVirtMemoryBitFlip(ThreadID tid,
+                                       Addr vaddr,
+                                       unsigned bit_index);
+
   public:
     /**
      * @{

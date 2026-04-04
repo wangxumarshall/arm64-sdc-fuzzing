@@ -73,6 +73,8 @@
 - Upgraded `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py` so hardware ingest now normalizes detectors, derives detector summaries, and preserves richer machine/build/runtime context.
 - Added `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation_strategies.py` plus `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/mutation_advisor.py`, wiring template/PCFG generation and heuristic mutation advice into the existing generation/scheduler/agent path.
 - Verified these additions with targeted and broad regressions, including root `tests`, ARM64 target tests, and gem5 helper tests.
+- PR-check follow-up confirmed that the first `memory_bit_flip` implementation was semantically wrong in SE mode because it wrote via physical memory instead of the guest virtual translation path.
+- The fix was to move memory fault injection onto an SE-translating path anchored on `ThreadContext`, and to make malformed CPU prefixes or incompatible target kinds fail fast instead of degrading into no-op simulations.
 
 ---
 *Update this file after every 2 view/browser/search operations*

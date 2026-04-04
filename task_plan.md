@@ -61,6 +61,7 @@ Phase 5
 | Keep `SIM_SAFE` / `HW_AGGRESSIVE` on the existing synthesizer path and add new catalog-driven profiles for `ALL_GENERATABLE`, `EXECUTABLE_SAFE`, and `KUNPENG920_STRESS` | The repo already has a stable executable subset; full-catalog generation has different constraints and should not regress the current differential flow |
 | Use Python-side gem5 `physProxy` for the first real `memory_bit_flip` injector path | This closes a meaningful Phase 5 gap without waiting for a deeper C++ memory injector |
 | Add template/PCFG generation as an opt-in strategy layered over the current generator | This matches the Phase 7 contract without destabilizing the existing baseline path |
+| Treat `mem:0x...` fault targets as guest virtual addresses and reject malformed CPU prefixes early | This avoids silently corrupting the wrong memory in SE mode and prevents wasted campaign runs |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |

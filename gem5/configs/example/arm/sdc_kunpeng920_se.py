@@ -28,6 +28,7 @@ from sdc_fault_request import (
     build_fault_request,
     parse_fault_target,
     supports_scripted_fault_injection,
+    validate_fault_request,
     write_fault_request,
 )
 
@@ -133,6 +134,10 @@ def _build_memory(mem_channels: int, mem_size: str):
 def _write_fault_manifest(args: argparse.Namespace) -> Path:
     outdir = Path(m5.options.outdir).resolve()
     manifest_path = outdir / "sdc_fault_request.json"
+    validate_fault_request(
+        fault_model=args.fault_model,
+        fault_target=args.fault_target,
+    )
     request = build_fault_request(
         fault_model=args.fault_model,
         fault_target=args.fault_target,
@@ -146,17 +151,6 @@ def _write_fault_manifest(args: argparse.Namespace) -> Path:
         clk_freq=args.clk_freq,
     )
     return write_fault_request(request, manifest_path)
-
-
-def _inject_memory_bit_flip(board: SimpleBoard, address: int, bit_index: int) -> tuple[int, int, int]:
-    byte_address = address + (bit_index // 8)
-    byte_offset = bit_index % 8
-    current_byte = board.physProxy.read(byte_address, 1)
-    old_value = current_byte[0]
-    new_value = old_value ^ (1 << byte_offset)
-    board.physProxy.write(byte_address, bytes([new_value]))
-    return byte_address, old_value, new_value
-
 
 def main() -> None:
     args = _build_parser().parse_args()
@@ -261,14 +255,19 @@ def main() -> None:
     elif args.fault_model == "memory_bit_flip":
         if target.memory_address is None:
             raise RuntimeError("memory_bit_flip requires a mem:<addr> fault target.")
-        byte_address, old_value, new_value = _inject_memory_bit_flip(
-            board,
-            target.memory_address,
-            args.fault_bit,
-        )
+        if target.address_space != "guest_virtual":
+            raise RuntimeError(
+                "memory_bit_flip currently only supports guest virtual targets "
+                "(use mem:0x...)."
+            )
+        byte_vaddr = target.memory_address + (args.fault_bit // 8)
+        byte_bit = args.fault_bit % 8
+        old_value = cpu.readArmVirtMemoryByte(0, byte_vaddr)
+        new_value = cpu.injectArmVirtMemoryBitFlip(0, byte_vaddr, byte_bit)
         print(
             "[sdc] injected memory bit flip: "
-            f"cpu={cpu_index} addr=0x{byte_address:016x} bit={args.fault_bit} "
+            f"cpu={cpu_index} base=0x{target.memory_address:016x} "
+            f"addr=0x{byte_vaddr:016x} bit={args.fault_bit} "
             f"old=0x{old_value:02x} new=0x{new_value:02x} tick={m5.curTick()}",
             file=sys.stderr,
         )

@@ -13,6 +13,7 @@ class FaultTargetSpec:
     raw_target: str = ""
     cpu_index: int = 0
     target_kind: str = "none"
+    address_space: str = "none"
     register_name: str = ""
     memory_address: Optional[int] = None
 
@@ -31,6 +32,7 @@ class FaultRequest:
     fault_tick: Optional[int] = None
     implemented_in_script: bool = False
     target_kind: str = "none"
+    address_space: str = "none"
     cpu_index: int = 0
     register_name: str = ""
     memory_address: Optional[int] = None
@@ -58,12 +60,24 @@ def parse_fault_target(raw_target: str) -> FaultTargetSpec:
 
     cpu_index = 0
     remainder = target
-    if target.lower().startswith("cpu") and ":" in target:
+    if target.lower().startswith("cpu"):
+        if ":" not in target:
+            raise ValueError(
+                f"Malformed CPU-qualified fault target: {raw_target}. "
+                "Expected format cpuN:<target>."
+            )
         prefix, remainder = target.split(":", 1)
         cpu_prefix = prefix.strip().lower()
-        if cpu_prefix.startswith("cpu") and cpu_prefix[3:].isdigit():
-            cpu_index = int(cpu_prefix[3:])
-            remainder = remainder.strip()
+        if not cpu_prefix.startswith("cpu"):
+            raise ValueError(f"Malformed CPU-qualified fault target: {raw_target}")
+        cpu_suffix = cpu_prefix[3:]
+        if not cpu_suffix.isdigit():
+            raise ValueError(
+                f"Malformed CPU-qualified fault target: {raw_target}. "
+                "CPU prefix must be cpuN where N is a decimal core index."
+            )
+        cpu_index = int(cpu_suffix)
+        remainder = remainder.strip()
 
     lowered = remainder.lower()
     if lowered.startswith("mem:"):
@@ -74,13 +88,30 @@ def parse_fault_target(raw_target: str) -> FaultTargetSpec:
             raw_target=target,
             cpu_index=cpu_index,
             target_kind="memory",
+            address_space="guest_virtual",
             memory_address=int(address_text, 0),
         )
+
+    if lowered.startswith(("physmem:", "paddr:")):
+        address_text = remainder.split(":", 1)[1].strip()
+        if not address_text:
+            raise ValueError(f"Invalid physical memory fault target: {raw_target}")
+        return FaultTargetSpec(
+            raw_target=target,
+            cpu_index=cpu_index,
+            target_kind="memory",
+            address_space="physical",
+            memory_address=int(address_text, 0),
+        )
+
+    if not remainder:
+        raise ValueError(f"Invalid fault target: {raw_target}")
 
     return FaultTargetSpec(
         raw_target=target,
         cpu_index=cpu_index,
         target_kind="register",
+        address_space="register_file",
         register_name=remainder,
     )
 
@@ -106,12 +137,62 @@ def supports_scripted_fault_injection(
 
     normalized_model = str(fault_model).strip().lower()
     if normalized_model == "register_bit_flip":
-        return target.target_kind == "register" and is_int_register and fault_bit < 64
+        return (
+            target.target_kind == "register"
+            and target.address_space == "register_file"
+            and is_int_register
+            and fault_bit < 64
+        )
     if normalized_model == "vector_register_bit_flip":
-        return target.target_kind == "register" and is_vec_register and fault_bit < 128
+        return (
+            target.target_kind == "register"
+            and target.address_space == "register_file"
+            and is_vec_register
+            and fault_bit < 128
+        )
     if normalized_model == "memory_bit_flip":
-        return target.target_kind == "memory" and target.memory_address is not None and fault_bit >= 0
+        return (
+            target.target_kind == "memory"
+            and target.address_space == "guest_virtual"
+            and target.memory_address is not None
+            and fault_bit >= 0
+        )
     return False
+
+
+def validate_fault_request(
+    *,
+    fault_model: str,
+    fault_target: str,
+) -> FaultTargetSpec:
+    target = parse_fault_target(fault_target)
+    normalized_model = str(fault_model).strip().lower()
+
+    if normalized_model == "none":
+        return target
+
+    if normalized_model in {"register_bit_flip", "vector_register_bit_flip"}:
+        if target.target_kind != "register" or target.address_space != "register_file":
+            raise ValueError(
+                f"{fault_model} requires a register fault target such as x0 or v0; "
+                f"got {fault_target!r}."
+            )
+        return target
+
+    if normalized_model == "memory_bit_flip":
+        if target.target_kind != "memory":
+            raise ValueError(
+                f"{fault_model} requires a memory fault target such as mem:0x1000; "
+                f"got {fault_target!r}."
+            )
+        if target.address_space != "guest_virtual":
+            raise ValueError(
+                f"{fault_model} currently requires guest virtual addresses using mem:0x...; "
+                f"got {fault_target!r}."
+            )
+        return target
+
+    return target
 
 
 def build_fault_request(
@@ -127,7 +208,10 @@ def build_fault_request(
     num_cores: int,
     clk_freq: str,
 ) -> FaultRequest:
-    target = parse_fault_target(fault_target)
+    target = validate_fault_request(
+        fault_model=fault_model,
+        fault_target=fault_target,
+    )
     return FaultRequest(
         fault_model=fault_model,
         fault_target=fault_target,
@@ -135,6 +219,7 @@ def build_fault_request(
         fault_tick=fault_tick,
         implemented_in_script=implemented_in_script,
         target_kind=target.target_kind,
+        address_space=target.address_space,
         cpu_index=target.cpu_index,
         register_name=target.register_name,
         memory_address=target.memory_address,
