@@ -1,0 +1,34 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "85e91a57d0ce",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "gem5/configs/example/arm/sdc_baremetal_se.py",
+    "gem5/src/arch/arm/ArmSeWorkload.py",
+    "gem5/src/arch/arm/SConscript",
+    "gem5/src/arch/arm/bare_metal/process.cc",
+    "gem5/src/arch/arm/bare_metal/process.hh",
+    "gem5/src/arch/arm/bare_metal/workload.cc",
+    "gem5/src/arch/arm/bare_metal/workload.hh",
+    "gem5/src/arch/arm/linux/se_workload.cc",
+    "microprobe/sdc_offline_gen.py",
+    "microprobe/targets/arm64/isa/armv8-common/isa.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/85/e91a57d0ce/0/metadata.json",
+      "transcript": "/85/e91a57d0ce/0/full.jsonl",
+      "content_hash": "/85/e91a57d0ce/0/content_hash.txt",
+      "prompt": "/85/e91a57d0ce/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7320332,
+    "cache_creation_tokens": 177978,
+    "cache_read_tokens": 210827212,
+    "output_tokens": 520635,
+    "api_call_count": 1873
+  }
+}
