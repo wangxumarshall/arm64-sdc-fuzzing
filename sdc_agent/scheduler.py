@@ -15,6 +15,7 @@ from .vault import SDCVault
 DEFAULT_CANDIDATE_STATUSES = (
     "INNER_READY",
     "POWER_READY",
+    "STATIC_DONE",
     "PENDING",
     "GOLDEN_READY",
     "MATCHED",
@@ -31,6 +32,7 @@ class SchedulerConfig:
     scan_limit_per_status: int = 128
     memory_bonus_weight: float = 0.25
     pending_signal: float = 0.35
+    static_done_signal: float = 0.40
     golden_ready_signal: float = 0.45
     power_ready_signal: float = 0.50
     inner_ready_signal: float = 0.60
@@ -46,6 +48,12 @@ class RankedCandidate:
     policy_name: str
     status: str
     static_score: float
+    profile_name: str
+    instruction_families: tuple[str, ...]
+    diversity_bonus: float
+    legality_factor: float
+    power_gain: float
+    inner_value_score: float
     sdc_signal: float
     power_total: float
     fitness: float
@@ -79,6 +87,23 @@ def _command_summary(payload: Any) -> Dict[str, Any]:
         "timed_out": bool(payload.get("timed_out", False)),
         "status": "ok" if payload.get("returncode") == 0 else "failed",
     }
+
+
+def _profile_name(metadata: Mapping[str, Any]) -> str:
+    for key in ("requested_profile_name", "profile_name", "effective_profile_name"):
+        value = metadata.get(key)
+        if value:
+            return str(value)
+    return "SIM_SAFE"
+
+
+def _instruction_families(instruction_names: Sequence[Any]) -> tuple[str, ...]:
+    families = {
+        str(name).strip().split("_")[0].upper()
+        for name in instruction_names
+        if str(name).strip()
+    }
+    return tuple(sorted(families))
 
 
 def _float_or_default(value: Any, default: float = 0.0) -> float:
@@ -152,6 +177,58 @@ def compute_fitness(
     return static_score * max(float(sdc_signal), 0.0) / (power + 1.0)
 
 
+def compute_legality_factor(status: str) -> float:
+    normalized = normalize_runner_status(status)
+    factors = {
+        "PENDING": 0.45,
+        "STATIC_DONE": 0.60,
+        "GOLDEN_READY": 0.85,
+        "POWER_READY": 0.95,
+        "INNER_READY": 1.0,
+        "MATCHED": 1.05,
+        "SDC_FOUND": 1.10,
+    }
+    return factors.get(normalized, 0.25)
+
+
+def compute_power_gain(power_total: Optional[float]) -> float:
+    if power_total in (None, ""):
+        return 1.0
+    power = max(float(power_total), 0.0)
+    return 1.0 + (1.0 / (1.0 + power))
+
+
+def compute_diversity_bonus(
+    instruction_names: Sequence[Any],
+    *,
+    profile_name: str = "SIM_SAFE",
+) -> float:
+    families = _instruction_families(instruction_names)
+    bonus = 1.0
+    if families:
+        bonus += min(max(len(families) - 1, 0), 6) * 0.04
+        if any(
+            family in {"LDR", "STR", "LDUR", "STUR", "LDP", "STP", "LDXR", "STXR", "LDAR", "STLR", "CAS", "LDADD", "LDCLR", "LDSET", "SWP"}
+            for family in families
+        ):
+            bonus += 0.03
+    if str(profile_name).strip().upper() == "HW_AGGRESSIVE":
+        bonus += 0.05
+    return bonus
+
+
+def compute_inner_value_score(
+    static_risk_score: float,
+    *,
+    status: str,
+    power_total: Optional[float],
+    diversity_bonus: float,
+) -> float:
+    return max(float(static_risk_score), 0.0) * compute_legality_factor(
+        status
+    ) * compute_power_gain(power_total) * max(float(diversity_bonus), 1.0)
+
+
 class FeedbackScheduler:
     """Select candidates and fold execution feedback back into the vault."""
 
@@ -166,6 +243,8 @@ class FeedbackScheduler:
             return self.config.inner_ready_signal
         if normalized == "POWER_READY":
             return self.config.power_ready_signal
+        if normalized == "STATIC_DONE":
+            return self.config.static_done_signal
         if normalized == "GOLDEN_READY":
             return self.config.golden_ready_signal
         if normalized == "MATCHED":
@@ -181,6 +260,7 @@ class FeedbackScheduler:
             "INNER_READY": 3,
             "POWER_READY": 2,
             "GOLDEN_READY": 2,
+            "STATIC_DONE": 1,
             "PENDING": 1,
             "MATCHED": 0,
         }
@@ -211,6 +291,8 @@ class FeedbackScheduler:
             candidate.promotion_readiness_score,
             candidate.injector_confidence_score,
             candidate.outer_value_score,
+            candidate.inner_value_score,
+            candidate.diversity_bonus,
             candidate.fitness,
             float(candidate.row.get("risk_score", 0.0)),
             float(candidate.row.get("memory_pressure_score", 0.0)),
@@ -223,6 +305,7 @@ class FeedbackScheduler:
             candidate.promotion_readiness_score,
             candidate.injector_confidence_score,
             candidate.outer_value_score,
+            candidate.inner_value_score,
             candidate.fitness,
             float(candidate.row.get("risk_score", 0.0)),
             -int(candidate.row.get("test_id", 0)),
@@ -233,12 +316,34 @@ class FeedbackScheduler:
         metadata = _decode_metadata(payload)
         outer_loop_metrics = self._outer_loop_metrics(metadata)
         scheduler_metadata = metadata.get("scheduler", {})
+        profile_name = _profile_name(metadata)
+        instruction_families = _instruction_families(
+            metadata.get("instruction_names", [])
+        )
+        diversity_bonus = compute_diversity_bonus(
+            metadata.get("instruction_names", []),
+            profile_name=profile_name,
+        )
         sdc_signal = float(
             scheduler_metadata.get(
                 "sdc_signal", self.status_signal(payload.get("status", "PENDING"))
             )
         )
         power_total = scheduler_metadata.get("power_total", payload.get("mcpat_power"))
+        static_risk_score = _float_or_default(
+            scheduler_metadata.get("static_risk_score"),
+            _float_or_default(payload.get("risk_score"), 0.0),
+        )
+        legality_factor = compute_legality_factor(str(payload.get("status", "PENDING")))
+        power_gain = compute_power_gain(
+            float(power_total) if power_total not in (None, "") else None
+        )
+        inner_value_score = compute_inner_value_score(
+            static_risk_score,
+            status=str(payload.get("status", "PENDING")),
+            power_total=(float(power_total) if power_total not in (None, "") else None),
+            diversity_bonus=diversity_bonus,
+        )
         fitness = compute_fitness(
             payload.get("ace_score", 0.0),
             payload.get("ibr_score", 0.0),
@@ -259,6 +364,12 @@ class FeedbackScheduler:
             policy_name=str(payload["policy_name"]),
             status=str(payload["status"]),
             static_score=static_score,
+            profile_name=profile_name,
+            instruction_families=instruction_families,
+            diversity_bonus=diversity_bonus,
+            legality_factor=legality_factor,
+            power_gain=power_gain,
+            inner_value_score=inner_value_score,
             sdc_signal=sdc_signal,
             power_total=float(power_total or 0.0),
             fitness=fitness,
@@ -325,11 +436,17 @@ class FeedbackScheduler:
                     "parent_testcase_key": candidate.testcase_key,
                     "target_name": candidate.target_name,
                     "policy_name": candidate.policy_name,
+                    "profile_name": candidate.profile_name,
                     "fitness": candidate.fitness,
+                    "inner_value_score": candidate.inner_value_score,
+                    "diversity_bonus": candidate.diversity_bonus,
+                    "legality_factor": candidate.legality_factor,
+                    "power_gain": candidate.power_gain,
                     "preferred_stride_bytes": candidate.metadata.get(
                         "preferred_stride_bytes", 8192
                     ),
                     "instruction_names": candidate.metadata.get("instruction_names", []),
+                    "instruction_families": list(candidate.instruction_families),
                     "status": candidate.status,
                 }
             )
@@ -385,6 +502,24 @@ class FeedbackScheduler:
             "sdc_signal": sdc_signal,
             "power_total": power_total if power_total is not None else 0.0,
             "fitness": fitness,
+            "static_risk_score": _float_or_default(payload.get("risk_score"), 0.0),
+            "diversity_bonus": compute_diversity_bonus(
+                metadata.get("instruction_names", []),
+                profile_name=_profile_name(metadata),
+            ),
+            "legality_factor": compute_legality_factor(normalized_status),
+            "power_gain": compute_power_gain(
+                float(power_total) if power_total is not None else None
+            ),
+            "inner_value_score": compute_inner_value_score(
+                _float_or_default(payload.get("risk_score"), 0.0),
+                status=normalized_status,
+                power_total=(float(power_total) if power_total is not None else None),
+                diversity_bonus=compute_diversity_bonus(
+                    metadata.get("instruction_names", []),
+                    profile_name=_profile_name(metadata),
+                ),
+            ),
             "mcpat_error": result.get("mcpat_error"),
         }
 
@@ -441,6 +576,12 @@ def _ranked_candidate_to_dict(candidate: RankedCandidate) -> Dict[str, Any]:
         "policy_name": candidate.policy_name,
         "status": candidate.status,
         "static_score": candidate.static_score,
+        "profile_name": candidate.profile_name,
+        "instruction_families": list(candidate.instruction_families),
+        "diversity_bonus": candidate.diversity_bonus,
+        "legality_factor": candidate.legality_factor,
+        "power_gain": candidate.power_gain,
+        "inner_value_score": candidate.inner_value_score,
         "sdc_signal": candidate.sdc_signal,
         "power_total": candidate.power_total,
         "fitness": candidate.fitness,

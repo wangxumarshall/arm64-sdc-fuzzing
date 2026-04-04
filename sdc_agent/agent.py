@@ -56,6 +56,9 @@ def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
             {
                 "testcase_key": candidate.testcase_key,
                 "status": candidate.status,
+                "profile_name": candidate.profile_name,
+                "inner_value_score": candidate.inner_value_score,
+                "diversity_bonus": candidate.diversity_bonus,
                 "fitness": candidate.fitness,
                 "outer_value_score": candidate.outer_value_score,
                 "injector_confidence_score": candidate.injector_confidence_score,

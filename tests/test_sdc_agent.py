@@ -47,6 +47,7 @@ def test_sdc_agent_summarizes_vault(tmp_path):
     assert payload["counts"]["PENDING"] == 1
     assert payload["counts"]["SDC_FOUND"] == 1
     assert payload["top_candidates"][0]["testcase_key"] == "sdc-seed"
+    assert payload["top_candidates"][0]["inner_value_score"] > 0.0
     assert payload["top_candidates"][0]["promotion_ready"] is True
     assert payload["top_promotion_candidates"][0]["testcase_key"] == "sdc-seed"
     assert payload["managed_domains_summary"]["domain_count"] == 6

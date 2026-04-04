@@ -1,6 +1,12 @@
 import json
 
-from sdc_agent.scheduler import FeedbackScheduler, compute_fitness, normalize_runner_status
+from sdc_agent.scheduler import (
+    FeedbackScheduler,
+    compute_diversity_bonus,
+    compute_fitness,
+    compute_inner_value_score,
+    normalize_runner_status,
+)
 from sdc_agent.vault import SDCVault, VaultEntry
 
 
@@ -16,6 +22,25 @@ def test_compute_fitness_prefers_lower_power_when_signal_matches():
     low_power = compute_fitness(0.8, 0.9, 0.5, 1.0, 2.0)
     high_power = compute_fitness(0.8, 0.9, 0.5, 1.0, 9.0)
     assert low_power > high_power
+
+
+def test_inner_value_score_rewards_diversity_and_legality():
+    low_diversity = compute_inner_value_score(
+        0.8,
+        status="PENDING",
+        power_total=None,
+        diversity_bonus=compute_diversity_bonus(["MOVZ_X_V0"]),
+    )
+    high_diversity = compute_inner_value_score(
+        0.8,
+        status="GOLDEN_READY",
+        power_total=1.0,
+        diversity_bonus=compute_diversity_bonus(
+            ["MOVZ_X_V0", "LDR_XI", "STR_XI", "ADD_XI"],
+            profile_name="HW_AGGRESSIVE",
+        ),
+    )
+    assert high_diversity > low_diversity
 
 
 def test_scheduler_records_execution_feedback_and_updates_vault(tmp_path):
@@ -205,6 +230,53 @@ def test_scheduler_select_candidates_prefers_observed_outer_loop_signal(tmp_path
         vault.close()
 
 
+def test_scheduler_select_candidates_prefers_higher_inner_value_score_when_outer_signals_tie(
+    tmp_path,
+):
+    vault = SDCVault(tmp_path / "vault.sqlite3")
+    try:
+        common_fields = {
+            "asm_content": "// inner",
+            "target_name": "arm64",
+            "ace_score": 0.8,
+            "ibr_score": 0.8,
+            "memory_pressure_score": 0.4,
+            "risk_score": 0.8,
+            "status": "GOLDEN_READY",
+        }
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="narrow-seed",
+                metadata={
+                    "profile_name": "SIM_SAFE",
+                    "instruction_names": ["MOVZ_X_V0", "MOVZ_X_V0", "MOVZ_X_V0"],
+                },
+                **common_fields,
+            )
+        )
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="diverse-seed",
+                metadata={
+                    "profile_name": "HW_AGGRESSIVE",
+                    "instruction_names": ["MOVZ_X_V0", "LDR_XI", "STR_XI", "ADD_XI"],
+                },
+                **common_fields,
+            )
+        )
+
+        scheduler = FeedbackScheduler()
+        ranked = scheduler.select_candidates(vault, 2)
+        assert [candidate.testcase_key for candidate in ranked] == [
+            "diverse-seed",
+            "narrow-seed",
+        ]
+        assert ranked[0].inner_value_score > ranked[1].inner_value_score
+        assert ranked[0].diversity_bonus > ranked[1].diversity_bonus
+    finally:
+        vault.close()
+
+
 def test_scheduler_promotion_plan_filters_and_orders_candidates(tmp_path):
     vault = SDCVault(tmp_path / "vault.sqlite3")
     try:
@@ -269,5 +341,39 @@ def test_scheduler_promotion_plan_filters_and_orders_candidates(tmp_path):
         ]
         assert plan[0]["promotion_ready"] is True
         assert plan[0]["fault_execution_plane"] == {"gem5_scripted": 2}
+    finally:
+        vault.close()
+
+
+def test_scheduler_mutation_plan_exposes_phase3_feedback_breakdown(tmp_path):
+    vault = SDCVault(tmp_path / "vault.sqlite3")
+    try:
+        vault.upsert_testcase(
+            VaultEntry(
+                testcase_key="seed-feedback",
+                asm_content="// feedback",
+                target_name="arm64",
+                ace_score=0.8,
+                ibr_score=0.7,
+                memory_pressure_score=0.5,
+                risk_score=0.8,
+                status="INNER_READY",
+                metadata={
+                    "profile_name": "HW_AGGRESSIVE",
+                    "instruction_names": ["MOVZ_X_V0", "LDR_XI", "STR_XI", "ADD_XI"],
+                    "preferred_stride_bytes": 12288,
+                },
+            )
+        )
+
+        scheduler = FeedbackScheduler()
+        plan = scheduler.mutation_plan(vault, 1)
+
+        assert len(plan) == 1
+        assert plan[0]["parent_testcase_key"] == "seed-feedback"
+        assert plan[0]["profile_name"] == "HW_AGGRESSIVE"
+        assert plan[0]["inner_value_score"] > 0.0
+        assert plan[0]["diversity_bonus"] > 1.0
+        assert "LDR" in plan[0]["instruction_families"]
     finally:
         vault.close()

@@ -102,6 +102,7 @@ def compute_promotion_score(
     base_score = max(
         candidate.promotion_readiness_score,
         candidate.outer_value_score * 0.5,
+        candidate.inner_value_score * 0.25,
         candidate.fitness * 0.1,
     )
 

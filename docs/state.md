@@ -16,6 +16,7 @@
 
 当前主阶段：
 
+- `Phase 3: 功耗驱动的进化闭环 hardening`
 - `Phase 4: 低频外循环产品化`
 - `Phase 6: 硬件 promotion lane bootstrap`
 
@@ -27,6 +28,7 @@
 4. `Phase 4` 已开始首版实现，并已把 injector confidence / promotion readiness 接入调度层。
 5. `Phase 6` 已从“只有表结构和 placeholder”推进到“有 promotion selector、有 bundle emitter、有 build/run backend、有结果 ingest 写回”的阶段。
 6. 仓库治理层面，`root + microprobe + qemu + gem5 + mcpat + opendcdiag` 现已合并到单一 monorepo 管理。
+7. `Phase 3` 当前已补上 inner-loop value scoring、diversity-aware mutation planning 与 profile-aware evolution fallback 这条控制面缺口。
 
 当前阶段的核心目标：
 
@@ -73,6 +75,9 @@
 23. `qemu` 内部 submodule 保留不变，但现在作为 root monorepo 内部的 gitlink 路径存在。
 24. `OpenDCDiagBackend` 已不再是 placeholder；控制面现已具备 staging build/run 主链。
 25. `hardware result ingest` 与 `run-hw / ingest-hw` CLI 已接入，硬件 lane 现在能把运行结果回写到 `hardware_runs`。
+26. 调度层现在已经把 `inner_value_score / diversity_bonus / legality_factor / power_gain` 作为独立反馈信号暴露出来，不再只剩单一 `fitness`。
+27. Python 3 genetic driver 现在会做 profile-aware fallback instruction recovery、diversity-aware partner selection，并把这些决策写进 lineage metadata。
+28. 仓库根目录现在可以直接运行 `pytest` 收集 `tests/` 下的控制面测试，不再依赖隐式解释器入口行为。
 
 ---
 
@@ -160,7 +165,23 @@
 22. gem5 现在已支持第二类脚本化 fault model：`vector_register_bit_flip`。
 23. `differential.py` 现在能解析向量寄存器 bit flip 的注入观测日志。
 
-### 3.5 Monorepo Governance
+### 3.5 Phase 3
+
+1. [scheduler.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py) 现在已显式区分：
+   - `static_score`
+   - `inner_value_score`
+   - `diversity_bonus`
+   - `legality_factor`
+   - `power_gain`
+2. `mutation_plan()` 现在会把 profile、instruction family 与 inner-loop feedback breakdown 一起暴露给后续进化步骤。
+3. [genetic.py](/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/driver/genetic.py) 现在会：
+   - 按 profile 恢复 fallback instruction set
+   - 基于 instruction family diversity 选择 partner
+   - 过滤 offspring instruction set，避免 profile contract 漂移
+   - 在 `lineage` / `evolution_feedback` 中记录多维反馈理由
+4. [agent.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py) 与 [hardware_lane.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_lane.py) 现在已经消费这些新增的调度信号。
+
+### 3.6 Monorepo Governance
 
 1. `microprobe/`、`qemu/`、`gem5/`、`mcpat/`、`opendcdiag/` 的完整历史已通过 subtree 导入 root。
 2. root 不再整目录忽略这些核心子项目。
@@ -174,7 +195,7 @@
 4. `tools/sdc_agent.py status` 现在会输出 `managed_domains_summary`。
 5. `tools/sdc_agent.py domains` 与 `tools/sdc_agent.py diff --domain <id>` 已提供单仓域视图。
 
-### 3.6 Phase 6 Runtime
+### 3.7 Phase 6 Runtime
 
 1. [opendcdiag_backend.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/power_backends/opendcdiag_backend.py) 现在已支持 staging workspace build/run。
 2. [hardware_results.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py) 现在已支持：
@@ -218,14 +239,18 @@
 25. `python3 tools/sdc_ingest_hw_results.py --help`
 26. `python3 tools/sdc_agent.py run-hw --help`
 27. `python3 tools/sdc_agent.py ingest-hw --help`
+28. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_scheduler.py tests/test_sdc_genetic_driver.py tests/test_sdc_agent.py tests/test_sdc_inner_loop.py tests/test_sdc_outer_loop.py tests/test_sdc_hardware_lane.py tests/test_sdc_phase4_validation.py tests/test_sdc_phase2_validation.py`
+29. `/Users/wangxu/anaconda3/bin/pytest -q tests`
+30. `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py`
+31. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_profiles.py tests/test_sdc_vault_v2.py tests/test_hardware_results.py tests/test_power_backends.py`
 
 当前结果：
 
-1. 主仓测试：`54 passed`
+1. 主仓测试：`58 passed`
 2. `microprobe` 定向测试：`8 passed`
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
-5. `HW_AGGRESSIVE` 请求会被正确记录为“requested=HW_AGGRESSIVE, effective=SIM_SAFE”
+5. `HW_AGGRESSIVE` 请求会被正确记录为“requested=HW_AGGRESSIVE, effective=HW_AGGRESSIVE”
 6. baseline Phase 2 真实端到端验证已通过：
    - qemu golden digest = `2b85c03077dc5edd`
    - gem5 digest = `2b85c03077dc5edd`
@@ -258,6 +283,11 @@
 19. 当前相关回归总计：`53 passed`
 20. `Phase 5 vector fault model` 控制面回归已通过：
    - `tests/test_run_sdc_differential.py`
+21. `Phase 3 feedback-loop` 与 direct `pytest` 回归已通过：
+   - `tests/test_sdc_scheduler.py`
+   - `tests/test_sdc_genetic_driver.py`
+   - `tests/test_sdc_agent.py`
+   - `tests/conftest.py` 引导下的 root `pytest`
 21. 当前相关回归总计：`54 passed`
 22. `HW_AGGRESSIVE` profile 回归已通过：
    - `tests/test_sdc_generation_profiles.py`

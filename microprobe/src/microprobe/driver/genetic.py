@@ -443,19 +443,74 @@ class SDCFuzzingGeneticDriver(object):
             return override_policy
         return str(parent.policy_name or DEFAULT_POLICY)
 
-    def _fallback_instruction_names(self, target_name: str) -> List[str]:
+    def _fallback_instruction_names(
+        self,
+        target_name: str,
+        *,
+        profile_name: str = "SIM_SAFE",
+    ) -> List[str]:
         from sdc_agent.generation import bootstrap_microprobe_paths
         from microprobe.target import import_definition
 
         bootstrap_microprobe_paths()
         target = import_definition(target_name)
-        return [instruction.name for instruction in collect_sensitive_instructions(target)]
+        return [
+            instruction.name
+            for instruction in collect_sensitive_instructions(
+                target,
+                profile_name=profile_name,
+            )
+        ]
+
+    @staticmethod
+    def _profile_name_for(candidate: Any) -> str:
+        for key in ("requested_profile_name", "profile_name", "effective_profile_name"):
+            value = candidate.metadata.get(key)
+            if value:
+                return str(value)
+        return "SIM_SAFE"
+
+    @staticmethod
+    def _instruction_families(names: Sequence[str]) -> List[str]:
+        families = {
+            str(name).strip().split("_")[0].upper()
+            for name in names
+            if str(name).strip()
+        }
+        return sorted(families)
 
     def _instruction_names_for(self, candidate: Any, target_name: str) -> List[str]:
         names = list(candidate.metadata.get("instruction_names", []))
         if names:
             return [str(name) for name in names]
-        return self._fallback_instruction_names(target_name)
+        return self._fallback_instruction_names(
+            target_name,
+            profile_name=self._profile_name_for(candidate),
+        )
+
+    def _filter_instruction_names_for_profile(
+        self,
+        names: Sequence[str],
+        *,
+        target_name: str,
+        profile_name: str,
+    ) -> List[str]:
+        allowed = self._fallback_instruction_names(
+            target_name,
+            profile_name=profile_name,
+        )
+        allowed_set = set(allowed)
+        filtered = [str(name) for name in names if str(name) in allowed_set]
+        if not filtered:
+            filtered = list(allowed[: self.config.sequence_length])
+
+        if not filtered:
+            return []
+
+        while len(filtered) < self.config.sequence_length:
+            filtered.append(filtered[len(filtered) % len(filtered)])
+
+        return filtered[: self.config.sequence_length]
 
     def _memory_instruction_names(self, target_name: str) -> List[str]:
         from sdc_agent.generation import bootstrap_microprobe_paths
@@ -471,6 +526,57 @@ class SDCFuzzingGeneticDriver(object):
         names.sort()
         return names
 
+    def _diversity_distance(
+        self,
+        primary: Sequence[str],
+        secondary: Sequence[str],
+    ) -> float:
+        primary_families = set(self._instruction_families(primary))
+        secondary_families = set(self._instruction_families(secondary))
+        if not primary_families and not secondary_families:
+            return 0.0
+        union = primary_families | secondary_families
+        if not union:
+            return 0.0
+        intersection = primary_families & secondary_families
+        return 1.0 - (len(intersection) / len(union))
+
+    def _select_partner(
+        self,
+        parents: Sequence[Any],
+        parent: Any,
+        *,
+        target_name: str,
+    ) -> tuple[Any, Dict[str, Any]]:
+        if len(parents) <= 1:
+            return parent, {
+                "reason": "single_parent_fallback",
+                "diversity_score": 0.0,
+            }
+
+        primary_names = self._instruction_names_for(parent, target_name)
+        candidates = []
+        for candidate in parents:
+            if candidate.testcase_key == parent.testcase_key:
+                continue
+            candidate_names = self._instruction_names_for(candidate, target_name)
+            diversity_score = self._diversity_distance(primary_names, candidate_names)
+            candidates.append(
+                (
+                    diversity_score,
+                    float(candidate.inner_value_score),
+                    float(candidate.outer_value_score),
+                    float(candidate.fitness),
+                    candidate,
+                )
+            )
+
+        selected = max(candidates, key=lambda item: item[:4])
+        return selected[4], {
+            "reason": "max_diversity_inner_value",
+            "diversity_score": float(selected[0]),
+        }
+
     def _mutate_instruction_names(
         self,
         *,
@@ -478,11 +584,16 @@ class SDCFuzzingGeneticDriver(object):
         secondary: Sequence[str],
         seed: int,
         target_name: str,
+        profile_name: str,
     ) -> tuple[List[str], List[str]]:
         rng = pyrandom.Random(seed)
         operators: List[str] = []
-        sensitive = self._fallback_instruction_names(target_name)
+        sensitive = self._fallback_instruction_names(
+            target_name,
+            profile_name=profile_name,
+        )
         memory_pool = self._memory_instruction_names(target_name)
+        aggressive_profile = str(profile_name).strip().upper() == "HW_AGGRESSIVE"
 
         if primary and secondary and rng.random() < self.config.crossover_rate:
             split_primary = max(1, len(primary) // 2)
@@ -513,6 +624,11 @@ class SDCFuzzingGeneticDriver(object):
             child[slot] = rng.choice(sensitive)
             operators.append("opcode_replace")
 
+        if aggressive_profile and sensitive and rng.random() < min(1.0, self.config.mutation_rate + 0.15):
+            slot = rng.randrange(len(child))
+            child[slot] = rng.choice(sensitive)
+            operators.append("aggressive_profile_bias")
+
         return child, operators
 
     def evolve(
@@ -536,11 +652,17 @@ class SDCFuzzingGeneticDriver(object):
             if emitted >= self.config.max_offspring:
                 break
 
-            partner = parents[(index + 1) % len(parents)] if len(parents) > 1 else parent
             resolved_target = self._resolve_target_name(parent, target_name)
             resolved_policy = self._resolve_policy_name(parent, policy_name)
+            partner, partner_selection = self._select_partner(
+                parents,
+                parent,
+                target_name=resolved_target,
+            )
             primary_names = self._instruction_names_for(parent, resolved_target)
             secondary_names = self._instruction_names_for(partner, resolved_target)
+            resolved_profile = self._profile_name_for(parent)
+            partner_profile = self._profile_name_for(partner)
             parent_generation = max(
                 self._extract_generation(parent.metadata),
                 self._extract_generation(partner.metadata),
@@ -550,6 +672,13 @@ class SDCFuzzingGeneticDriver(object):
                 int(partner.metadata.get("preferred_stride_bytes", 0) or 0),
                 self.config.min_memory_stride,
             )
+            dependency_distance = max(
+                self.config.dependency_distance,
+                int(parent.metadata.get("dependency_distance", 0) or 0),
+                int(partner.metadata.get("dependency_distance", 0) or 0),
+            )
+            parent_families = self._instruction_families(primary_names)
+            partner_families = self._instruction_families(secondary_names)
 
             for child_index in range(self.config.offspring_per_parent):
                 if emitted >= self.config.max_offspring:
@@ -561,6 +690,12 @@ class SDCFuzzingGeneticDriver(object):
                     secondary=secondary_names,
                     seed=child_seed,
                     target_name=resolved_target,
+                    profile_name=resolved_profile,
+                )
+                child_names = self._filter_instruction_names_for_profile(
+                    child_names,
+                    target_name=resolved_target,
+                    profile_name=resolved_profile,
                 )
                 lineage = {
                     "generation": parent_generation + 1,
@@ -569,15 +704,40 @@ class SDCFuzzingGeneticDriver(object):
                     "operators": operators,
                     "parent_statuses": [parent.status, partner.status],
                     "parent_fitness": [parent.fitness, partner.fitness],
+                    "parent_inner_value_scores": [
+                        parent.inner_value_score,
+                        partner.inner_value_score,
+                    ],
+                    "parent_outer_value_scores": [
+                        parent.outer_value_score,
+                        partner.outer_value_score,
+                    ],
+                    "profile_name": resolved_profile,
+                    "partner_profile_name": partner_profile,
+                    "selected_partner_reason": partner_selection["reason"],
+                    "diversity_score": partner_selection["diversity_score"],
+                    "parent_instruction_families": parent_families,
+                    "partner_instruction_families": partner_families,
+                    "preferred_stride_bytes": preferred_stride,
+                    "dependency_distance": dependency_distance,
+                    "child_index": child_index,
                 }
                 metadata_extra = {
                     "requested_profile_name": parent.metadata.get(
                         "requested_profile_name",
-                        parent.metadata.get("profile_name", "SIM_SAFE"),
+                        resolved_profile,
                     ),
-                    "profile_name": parent.metadata.get("profile_name", "SIM_SAFE"),
+                    "profile_name": resolved_profile,
+                    "effective_profile_name": resolved_profile,
                     "preferred_stride_bytes": preferred_stride,
+                    "dependency_distance": dependency_distance,
                     "lineage": lineage,
+                    "evolution_feedback": {
+                        "inner_value_score": parent.inner_value_score,
+                        "outer_value_score": parent.outer_value_score,
+                        "diversity_score": partner_selection["diversity_score"],
+                        "selected_partner": partner.testcase_key,
+                    },
                 }
                 generated = generate_testcase(
                     {
@@ -586,10 +746,10 @@ class SDCFuzzingGeneticDriver(object):
                         "wrapper": self.config.wrapper_name,
                         "sequence_length": self.config.sequence_length,
                         "benchmark_size": self.config.benchmark_size,
-                        "dependency_distance": self.config.dependency_distance,
+                        "dependency_distance": dependency_distance,
                         "memory_stream_stride": preferred_stride,
                         "strict_validation": self.config.strict_validation,
-                        "profile_name": metadata_extra["requested_profile_name"],
+                        "profile_name": resolved_profile,
                         "seed": child_seed,
                         "output_dir": str(output_dir) if output_dir is not None else None,
                         "instruction_names": child_names,

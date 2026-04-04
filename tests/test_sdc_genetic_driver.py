@@ -49,5 +49,33 @@ def test_sdc_genetic_driver_emits_offspring_into_vault(tmp_path):
         metadata = child.metadata
         assert metadata["lineage"]["driver"] == "SDCFuzzingGeneticDriver"
         assert metadata["lineage"]["generation"] == 1
+        assert metadata["lineage"]["selected_partner_reason"] == "single_parent_fallback"
+        assert metadata["lineage"]["dependency_distance"] == 1
+        assert metadata["lineage"]["preferred_stride_bytes"] >= 8192
+        assert metadata["evolution_feedback"]["selected_partner"] == parent["entry"].testcase_key
         assert metadata["preferred_stride_bytes"] >= 8192
         assert metadata["requested_profile_name"] == "SIM_SAFE"
+
+
+def test_sdc_genetic_driver_uses_profile_aware_instruction_fallback(monkeypatch):
+    class Candidate:
+        def __init__(self, profile_name: str):
+            self.metadata = {
+                "requested_profile_name": profile_name,
+                "profile_name": profile_name,
+            }
+
+    driver = SDCFuzzingGeneticDriver(config=EvolutionConfig(sequence_length=4))
+
+    observed = []
+
+    def fake_fallback(target_name: str, *, profile_name: str = "SIM_SAFE"):
+        observed.append((target_name, profile_name))
+        return [f"{profile_name}_OP"]
+
+    monkeypatch.setattr(driver, "_fallback_instruction_names", fake_fallback)
+
+    names = driver._instruction_names_for(Candidate("HW_AGGRESSIVE"), "arm64-target")
+
+    assert names == ["HW_AGGRESSIVE_OP"]
+    assert observed == [("arm64-target", "HW_AGGRESSIVE")]
