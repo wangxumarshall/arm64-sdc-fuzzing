@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from .generation_strategies import recommend_generation_recipe
+from .mutation_advisor import build_mutation_advice
 from .vault import SDCVault
 
 
@@ -447,6 +449,11 @@ class FeedbackScheduler:
                     ),
                     "instruction_names": candidate.metadata.get("instruction_names", []),
                     "instruction_families": list(candidate.instruction_families),
+                    **recommend_generation_recipe(
+                        profile_name=candidate.profile_name,
+                        instruction_families=candidate.instruction_families,
+                    ),
+                    "mutation_advice": build_mutation_advice(candidate),
                     "status": candidate.status,
                 }
             )

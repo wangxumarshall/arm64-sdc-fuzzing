@@ -33,6 +33,126 @@ def _decode_metadata(row: Mapping[str, Any]) -> Dict[str, Any]:
     return json.loads(str(raw))
 
 
+def _normalize_result_status(value: Any) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"PASS", "FAIL", "SKIP", "ERROR"}:
+        return normalized
+    return normalized or "UNKNOWN"
+
+
+def _normalize_detector_status(value: Any) -> str:
+    if isinstance(value, bool):
+        return "pass" if value else "fail"
+    normalized = str(value or "").strip().lower()
+    if normalized in {"pass", "ok", "success"}:
+        return "pass"
+    if normalized in {"fail", "failed", "error"}:
+        return "fail"
+    if normalized in {"skip", "skipped"}:
+        return "skip"
+    return "info"
+
+
+def _normalize_detectors(payload: Mapping[str, Any]) -> tuple[Dict[str, Any], Dict[str, int]]:
+    raw_detectors = payload.get("detectors") or {}
+    detector_records: Dict[str, Any] = {}
+
+    if isinstance(raw_detectors, Mapping):
+        for name, value in raw_detectors.items():
+            key = str(name)
+            if isinstance(value, Mapping):
+                record = dict(value)
+                record["status"] = _normalize_detector_status(
+                    record.get("status", record.get("result", record.get("value")))
+                )
+            else:
+                record = {
+                    "status": _normalize_detector_status(value),
+                    "value": value,
+                }
+            detector_records[key] = record
+    elif isinstance(raw_detectors, Sequence) and not isinstance(raw_detectors, (str, bytes, bytearray)):
+        for item in raw_detectors:
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("name") or item.get("detector") or f"detector_{len(detector_records)}")
+            record = dict(item)
+            record["status"] = _normalize_detector_status(
+                record.get("status", record.get("result", record.get("value")))
+            )
+            detector_records[key] = record
+
+    for stage_name in ("setup", "compile", "run"):
+        stage_payload = payload.get(stage_name)
+        if not isinstance(stage_payload, Mapping) or "returncode" not in stage_payload:
+            continue
+        record = {
+            "status": "pass" if int(stage_payload.get("returncode", -1)) == 0 else "fail",
+            "returncode": int(stage_payload.get("returncode", -1)),
+        }
+        if "stdout_path" in stage_payload:
+            record["stdout_path"] = stage_payload["stdout_path"]
+        if "stderr_path" in stage_payload:
+            record["stderr_path"] = stage_payload["stderr_path"]
+        detector_records.setdefault(f"stage_{stage_name}", record)
+
+    summary = {
+        "pass_count": 0,
+        "fail_count": 0,
+        "skip_count": 0,
+        "info_count": 0,
+    }
+    for record in detector_records.values():
+        status = _normalize_detector_status(
+            record.get("status") if isinstance(record, Mapping) else record
+        )
+        if status == "pass":
+            summary["pass_count"] += 1
+        elif status == "fail":
+            summary["fail_count"] += 1
+        elif status == "skip":
+            summary["skip_count"] += 1
+        else:
+            summary["info_count"] += 1
+    return detector_records, summary
+
+
+def _normalize_machine_metadata(
+    payload: Mapping[str, Any],
+    *,
+    machine_id: str,
+    backend_name: str,
+    log_path: str,
+) -> Dict[str, Any]:
+    raw_metadata = payload.get("machine_metadata") or {}
+    normalized = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
+    normalized["machine_id"] = machine_id
+    normalized["backend_name"] = backend_name
+    normalized["execution_context"] = {
+        "bundle_dir": payload.get("bundle_dir"),
+        "workspace_root": payload.get("workspace_root"),
+        "build_dir": payload.get("build_dir"),
+        "runtime_dir": payload.get("runtime_dir"),
+        "log_path": log_path,
+        "setup_returncode": (
+            int(payload["setup"]["returncode"])
+            if isinstance(payload.get("setup"), Mapping) and "returncode" in payload["setup"]
+            else None
+        ),
+        "compile_returncode": (
+            int(payload["compile"]["returncode"])
+            if isinstance(payload.get("compile"), Mapping) and "returncode" in payload["compile"]
+            else None
+        ),
+        "run_returncode": (
+            int(payload["run"]["returncode"])
+            if isinstance(payload.get("run"), Mapping) and "returncode" in payload["run"]
+            else None
+        ),
+    }
+    return normalized
+
+
 def ingest_hardware_result(
     *,
     db_path: Path,
@@ -44,11 +164,16 @@ def ingest_hardware_result(
     testcase_key = str(payload["testcase_key"])
     backend_name = str(payload.get("backend_name", payload.get("backend", "opendcdiag")))
     external_test_name = str(payload["external_test_name"])
-    result_status = str(payload["result_status"])
-    detectors = dict(payload.get("detectors") or {})
+    result_status = _normalize_result_status(payload["result_status"])
     effective_machine_id = machine_id or str(payload.get("machine_id") or "unknown-machine")
-    machine_metadata = dict(payload.get("machine_metadata") or {})
     log_path = str(payload.get("log_path") or result_json)
+    detectors, detector_summary = _normalize_detectors(payload)
+    machine_metadata = _normalize_machine_metadata(
+        payload,
+        machine_id=effective_machine_id,
+        backend_name=backend_name,
+        log_path=log_path,
+    )
 
     with SDCVault(db_path) as vault:
         promotion = vault.get_hardware_promotion(
@@ -72,6 +197,7 @@ def ingest_hardware_result(
             metadata={
                 "result_json": str(result_json),
                 "backend_payload": payload,
+                "detector_summary": detector_summary,
                 "machine_metadata": machine_metadata,
             },
         )
@@ -83,6 +209,9 @@ def ingest_hardware_result(
             "latest_result_status": result_status,
             "latest_machine_id": effective_machine_id,
             "latest_hardware_run_id": hardware_run_id,
+            "latest_detectors": detectors,
+            "latest_detector_summary": detector_summary,
+            "latest_log_path": log_path,
             "latest_machine_metadata": machine_metadata,
         }
         vault.upsert_hardware_promotion(
@@ -102,6 +231,9 @@ def ingest_hardware_result(
                 "latest_result_status": result_status,
                 "latest_machine_id": effective_machine_id,
                 "latest_hardware_run_id": hardware_run_id,
+                "latest_detectors": detectors,
+                "latest_detector_summary": detector_summary,
+                "latest_log_path": log_path,
                 "latest_machine_metadata": machine_metadata,
             }
             vault.update_execution_result(testcase_key, metadata=metadata)
@@ -112,6 +244,8 @@ def ingest_hardware_result(
         "promotion_id": promotion_id,
         "hardware_run_id": hardware_run_id,
         "result_status": result_status,
+        "detectors": detectors,
+        "detector_summary": detector_summary,
         "machine_id": effective_machine_id,
         "machine_metadata": machine_metadata,
         "result_json": str(result_json),

@@ -47,14 +47,20 @@ def test_ingest_hardware_result_records_run_and_updates_promotion(tmp_path):
 
     assert payload["promotion_id"] == promotion_id
     assert payload["result_status"] == "PASS"
+    assert payload["detector_summary"]["pass_count"] >= 1
     assert payload["machine_metadata"]["machine"] == "aarch64"
+    assert payload["machine_metadata"]["execution_context"]["log_path"].endswith("sandstone.stdout")
 
     with SDCVault(db_path) as vault:
         runs = vault.list_hardware_runs("seed-a")
         assert len(runs) == 1
         assert runs[0]["result_status"] == "PASS"
+        detectors = json.loads(runs[0]["detectors_json"])
+        assert detectors["digest_match"]["status"] == "pass"
         promotions = vault.list_hardware_promotions("seed-a")
         assert promotions[0]["status"] == "PASS"
+        promotion_meta = json.loads(promotions[0]["metadata_json"])
+        assert promotion_meta["latest_detector_summary"]["pass_count"] >= 1
 
 
 def test_execute_hardware_promotions_runs_backend_and_auto_ingests(monkeypatch, tmp_path):
@@ -101,10 +107,13 @@ def test_execute_hardware_promotions_runs_backend_and_auto_ingests(monkeypatch, 
                 "testcase_key": "seed-b",
                 "external_test_name": "arm64_sdc_seed_b",
                 "result_status": "PASS",
-                "detectors": {"digest_match": "pass"},
+                "detectors": [{"name": "digest_match", "result": "pass"}],
                 "machine_id": "local-opendcdiag",
                 "machine_metadata": {"machine": "aarch64", "cpu_count": 64},
                 "log_path": str(runtime_dir / "sandstone.stdout"),
+                "setup": {"returncode": 0},
+                "compile": {"returncode": 0},
+                "run": {"returncode": 0},
                 "result_json": str(result_json),
             }
             result_json.write_text(json.dumps(payload) + "\n", encoding="utf-8")
@@ -129,3 +138,6 @@ def test_execute_hardware_promotions_runs_backend_and_auto_ingests(monkeypatch, 
         runs = vault.list_hardware_runs("seed-b")
         assert len(runs) == 1
         assert runs[0]["machine_id"] == "kunpeng920-b"
+        detectors = json.loads(runs[0]["detectors_json"])
+        assert detectors["digest_match"]["status"] == "pass"
+        assert detectors["stage_run"]["status"] == "pass"

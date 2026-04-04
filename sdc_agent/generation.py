@@ -22,7 +22,21 @@ DEFAULT_POLICY = "sdc_fuzzing"
 DEFAULT_WRAPPER = "Arm64AsmWrapper"
 PROFILE_SIM_SAFE = "SIM_SAFE"
 PROFILE_HW_AGGRESSIVE = "HW_AGGRESSIVE"
-SUPPORTED_PROFILES = (PROFILE_SIM_SAFE, PROFILE_HW_AGGRESSIVE)
+PROFILE_ALL_GENERATABLE = "ALL_GENERATABLE"
+PROFILE_EXECUTABLE_SAFE = "EXECUTABLE_SAFE"
+PROFILE_KUNPENG920_STRESS = "KUNPENG920_STRESS"
+SUPPORTED_PROFILES = (
+    PROFILE_SIM_SAFE,
+    PROFILE_HW_AGGRESSIVE,
+    PROFILE_ALL_GENERATABLE,
+    PROFILE_EXECUTABLE_SAFE,
+    PROFILE_KUNPENG920_STRESS,
+)
+CATALOG_PROFILES = (
+    PROFILE_ALL_GENERATABLE,
+    PROFILE_EXECUTABLE_SAFE,
+    PROFILE_KUNPENG920_STRESS,
+)
 
 
 def bootstrap_microprobe_paths() -> None:
@@ -49,7 +63,20 @@ bootstrap_microprobe_paths()
 from microprobe.code import get_wrapper  # noqa: E402
 from microprobe.target import import_definition  # noqa: E402
 from microprobe.utils.policy import find_policy  # noqa: E402
+from microprobe.utils.arm64_isa_catalog import (  # noqa: E402
+    DEFAULT_CATALOG_PATH,
+    build_catalog_summary,
+    load_catalog,
+    plan_catalog_task_count,
+    select_catalog_encodings,
+    validate_sequence_asm,
+)
 
+from .generation_strategies import (  # noqa: E402
+    GENERATION_STRATEGY_BASELINE,
+    normalize_generation_strategy,
+    select_strategy_instructions,
+)
 from .vault import SDCVault, VaultEntry  # noqa: E402
 
 
@@ -87,6 +114,9 @@ def resolve_profile_contract(
         "effective_profile_name": effective,
         "fallback_reason": fallback_reason,
         "contract_version": 1,
+        "generation_mode": (
+            "catalog" if effective in CATALOG_PROFILES else "synthesizer"
+        ),
     }
 
 
@@ -168,7 +198,9 @@ def select_instructions(
     seed: int,
     profile_name: str = PROFILE_SIM_SAFE,
     instruction_names: Optional[Sequence[str]] = None,
-) -> List[Any]:
+    generation_strategy: str = GENERATION_STRATEGY_BASELINE,
+    template_name: Optional[str] = None,
+) -> tuple[List[Any], Dict[str, Any]]:
     rng = random.Random(seed)
     preferred = (
         resolve_instruction_names(target, instruction_names)
@@ -181,6 +213,18 @@ def select_instructions(
     if not candidates and not preferred:
         raise RuntimeError("No instructions available in target ISA")
 
+    strategy = normalize_generation_strategy(generation_strategy)
+    if not preferred and strategy != GENERATION_STRATEGY_BASELINE:
+        selected, strategy_metadata = select_strategy_instructions(
+            instructions=candidates,
+            sequence_length=sequence_length,
+            seed=seed,
+            generation_strategy=strategy,
+            template_name=template_name,
+        )
+        if selected:
+            return selected, strategy_metadata
+
     selected: List[Any] = []
     if preferred:
         selected.extend(preferred[:sequence_length])
@@ -189,7 +233,7 @@ def select_instructions(
     while len(selected) < sequence_length:
         selected.append(rng.choice(fill_pool))
 
-    return selected[:sequence_length]
+    return selected[:sequence_length], {"generation_strategy": strategy}
 
 
 def compute_risk_score(metadata: Mapping[str, Any]) -> float:
@@ -197,6 +241,152 @@ def compute_risk_score(metadata: Mapping[str, Any]) -> float:
     ibr = float(metadata.get("ibr_score", 0.0))
     mem = float(metadata.get("memory_pressure_score", 0.0))
     return (ace * 0.45) + (ibr * 0.35) + (mem * 0.20)
+
+
+def _catalog_sequence_metrics(encodings: Sequence[Mapping[str, Any]]) -> Dict[str, float]:
+    if not encodings:
+        return {
+            "ace_score": 0.0,
+            "ibr_score": 0.0,
+            "memory_pressure_score": 0.0,
+        }
+
+    memory = 0.0
+    wide = 0.0
+    ace = 0.0
+    for encoding in encodings:
+        mnemonic = str(encoding.get("mnemonic", "")).upper()
+        instr_class = str(encoding.get("instr_class", ""))
+        hotness = float(encoding.get("kunpeng_hotness", 0.0))
+        if mnemonic.startswith(("LD", "ST", "CAS", "SWP", "PRFM")):
+            memory += 1.0
+        else:
+            memory += min(hotness, 0.5)
+
+        if instr_class in {"float", "advsimd"} or any(
+            marker in mnemonic for marker in ("CRC", "AES", "SHA")
+        ):
+            wide += 1.0
+        else:
+            wide += 0.35
+
+        ace += 0.65 if encoding.get("executable") else 0.2
+
+    total = float(len(encodings))
+    return {
+        "ace_score": ace / total,
+        "ibr_score": wide / total,
+        "memory_pressure_score": memory / total,
+    }
+
+
+def _render_catalog_sequence(encodings: Sequence[Mapping[str, Any]]) -> str:
+    result = validate_sequence_asm(encodings)
+    return str(result["asm_text"])
+
+
+def generate_catalog_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
+    target_name = str(task.get("target", DEFAULT_TARGET))
+    policy_name = str(task.get("policy", DEFAULT_POLICY))
+    requested_wrapper_name = str(task.get("wrapper", DEFAULT_WRAPPER))
+    output_dir_raw = task.get("output_dir")
+    strict_validation = bool(task.get("strict_validation", False))
+    profile_contract = resolve_profile_contract(
+        profile_name=task.get("profile_name"),
+        instruction_names=task.get("instruction_names"),
+    )
+    catalog = load_catalog(task.get("catalog_path", DEFAULT_CATALOG_PATH))
+    catalog_offset = int(task.get("catalog_offset", 0))
+    sequence_length = int(task.get("sequence_length", 8))
+    seed = int(task.get("seed", 13))
+    metadata_extra = task.get("metadata_extra")
+
+    encodings = select_catalog_encodings(
+        catalog,
+        profile_name=profile_contract["effective_profile_name"],
+        sequence_length=sequence_length,
+        offset=catalog_offset,
+    )
+    if not encodings:
+        raise RuntimeError(
+            f"No catalog encodings available for profile "
+            f"{profile_contract['effective_profile_name']}"
+        )
+
+    validation = validate_sequence_asm(encodings)
+    if strict_validation and not validation["ok"]:
+        raise RuntimeError(validation["stderr"] or "Catalog sequence validation failed")
+
+    rendered = str(validation["asm_text"])
+    testcase_key = hashlib.sha1(rendered.encode("utf-8")).hexdigest()
+
+    metrics = _catalog_sequence_metrics(encodings)
+    metadata: Dict[str, Any] = {
+        **metrics,
+        "profile_name": profile_contract["effective_profile_name"],
+        "requested_profile_name": profile_contract["requested_profile_name"],
+        "effective_profile_name": profile_contract["effective_profile_name"],
+        "profile_contract": {
+            "contract_version": profile_contract["contract_version"],
+            "requested_profile_name": profile_contract["requested_profile_name"],
+            "effective_profile_name": profile_contract["effective_profile_name"],
+            "fallback_reason": profile_contract["fallback_reason"],
+            "generation_mode": profile_contract["generation_mode"],
+        },
+        "wrapper_name": DEFAULT_WRAPPER,
+        "requested_wrapper_name": requested_wrapper_name,
+        "catalog_path": str(Path(task.get("catalog_path", DEFAULT_CATALOG_PATH)).resolve()),
+        "catalog_offset": catalog_offset,
+        "catalog_summary": build_catalog_summary(catalog),
+        "instruction_names": [str(encoding["name"]) for encoding in encodings],
+        "instruction_mnemonics": [str(encoding["mnemonic"]) for encoding in encodings],
+        "doc_paths": [
+            str(encoding["doc_path"])
+            for encoding in encodings
+            if encoding.get("doc_path")
+        ],
+        "seed": seed,
+        "sequence_length": sequence_length,
+        "clang_validation": {
+            "ok": bool(validation["ok"]),
+            "returncode": int(validation["returncode"]),
+            "stderr": str(validation["stderr"]),
+        },
+    }
+    if requested_wrapper_name != DEFAULT_WRAPPER:
+        metadata["profile_contract"]["fallback_reason"] = (
+            "catalog_profiles_force_arm64_asm_wrapper"
+        )
+    metadata = _merge_nested_dicts(metadata, metadata_extra)
+    risk_score = compute_risk_score(metadata)
+    metadata["risk_score"] = risk_score
+
+    output_file: Optional[Path] = None
+    if output_dir_raw is not None:
+        output_dir = Path(output_dir_raw)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{testcase_key}.s"
+        output_file.write_text(rendered, encoding="utf-8")
+        metadata["rendered_path"] = str(output_file.resolve())
+        metadata["rendered_format"] = "s"
+
+    entry = VaultEntry(
+        testcase_key=testcase_key,
+        asm_content=rendered,
+        target_name=target_name,
+        policy_name=policy_name,
+        ace_score=float(metadata.get("ace_score", 0.0)),
+        ibr_score=float(metadata.get("ibr_score", 0.0)),
+        memory_pressure_score=float(metadata.get("memory_pressure_score", 0.0)),
+        risk_score=risk_score,
+        metadata=metadata,
+    )
+    return {
+        "entry": entry,
+        "output_file": str(output_file) if output_file is not None else None,
+        "wrapper_name": DEFAULT_WRAPPER,
+        "metadata": metadata,
+    }
 
 
 def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
@@ -214,21 +404,27 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
     output_dir_raw = task.get("output_dir")
     instruction_names = task.get("instruction_names")
     metadata_extra = task.get("metadata_extra")
+    generation_strategy = normalize_generation_strategy(task.get("generation_strategy"))
+    template_name = task.get("template_name")
     profile_contract = resolve_profile_contract(
         profile_name=task.get("profile_name"),
         instruction_names=instruction_names,
     )
+    if profile_contract["generation_mode"] == "catalog":
+        return generate_catalog_testcase(task)
 
     target = import_definition(target_name)
     wrapper_cls, resolved_wrapper_name = resolve_wrapper(wrapper_name)
     wrapper = wrapper_cls()
     policy = find_policy(target_name, policy_name)
-    instructions = select_instructions(
+    instructions, strategy_metadata = select_instructions(
         target,
         sequence_length=sequence_length,
         seed=seed,
         profile_name=profile_contract["effective_profile_name"],
         instruction_names=instruction_names,
+        generation_strategy=generation_strategy,
+        template_name=template_name,
     )
 
     synth = policy.apply(
@@ -255,9 +451,30 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
         "requested_profile_name": profile_contract["requested_profile_name"],
         "effective_profile_name": profile_contract["effective_profile_name"],
         "fallback_reason": profile_contract["fallback_reason"],
+        "generation_mode": profile_contract["generation_mode"],
     }
     metadata["wrapper_name"] = resolved_wrapper_name
     metadata["instruction_names"] = [instruction.name for instruction in instructions]
+    metadata["generation_strategy"] = strategy_metadata.get(
+        "generation_strategy", generation_strategy
+    )
+    if strategy_metadata.get("template_name"):
+        metadata["template_name"] = strategy_metadata["template_name"]
+        metadata["template_version"] = strategy_metadata["template_version"]
+        metadata["template_description"] = strategy_metadata["template_description"]
+        metadata["template_mnemonics"] = strategy_metadata["template_mnemonics"]
+        metadata["template_family_weights"] = strategy_metadata["template_family_weights"]
+        metadata["template_recommended_profile"] = strategy_metadata[
+            "template_recommended_profile"
+        ]
+        metadata.setdefault(
+            "preferred_stride_bytes",
+            strategy_metadata["template_preferred_stride_bytes"],
+        )
+        metadata.setdefault(
+            "dependency_distance",
+            strategy_metadata["template_recommended_dependency_distance"],
+        )
     metadata["seed"] = seed
     metadata["sequence_length"] = sequence_length
     metadata["benchmark_size"] = benchmark_size
@@ -322,12 +539,17 @@ def build_generation_tasks(
     seed: int,
     output_dir: Optional[Path],
     profile_name: str,
+    catalog_path: Optional[Path] = None,
+    generation_strategy: str = GENERATION_STRATEGY_BASELINE,
+    template_name: Optional[str] = None,
 ) -> Iterable[Dict[str, Any]]:
     for index in range(count):
         yield {
             "target": target,
             "policy": policy,
             "profile_name": profile_name,
+            "generation_strategy": generation_strategy,
+            "template_name": template_name,
             "wrapper": wrapper,
             "sequence_length": sequence_length,
             "benchmark_size": benchmark_size,
@@ -336,6 +558,8 @@ def build_generation_tasks(
             "strict_validation": strict_validation,
             "seed": seed + index,
             "output_dir": str(output_dir) if output_dir is not None else None,
+            "catalog_path": str(catalog_path) if catalog_path is not None else None,
+            "catalog_offset": index * sequence_length,
         }
 
 
@@ -355,19 +579,32 @@ def generate_batch(
     seed: int = 13,
     output_dir: Optional[Path] = None,
     profile_name: str = PROFILE_SIM_SAFE,
+    generation_strategy: str = GENERATION_STRATEGY_BASELINE,
+    template_name: Optional[str] = None,
 ) -> Dict[str, Any]:
+    requested_count = count
     successes = 0
     failures: List[Dict[str, Any]] = []
     testcase_keys: List[str] = []
+    planned_count = count
+    catalog_path = DEFAULT_CATALOG_PATH
 
     with SDCVault(db_path) as vault:
+        if normalize_profile_name(profile_name) in CATALOG_PROFILES:
+            catalog = load_catalog(catalog_path)
+            planned_count = plan_catalog_task_count(
+                catalog,
+                profile_name=normalize_profile_name(profile_name),
+                requested_count=count,
+                sequence_length=sequence_length,
+            )
         tasks = list(
             build_generation_tasks(
                 target=target,
                 policy=policy,
                 profile_name=profile_name,
                 wrapper=wrapper,
-                count=count,
+                count=planned_count,
                 sequence_length=sequence_length,
                 benchmark_size=benchmark_size,
                 dependency_distance=dependency_distance,
@@ -375,6 +612,9 @@ def generate_batch(
                 strict_validation=strict_validation,
                 seed=seed,
                 output_dir=output_dir,
+                catalog_path=catalog_path,
+                generation_strategy=generation_strategy,
+                template_name=template_name,
             )
         )
 
@@ -404,7 +644,8 @@ def generate_batch(
             testcase_keys.append(result["entry"].testcase_key)
 
     return {
-        "requested": count,
+        "requested": requested_count,
+        "planned": planned_count,
         "inserted": successes,
         "testcase_keys": testcase_keys,
         "failed": failures,

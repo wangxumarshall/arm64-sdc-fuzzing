@@ -32,8 +32,31 @@ def test_build_fault_request_captures_runner_context(tmp_path):
     )
 
     assert request.is_active() is True
+    assert request.target_kind == "register"
+    assert request.register_name == "x0"
     assert request.binary_args == ("--size", "64")
     assert request.binary.endswith("case.elf")
+
+
+def test_parse_fault_target_supports_memory_targets():
+    target = sdc_fault_request.parse_fault_target("cpu1:mem:0x2000")
+
+    assert target.cpu_index == 1
+    assert target.target_kind == "memory"
+    assert target.memory_address == 0x2000
+
+
+def test_supports_scripted_fault_injection_recognizes_memory_faults():
+    assert (
+        sdc_fault_request.supports_scripted_fault_injection(
+            fault_model="memory_bit_flip",
+            fault_target="mem:0x1000",
+            fault_bit=9,
+            fault_tick=2048,
+            num_cores=1,
+        )
+        is True
+    )
 
 
 def test_write_fault_request_emits_json_manifest(tmp_path):

@@ -28,11 +28,11 @@
 | Phase 0 | 架构合同与规划文档重构 | Control plane | 已完成 | 100% |
 | Phase 1 | Vault v2 与数据契约升级 | Control plane | 已完成 | 100% |
 | Phase 2 | 高频内循环产品化 | Sub-P1 microprobe-arm、Sub-P2-1 qemu、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 96% |
-| Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 部分完成 | 30% |
+| Phase 3 | 功耗驱动的进化闭环 | Sub-P1 microprobe-arm、Sub-P3 mcpat-arm、Sub-P4 Control plane | 进行中 | 70% |
 | Phase 4 | 低频外循环产品化 | Sub-P2-1 qemu、Sub-P2-2 gem5、Sub-P4 Control plane | 进行中 | 70% |
-| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 进行中 | 30% |
-| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 进行中 | 40% |
-| Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 规划中 | 10% |
+| Phase 5 | gem5 真实 fault injector | Sub-P2-2 gem5 | 进行中 | 55% |
+| Phase 6 | opendcdiag-arm promotion 与真机回灌 | Sub-P0 opendcdiag、Sub-P4 Control plane | 进行中 | 60% |
+| Phase 7 | LLM/PCFG/template 智能生成 | Sub-P1 microprobe-arm、Sub-P4 Control plane | 进行中 | 45% |
 
 ### 2.2 横向基础设施
 

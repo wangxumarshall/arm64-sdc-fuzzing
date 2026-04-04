@@ -55,6 +55,24 @@
 - Extended `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/driver/genetic.py` with profile-aware fallback instruction recovery, diversity-aware partner selection, profile filtering of offspring instructions, and richer lineage/evolution feedback metadata.
 - Updated `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py` and `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_lane.py` to consume the new ranking signals in summaries and hardware promotion scoring.
 - Added regression coverage for scheduler scoring, genetic-driver lineage metadata, agent summary output, and direct pytest collection behavior.
+- Added `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/utils/arm64_isa_catalog.py`, which parses the official Arm A64 XML snapshot plus `docs/armv8-isa` into a normalized catalog with 790 instruction pages, 1576 encodings, execution classification, Kunpeng920 hotness tags, sample assembly, and clang-based sequence validation.
+- Added `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tools/a64_isa_catalog.py` and generated `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json` as the local full-A64 source of truth.
+- Extended `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py` and `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/generic/tools/mp_sdc_offline_gen.py` with `ALL_GENERATABLE`, `EXECUTABLE_SAFE`, and `KUNPENG920_STRESS` profiles; catalog-driven runs now auto-expand batch count to cover the full catalog.
+- Extended `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tools/a64_isa_audit.py` to report both the legacy `instruction.yaml` gap and the new catalog coverage against official XML.
+- Updated `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/isa/armv8-common/isa.py` to expose catalog-backed profile enumeration directly from the ARM64 ISA object.
+
+## ARM64 Catalog Findings
+- The official A64 XML snapshot used in this implementation contains 790 instruction documents and 1576 encoding variants across the `general`, `system`, `float`, and `advsimd` classes.
+- The legacy ARM64 `instruction.yaml` still contains only 57 entries and 28 unique mnemonics, so it remains an executable subset rather than the full ISA definition.
+- The generated local catalog covers all official mnemonics in the selected classes: `general 248/248`, `system 74/74`, `float 48/48`, `advsimd 284/284`.
+- `docs/armv8-isa` currently maps cleanly to 279 of 387 pages by normalized title; the remaining pages are naming/heading mismatches, not XML catalog gaps.
+- Full-catalog validation is intentionally split from execution: many encodings are feature-gated, privileged, or trap-like, so the catalog records `executable`, `privileged`, `trap_like`, and `execution_block_reason` instead of pretending everything belongs in the same runtime wrapper.
+
+## Additional Outcomes
+- Added a real scripted `memory_bit_flip` path through `/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_fault_request.py`, `/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_kunpeng920_se.py`, and `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py`.
+- Upgraded `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py` so hardware ingest now normalizes detectors, derives detector summaries, and preserves richer machine/build/runtime context.
+- Added `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation_strategies.py` plus `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/mutation_advisor.py`, wiring template/PCFG generation and heuristic mutation advice into the existing generation/scheduler/agent path.
+- Verified these additions with targeted and broad regressions, including root `tests`, ARM64 target tests, and gem5 helper tests.
 
 ---
 *Update this file after every 2 view/browser/search operations*

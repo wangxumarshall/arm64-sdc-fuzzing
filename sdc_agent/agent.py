@@ -14,6 +14,7 @@ from .generation import (
     PROFILE_SIM_SAFE,
     DEFAULT_TARGET,
     DEFAULT_WRAPPER,
+    GENERATION_STRATEGY_BASELINE,
     bootstrap_microprobe_paths,
     generate_batch,
 )
@@ -131,6 +132,8 @@ def run_cycle(
     target: str,
     policy: str,
     generate_profile: str,
+    generation_strategy: str,
+    template_name: Optional[str],
     generate_wrapper: str,
     evolve_wrapper: str,
     sequence_length: int,
@@ -158,6 +161,8 @@ def run_cycle(
         target=target,
         policy=policy,
         profile_name=generate_profile,
+        generation_strategy=generation_strategy,
+        template_name=template_name,
         wrapper=generate_wrapper,
         count=generate_count,
         jobs=generate_jobs,
@@ -221,6 +226,8 @@ def _add_common_generation_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--target", default=DEFAULT_TARGET)
     parser.add_argument("--policy", default=DEFAULT_POLICY)
     parser.add_argument("--profile", default=PROFILE_SIM_SAFE)
+    parser.add_argument("--generation-strategy", default=GENERATION_STRATEGY_BASELINE)
+    parser.add_argument("--template-name", default=None)
     parser.add_argument("--wrapper", default=DEFAULT_WRAPPER)
     parser.add_argument("--sequence-length", type=int, default=8)
     parser.add_argument("--benchmark-size", type=int, default=64)
@@ -341,6 +348,8 @@ def main() -> int:
             target=args.target,
             policy=args.policy,
             profile_name=args.profile,
+            generation_strategy=args.generation_strategy,
+            template_name=args.template_name,
             wrapper=args.wrapper,
             count=args.count,
             jobs=args.jobs,
@@ -401,6 +410,8 @@ def main() -> int:
             target=args.target,
             policy=args.policy,
             generate_profile=args.profile,
+            generation_strategy=args.generation_strategy,
+            template_name=args.template_name,
             generate_wrapper=args.wrapper,
             evolve_wrapper=args.evolve_wrapper,
             sequence_length=args.sequence_length,

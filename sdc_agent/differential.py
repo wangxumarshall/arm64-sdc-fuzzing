@@ -21,10 +21,19 @@ DEFAULT_GEM5_OUTDIR = REPO_ROOT / "m5out-sdc"
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 FAULT_MANIFEST_NAME = "sdc_fault_request.json"
 INJECTED_EXECUTION_PLANES = {"gem5_scripted"}
-INJECTION_LOG_PATTERN = re.compile(
+REGISTER_INJECTION_LOG_PATTERN = re.compile(
     r"\[sdc\] injected (?P<target_kind>register|vector register) bit flip: "
     r"cpu=(?P<cpu_index>\d+) "
     r"reg=(?P<register_name>[A-Za-z0-9_]+) "
+    r"bit=(?P<fault_bit>\d+) "
+    r"old=(?P<old_value>0x[0-9a-fA-F]+) "
+    r"new=(?P<new_value>0x[0-9a-fA-F]+) "
+    r"tick=(?P<fault_tick>\d+)"
+)
+MEMORY_INJECTION_LOG_PATTERN = re.compile(
+    r"\[sdc\] injected memory bit flip: "
+    r"cpu=(?P<cpu_index>\d+) "
+    r"addr=(?P<memory_address>0x[0-9a-fA-F]+) "
     r"bit=(?P<fault_bit>\d+) "
     r"old=(?P<old_value>0x[0-9a-fA-F]+) "
     r"new=(?P<new_value>0x[0-9a-fA-F]+) "
@@ -151,8 +160,20 @@ def parse_injection_observation(
     if command_result is None:
         return None
     for payload in (command_result.stderr, command_result.stdout):
-        match = INJECTION_LOG_PATTERN.search(payload)
+        match = REGISTER_INJECTION_LOG_PATTERN.search(payload)
         if match is None:
+            match = MEMORY_INJECTION_LOG_PATTERN.search(payload)
+            if match is not None:
+                groups = match.groupdict()
+                return {
+                    "cpu_index": int(groups["cpu_index"]),
+                    "target_kind": "memory",
+                    "memory_address": groups["memory_address"].lower(),
+                    "fault_bit": int(groups["fault_bit"]),
+                    "fault_tick": int(groups["fault_tick"]),
+                    "old_value": groups["old_value"].lower(),
+                    "new_value": groups["new_value"].lower(),
+                }
             continue
         groups = match.groupdict()
         return {

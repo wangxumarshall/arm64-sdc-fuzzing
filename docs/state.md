@@ -18,7 +18,9 @@
 
 - `Phase 3: 功耗驱动的进化闭环 hardening`
 - `Phase 4: 低频外循环产品化`
+- `Phase 5: gem5 scripted injector expansion`
 - `Phase 6: 硬件 promotion lane bootstrap`
+- `Phase 7: template/PCFG intelligent generation bootstrap`
 
 当前判断：
 
@@ -29,6 +31,9 @@
 5. `Phase 6` 已从“只有表结构和 placeholder”推进到“有 promotion selector、有 bundle emitter、有 build/run backend、有结果 ingest 写回”的阶段。
 6. 仓库治理层面，`root + microprobe + qemu + gem5 + mcpat + opendcdiag` 现已合并到单一 monorepo 管理。
 7. `Phase 3` 当前已补上 inner-loop value scoring、diversity-aware mutation planning 与 profile-aware evolution fallback 这条控制面缺口。
+8. `Phase 5` 当前已从两类 scripted fault model 扩到第三类：`memory_bit_flip`。
+9. `Phase 6` 当前已从“回写原始 hardware payload”推进到“规范化 detectors / detector summary / machine-build-runtime metadata”。
+10. `Phase 7` 当前已把 template/PCFG generation 和 heuristic mutation advisor 真正挂进主控制平面路径。
 
 当前阶段的核心目标：
 
@@ -78,6 +83,9 @@
 26. 调度层现在已经把 `inner_value_score / diversity_bonus / legality_factor / power_gain` 作为独立反馈信号暴露出来，不再只剩单一 `fitness`。
 27. Python 3 genetic driver 现在会做 profile-aware fallback instruction recovery、diversity-aware partner selection，并把这些决策写进 lineage metadata。
 28. 仓库根目录现在可以直接运行 `pytest` 收集 `tests/` 下的控制面测试，不再依赖隐式解释器入口行为。
+29. gem5 Python 层 `physProxy.read/write` 足以支撑第一版真实 `memory_bit_flip`，不必等待更深的 C++ memory injector hook。
+30. hardware result ingest 现在不仅保存原始 payload，还会提炼 stage detector 状态和可查询的 detector summary。
+31. Phase 7 的智能生成现在不再只停留在文档里；`generate_batch()`、scheduler mutation plan、以及 `tools/sdc_agent.py generate/cycle` 已能消费 template / pcfg / mutation advice。
 
 ---
 
@@ -181,7 +189,26 @@
    - 在 `lineage` / `evolution_feedback` 中记录多维反馈理由
 4. [agent.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py) 与 [hardware_lane.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_lane.py) 现在已经消费这些新增的调度信号。
 
-### 3.6 Monorepo Governance
+### 3.6 Phase 5
+
+1. [sdc_fault_request.py](/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_fault_request.py) 现在已支持 `mem:0x...` 与 `cpuN:mem:0x...` fault target 约定。
+2. [sdc_kunpeng920_se.py](/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_kunpeng920_se.py) 现在已支持 scripted `memory_bit_flip`，并会输出可解析的 memory injection 观测日志。
+3. [differential.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py) 现在能解析 memory fault observation，并把它收敛到 `fault_request.observation`。
+
+### 3.7 Phase 7
+
+1. [generation_strategies.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation_strategies.py) 已新增首版智能生成策略层，支持：
+   - `baseline`
+   - `template`
+   - `pcfg`
+2. 已新增首版高价值模板库：
+   - `cache_thrash`
+   - `long_dependency_chain`
+   - `neon_fma_heavy`
+3. [generation.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py) 与 [agent.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py) 现在已经把 `generation_strategy` / `template_name` 接到主生成和 `cycle` 路径。
+4. [mutation_advisor.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/mutation_advisor.py) 已提供可被未来 LLM 替换的 mutation-advice 接口；scheduler mutation plan 现在会附带 advice。
+
+### 3.8 Monorepo Governance
 
 1. `microprobe/`、`qemu/`、`gem5/`、`mcpat/`、`opendcdiag/` 的完整历史已通过 subtree 导入 root。
 2. root 不再整目录忽略这些核心子项目。
@@ -195,7 +222,7 @@
 4. `tools/sdc_agent.py status` 现在会输出 `managed_domains_summary`。
 5. `tools/sdc_agent.py domains` 与 `tools/sdc_agent.py diff --domain <id>` 已提供单仓域视图。
 
-### 3.7 Phase 6 Runtime
+### 3.9 Phase 6 Runtime
 
 1. [opendcdiag_backend.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/power_backends/opendcdiag_backend.py) 现在已支持 staging workspace build/run。
 2. [hardware_results.py](/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py) 现在已支持：
@@ -243,10 +270,15 @@
 29. `/Users/wangxu/anaconda3/bin/pytest -q tests`
 30. `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py`
 31. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_profiles.py tests/test_sdc_vault_v2.py tests/test_hardware_results.py tests/test_power_backends.py`
+32. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_run_sdc_differential.py gem5/tests/test_sdc_fault_request.py`
+33. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_hardware_results.py tests/test_power_backends.py`
+34. `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_strategies.py tests/test_sdc_generation_profiles.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_genetic_driver.py`
+35. `/Users/wangxu/anaconda3/bin/pytest -q tests`
+36. `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py gem5/tests/test_sdc_fault_request.py`
 
 当前结果：
 
-1. 主仓测试：`58 passed`
+1. 主仓测试：`65 passed`
 2. `microprobe` 定向测试：`8 passed`
 3. 新 CLI 正常暴露参数
 4. 现有 `status` 汇总仍可用
@@ -288,9 +320,19 @@
    - `tests/test_sdc_genetic_driver.py`
    - `tests/test_sdc_agent.py`
    - `tests/conftest.py` 引导下的 root `pytest`
-21. 当前相关回归总计：`54 passed`
-22. `HW_AGGRESSIVE` profile 回归已通过：
+22. 当前相关回归总计：`54 passed`
+23. `HW_AGGRESSIVE` profile 回归已通过：
    - `tests/test_sdc_generation_profiles.py`
+24. `Phase 5 memory fault model` 控制面与 gem5 helper 回归已通过：
+   - `tests/test_run_sdc_differential.py`
+   - `gem5/tests/test_sdc_fault_request.py`
+25. `Phase 6 richer ingest` 回归已通过：
+   - `tests/test_hardware_results.py`
+   - `tests/test_power_backends.py`
+26. `Phase 7 template/pcfg/mutation-advice` 回归已通过：
+   - `tests/test_sdc_generation_strategies.py`
+   - `tests/test_sdc_scheduler.py`
+   - `tests/test_sdc_agent.py`
 
 ---
 
@@ -300,10 +342,11 @@
 
 1. inner loop 已具备基础缓存和 artifact index，但更细粒度的 artifact/index 体系仍可继续增强。
 3. outer loop 已能识别脚本化 fault execution plane，但更大范围的 injector 联动仍未完成。
-4. gem5 real fault injector 目前已支持 `register_bit_flip` 与 `vector_register_bit_flip` 两类脚本化路径；更多 fault model 仍未实现。
+4. gem5 real fault injector 目前已支持 `register_bit_flip`、`vector_register_bit_flip` 与 `memory_bit_flip` 三类脚本化路径；更多 fault model 仍未实现。
 5. `opendcdiag-arm` promotion 已接入控制面的 build/run + ingest 版，但仍缺真实硬件环境下的稳定性验证。
 6. 当前 opendcdiag runtime 仍依赖 staging workspace build，而不是目标机器上的长期部署流程。
 7. `qemu` 内部 submodule 仍保留，不属于本轮单仓扁平化范围。
+8. 当前 mutation advisor 还是 heuristic/rule-based，真正的外部 LLM-backed mutation advisor 仍需独立接入和环境配置。
 
 ---
 
@@ -315,12 +358,14 @@
    - outer loop 与真实 injector 的更深衔接
    - 已将新的 injector confidence / promotion readiness 接入排序与 promotion 逻辑
 2. 推进 `Phase 5: gem5 真实 fault injector`
-   - 扩展 fault model，不只停留在 register bit flip
+   - 扩展 fault model，超出当前 `register/vector/memory bit flip`
 3. 推进 `Phase 6: opendcdiag-arm promotion 与真机回灌`
    - 将 staging build/run 升级为真实机器部署流程
-   - 增强 detector 解析与机器元数据回灌
+   - 将已增强的 detector 解析与机器元数据回灌带到真实机器闭环
 4. 持续推进 `Monorepo Governance`
    - 用 domain 级视图承接后续所有跨子项目开发和审阅
+5. 推进 `Phase 7`
+   - 在当前 template/pcfg/mutation-advice 基础上接入真正的外部 LLM advisor
 
 ---
 

@@ -55,6 +55,50 @@
 - Files created/modified:
   - `progress.md` (updated)
 
+### Phase 6: ARM64 Full-Catalog Generation
+- **Status:** complete
+- Actions taken:
+  - Downloaded and extracted the official Arm A64 XML snapshot and normalized it into a local ARM64 catalog.
+  - Added catalog parsing, sample-assembly rendering, execution classification, Kunpeng920 hotness tagging, and clang-based validation utilities.
+  - Generated `microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json` and wired catalog-backed profiles into offline generation.
+  - Extended the ARM64 audit tool to compare both the legacy executable subset and the new catalog against the official XML baseline.
+  - Added regression tests for catalog parsing, catalog-aware audit reporting, catalog-driven generation profiles, and ARM64 target catalog access.
+- Files created/modified:
+  - `microprobe/src/microprobe/utils/arm64_isa_catalog.py` (created)
+  - `microprobe/targets/arm64/tools/a64_isa_catalog.py` (created)
+  - `microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json` (generated)
+  - `microprobe/targets/arm64/tools/a64_isa_audit.py` (updated)
+  - `microprobe/targets/generic/tools/mp_sdc_offline_gen.py` (updated)
+  - `sdc_agent/generation.py` (updated)
+  - `microprobe/targets/arm64/isa/armv8-common/isa.py` (updated)
+  - `microprobe/targets/arm64/tests/tools/test_a64_isa_catalog.py` (created)
+  - `microprobe/targets/arm64/tests/tools/test_a64_isa_audit.py` (updated)
+  - `tests/test_sdc_generation_profiles.py` (updated)
+  - `microprobe/targets/arm64/tests/targets/test_target_contract.py` (updated)
+
+### Phase 7: Remaining Local Plan Execution
+- **Status:** complete
+- Actions taken:
+  - Added real scripted `memory_bit_flip` support across gem5 fault target parsing, `sdc_kunpeng920_se.py`, and differential observation parsing.
+  - Upgraded hardware result ingest so detector payloads and machine/build/runtime metadata are normalized before writeback.
+  - Added template/PCFG generation helpers and heuristic mutation-advice output to the generation and scheduling paths.
+  - Re-ran root, microprobe, and gem5 helper regressions after the new Phase 5/6/7 work.
+- Files created/modified:
+  - `gem5/configs/example/arm/sdc_fault_request.py` (updated)
+  - `gem5/configs/example/arm/sdc_kunpeng920_se.py` (updated)
+  - `gem5/tests/test_sdc_fault_request.py` (updated)
+  - `sdc_agent/differential.py` (updated)
+  - `sdc_agent/hardware_results.py` (updated)
+  - `sdc_agent/generation.py` (updated)
+  - `sdc_agent/generation_strategies.py` (created)
+  - `sdc_agent/mutation_advisor.py` (created)
+  - `sdc_agent/scheduler.py` (updated)
+  - `sdc_agent/agent.py` (updated)
+  - `tests/test_run_sdc_differential.py` (updated)
+  - `tests/test_hardware_results.py` (updated)
+  - `tests/test_sdc_generation_strategies.py` (created)
+  - `tests/test_sdc_scheduler.py` (updated)
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
@@ -66,6 +110,18 @@
 | Full root test suite | `/Users/wangxu/anaconda3/bin/pytest -q tests` | No regressions across project tests | `58 passed` | PASS |
 | Microprobe ARM64 targeted tests | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py` | Evolution/profile changes preserve target contracts | `8 passed` | PASS |
 | Supporting v2 and hardware tests | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_profiles.py tests/test_sdc_vault_v2.py tests/test_hardware_results.py tests/test_power_backends.py` | Adjacent regressions remain green | `11 passed` | PASS |
+| ARM64 catalog parser tests | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_a64_isa_catalog.py` | XML/docs parsing and sample validation remain stable | `2 passed` | PASS |
+| ARM64 audit tests | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_a64_isa_audit.py` | Catalog-aware audit reporting works | `2 passed` | PASS |
+| Catalog-backed generation profiles | `/Users/wangxu/anaconda3/bin/pytest -q tests/test_sdc_generation_profiles.py` | New catalog profiles do not regress existing generation behavior | `5 passed` | PASS |
+| ARM64 root regressions | `/Users/wangxu/anaconda3/bin/pytest -q tests` | Root project regression suite remains green | `61 passed` | PASS |
+| ARM64 target regressions | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests` | ARM64 target/tool tests remain green | `42 passed` | PASS |
+| Real XML audit | `python3 microprobe/targets/arm64/tools/a64_isa_audit.py ...` | Catalog should cover all official mnemonics in selected classes | `general/system/float/advsimd cat missing = 0` | PASS |
+| Real full-catalog generation | `python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py --profile ALL_GENERATABLE --count 1 --sequence-length 512 ...` | Generator should auto-expand work to cover the full catalog | `planned=4 inserted=4 failed=[]` | PASS |
+| Memory fault + gem5 helper regressions | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_run_sdc_differential.py gem5/tests/test_sdc_fault_request.py` | New memory injector path parses and classifies correctly | `13 passed` | PASS |
+| Hardware ingest normalization regressions | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_hardware_results.py tests/test_power_backends.py` | Detector and machine metadata normalization stays compatible | `4 passed` | PASS |
+| Phase 7 strategy regressions | `/Users/wangxu/anaconda3/bin/python -m pytest -q tests/test_sdc_generation_strategies.py tests/test_sdc_generation_profiles.py tests/test_sdc_scheduler.py tests/test_sdc_agent.py tests/test_sdc_genetic_driver.py` | Template/PCFG generation and mutation advice integrate cleanly | `23 passed` | PASS |
+| Expanded root test suite after Phase 5/6/7 work | `/Users/wangxu/anaconda3/bin/pytest -q tests` | Entire root suite remains green after new work | `65 passed` | PASS |
+| Expanded targeted subtree tests | `/Users/wangxu/anaconda3/bin/pytest -q microprobe/targets/arm64/tests/tools/test_mp_sdc_offline_gen.py microprobe/targets/arm64/tests/targets/test_target_contract.py gem5/tests/test_sdc_fault_request.py` | Microprobe target contract and gem5 helper stay green | `13 passed` | PASS |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
@@ -73,15 +129,17 @@
 | 2026-04-04 | None yet | 1 | Discovery phase only |
 | 2026-04-04 | `pytest` could not import `sdc_agent` | 1 | Resolved by adding `tests/conftest.py` with repo-root path bootstrap |
 | 2026-04-04 | `/usr/bin/python3 -m pytest` lacked `pytest` | 1 | Switched to identifying the intended Python environment instead of repeating the same failing invocation |
+| 2026-04-04 | Initial catalog sample validation picked feature-gated `ABS` encodings and failed on default `.arch armv8-a` | 1 | Kept clang validation as best-effort metadata for catalog sequences instead of using it as the sole acceptance criterion for full-catalog generation |
+| 2026-04-04 | Initial `neon_fma_heavy` template used `LD1`/`ST1` and failed during wrapper assembly generation | 1 | Replaced unstable mnemonics with aggressive but wrapper-stable `LDP/STP` in the first template version |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
 | Where am I? | Phase 5: Delivery |
 | Where am I going? | Final review and concise handoff |
-| What's the goal? | Bring the source implementation in line with `docs/spec.md` and `docs/plan.md` and verify it end to end |
-| What have I learned? | The highest-value remaining source gaps were Phase 3 feedback-loop richness and repo-local verification ergonomics, and both are now implemented and validated |
-| What have I done? | Read the docs, identified the gaps, implemented scheduler/genetic-driver/test bootstrap changes, and verified them across targeted and broad test suites |
+| What's the goal? | Bring the source implementation in line with `docs/spec.md` and `docs/plan.md`, including full ARM64 catalog generation coverage and the remaining locally feasible Phase 5/6/7 upgrades, and verify it end to end |
+| What have I learned? | Full A64 coverage is best modeled as an official-XML-backed catalog plus generation profiles, while the remaining local plan gaps centered on memory fault injection, richer hardware ingest, and smarter generation advice |
+| What have I done? | Added the catalog pipeline, advanced Phase 5/6/7 with memory fault injection and intelligent generation helpers, and verified the changes across root tests, ARM64 tests, and targeted gem5 helper tests |
 
 ---
 *Update after completing each phase or encountering errors*

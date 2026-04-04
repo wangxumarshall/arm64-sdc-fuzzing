@@ -24,41 +24,21 @@ from gem5.isas import ISA
 from gem5.resources.resource import BinaryResource
 from gem5.simulate.simulator import Simulator
 
-from sdc_fault_request import build_fault_request, write_fault_request
-
-
-def _parse_fault_target(raw_target: str) -> tuple[int, str]:
-    value = raw_target.strip()
-    if not value:
-        return 0, ""
-    if ":" not in value:
-        return 0, value
-    prefix, register = value.split(":", 1)
-    prefix = prefix.strip().lower()
-    register = register.strip()
-    if prefix.startswith("cpu"):
-        return int(prefix[3:]), register
-    return 0, value
+from sdc_fault_request import (
+    build_fault_request,
+    parse_fault_target,
+    supports_scripted_fault_injection,
+    write_fault_request,
+)
 
 
 def _supports_scripted_fault_injection(args: argparse.Namespace) -> bool:
-    cpu_index, register_name = _parse_fault_target(args.fault_target)
-    is_int_register = register_name.lower().startswith("x") or register_name.lower() == "sp"
-    is_vec_register = register_name.lower().startswith("v") or register_name.lower().startswith("q")
-    return (
-        args.fault_model in {"register_bit_flip", "vector_register_bit_flip"}
-        and args.fault_bit is not None
-        and args.fault_tick is not None
-        and register_name != ""
-        and cpu_index < args.num_cores
-        and (
-            (args.fault_model == "register_bit_flip" and is_int_register and args.fault_bit < 64)
-            or (
-                args.fault_model == "vector_register_bit_flip"
-                and is_vec_register
-                and args.fault_bit < 128
-            )
-        )
+    return supports_scripted_fault_injection(
+        fault_model=args.fault_model,
+        fault_target=args.fault_target,
+        fault_bit=args.fault_bit,
+        fault_tick=args.fault_tick,
+        num_cores=args.num_cores,
     )
 
 
@@ -168,6 +148,16 @@ def _write_fault_manifest(args: argparse.Namespace) -> Path:
     return write_fault_request(request, manifest_path)
 
 
+def _inject_memory_bit_flip(board: SimpleBoard, address: int, bit_index: int) -> tuple[int, int, int]:
+    byte_address = address + (bit_index // 8)
+    byte_offset = bit_index % 8
+    current_byte = board.physProxy.read(byte_address, 1)
+    old_value = current_byte[0]
+    new_value = old_value ^ (1 << byte_offset)
+    board.physProxy.write(byte_address, bytes([new_value]))
+    return byte_address, old_value, new_value
+
+
 def main() -> None:
     args = _build_parser().parse_args()
     outdir = Path(m5.options.outdir).resolve()
@@ -228,7 +218,8 @@ def main() -> None:
         return
 
     simulator._instantiate()
-    cpu_index, register_name = _parse_fault_target(args.fault_target)
+    target = parse_fault_target(args.fault_target)
+    cpu_index = target.cpu_index
     cpu = board.get_processor().get_cores()[cpu_index].get_simobject()
 
     if args.fault_tick is None or args.fault_bit is None:
@@ -248,6 +239,7 @@ def main() -> None:
             return
 
     if args.fault_model == "register_bit_flip":
+        register_name = target.register_name
         old_value = cpu.readArmIntRegisterByName(0, register_name)
         new_value = cpu.injectArmIntRegisterBitFlip(0, register_name, args.fault_bit)
         print(
@@ -257,12 +249,27 @@ def main() -> None:
             file=sys.stderr,
         )
     elif args.fault_model == "vector_register_bit_flip":
+        register_name = target.register_name
         old_value = cpu.readArmVecRegisterByName(0, register_name)
         new_value = cpu.injectArmVecRegisterBitFlip(0, register_name, args.fault_bit)
         print(
             "[sdc] injected vector register bit flip: "
             f"cpu={cpu_index} reg={register_name} bit={args.fault_bit} "
             f"old={old_value} new={new_value} tick={m5.curTick()}",
+            file=sys.stderr,
+        )
+    elif args.fault_model == "memory_bit_flip":
+        if target.memory_address is None:
+            raise RuntimeError("memory_bit_flip requires a mem:<addr> fault target.")
+        byte_address, old_value, new_value = _inject_memory_bit_flip(
+            board,
+            target.memory_address,
+            args.fault_bit,
+        )
+        print(
+            "[sdc] injected memory bit flip: "
+            f"cpu={cpu_index} addr=0x{byte_address:016x} bit={args.fault_bit} "
+            f"old=0x{old_value:02x} new=0x{new_value:02x} tick={m5.curTick()}",
             file=sys.stderr,
         )
     else:

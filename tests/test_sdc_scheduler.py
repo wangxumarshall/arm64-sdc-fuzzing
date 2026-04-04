@@ -375,5 +375,9 @@ def test_scheduler_mutation_plan_exposes_phase3_feedback_breakdown(tmp_path):
         assert plan[0]["inner_value_score"] > 0.0
         assert plan[0]["diversity_bonus"] > 1.0
         assert "LDR" in plan[0]["instruction_families"]
+        assert plan[0]["generation_strategy"] == "pcfg"
+        assert plan[0]["template_name"] == "neon_fma_heavy"
+        assert plan[0]["mutation_advice"]["recommended_fault_model"] == "memory_bit_flip"
+        assert plan[0]["mutation_advice"]["recommended_template_name"] == "neon_fma_heavy"
     finally:
         vault.close()

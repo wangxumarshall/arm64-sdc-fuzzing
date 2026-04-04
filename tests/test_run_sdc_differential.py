@@ -105,6 +105,21 @@ def test_build_fault_args_renders_optional_fields():
         "--fault-tick",
         "1234",
     ]
+    assert build_fault_args(
+        fault_model="memory_bit_flip",
+        fault_target="mem:0x1000",
+        fault_bit=9,
+        fault_tick=2048,
+    ) == [
+        "--fault-model",
+        "memory_bit_flip",
+        "--fault-target",
+        "mem:0x1000",
+        "--fault-bit",
+        "9",
+        "--fault-tick",
+        "2048",
+    ]
 
 
 def test_run_differential_exposes_programmatic_pipeline(monkeypatch, tmp_path):
@@ -328,3 +343,77 @@ def test_run_differential_parses_vector_register_fault_observation(monkeypatch, 
     assert result.fault_request["execution_plane"] == "gem5_scripted"
     assert result.fault_request["observation"]["target_kind"] == "vector_register"
     assert result.fault_request["observation"]["register_name"] == "v0"
+
+
+def test_run_differential_parses_memory_fault_observation(monkeypatch, tmp_path):
+    source = tmp_path / "case-mem.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    def fake_compile_static_elf(**kwargs):
+        return CommandResult(["cc"], 0, "", "")
+
+    def fake_run_qemu(**kwargs):
+        return CommandResult(["qemu"], 0, "SDC_DIGEST=1234", "")
+
+    def fake_run_gem5(**kwargs):
+        manifest_path = kwargs["gem5_outdir"] / "sdc_fault_request.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "fault_model": "memory_bit_flip",
+                    "fault_target": "mem:0x1000",
+                    "fault_bit": 9,
+                    "fault_tick": 4096,
+                    "implemented_in_script": True,
+                    "target_kind": "memory",
+                    "memory_address": 4096,
+                    "memory_address_hex": "0x1000",
+                    "binary": str((tmp_path / "case-mem.elf").resolve()),
+                    "binary_args": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return CommandResult(
+            ["gem5"],
+            0,
+            "SDC_HASH=5678",
+            (
+                "[sdc] injected memory bit flip: "
+                "cpu=0 addr=0x0000000000001001 bit=9 "
+                "old=0xaa new=0xa8 tick=4096"
+            ),
+        )
+
+    class FakeBackend:
+        def __init__(self, template_profile: str, mcpat_binary: Path | None = None):
+            self.template_profile = template_profile
+            self.mcpat_binary = mcpat_binary
+
+        def run(self, target_dir: Path):
+            return {"power_total": 2.75, "target_dir": str(target_dir)}
+
+    monkeypatch.setattr(
+        "sdc_agent.differential.compile_static_elf", fake_compile_static_elf
+    )
+    monkeypatch.setattr("sdc_agent.differential.run_qemu", fake_run_qemu)
+    monkeypatch.setattr("sdc_agent.differential.run_gem5", fake_run_gem5)
+    monkeypatch.setattr("sdc_agent.differential.McPATBackend", FakeBackend)
+
+    result = run_differential(
+        source=source,
+        elf=tmp_path / "case-mem.elf",
+        gem5_outdir=tmp_path / "m5out-mem",
+        fault_model="memory_bit_flip",
+        fault_target="mem:0x1000",
+        fault_bit=9,
+        fault_tick=4096,
+    )
+
+    assert result.status == "sdc_found"
+    assert result.fault_request is not None
+    assert result.fault_request["execution_plane"] == "gem5_scripted"
+    assert result.fault_request["observation"]["target_kind"] == "memory"
+    assert result.fault_request["observation"]["memory_address"] == "0x0000000000001001"
