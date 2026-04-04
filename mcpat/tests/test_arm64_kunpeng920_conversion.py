@@ -10,7 +10,7 @@ MCPAT_ROOT = Path(__file__).resolve().parents[1]
 if str(MCPAT_ROOT) not in sys.path:
     sys.path.insert(0, str(MCPAT_ROOT))
 
-from pypat.conversion.convert import run  # noqa: E402
+from pypat.conversion.convert import run, run_mcpat  # noqa: E402
 
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "data" / "arm64_kunpeng920_minimal"
@@ -36,3 +36,26 @@ def test_arm64_kunpeng920_fixture_runs_end_to_end(tmp_path):
     assert Path(result["mcpat_input"]).exists()
     assert Path(result["mcpat_output"]).exists()
     assert Path(result["mcpat_power_trace"]).exists()
+
+
+def test_run_mcpat_detects_fatal_log_even_on_zero_exit(tmp_path):
+    fake_mcpat = tmp_path / "fake-mcpat.sh"
+    fake_mcpat.write_text(
+        "#!/bin/sh\n"
+        "echo 'ERROR: no valid cache organizations found'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_mcpat.chmod(fake_mcpat.stat().st_mode | stat.S_IXUSR)
+
+    mcpat_input = tmp_path / "conv.xml"
+    mcpat_input.write_text("<component id='root' name='root'/>", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="fatal error"):
+        run_mcpat(
+            mcpat_binary=fake_mcpat,
+            target=tmp_path,
+            mcpat_input=mcpat_input,
+            print_level=1,
+            opt_for_clk=0,
+        )

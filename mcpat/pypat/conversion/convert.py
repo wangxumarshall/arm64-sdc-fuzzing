@@ -6,6 +6,17 @@ from .gem5_to_mcpat import run_conversion
 from pypat.parsers.mcpat_text import parse_mcpat_summary
 
 
+_FATAL_LOG_PATTERNS = (
+    "ERROR:",
+    "XML Parsing error",
+    "The value of homogeneous_",
+    "some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!",
+    "Number of private L2 does not match number of cores",
+    "Unknown memory controllers",
+    "Cannot retrieve array structure",
+)
+
+
 def gen_dirs(target_dir: Path) -> Dict[str, Path]:
     stats_txt = target_dir / "stats.txt"
     stats_h5 = target_dir / "stats.h5"
@@ -22,6 +33,16 @@ def gen_dirs(target_dir: Path) -> Dict[str, Path]:
         "config_file": target_dir / "config.json",
         "stats_file": stats_file,
     }
+
+
+def _fatal_log_excerpt(log_text: str) -> str | None:
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(pattern in stripped for pattern in _FATAL_LOG_PATTERNS):
+            return stripped
+    return None
 
 
 def run_mcpat(
@@ -64,6 +85,14 @@ def run_mcpat(
                 f"McPAT failed with exit code {exc.returncode}. "
                 f"See {mcpat_output}. Output starts with:\n{excerpt}"
             ) from exc
+
+    log_excerpt = mcpat_output.read_text(encoding="utf-8", errors="replace")
+    fatal_line = _fatal_log_excerpt(log_excerpt)
+    if fatal_line is not None:
+        raise RuntimeError(
+            f"McPAT reported a fatal error while returning success. "
+            f"See {mcpat_output}. First fatal line:\n{fatal_line}"
+        )
 
     return mcpat_output
 

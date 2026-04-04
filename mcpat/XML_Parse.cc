@@ -38,13 +38,31 @@
  
  using namespace std;
  
- void ParseXML::parse(char* filepath)
- {
-   unsigned int i,j,k,m,n;
-   unsigned int NumofCom_4;
-   unsigned int itmp;
-   //Initialize all structures
-   ParseXML::initialize();
+void ParseXML::parse(char* filepath)
+{
+  unsigned int i,j,k,m,n;
+  unsigned int NumofCom_4;
+  unsigned int itmp;
+  //Initialize all structures
+  ParseXML::initialize();
+
+  auto fatal_hierarchy_error = [&](const char* stage, int homogeneous, int declared, unsigned int component_index) {
+    cerr << "McPAT XML hierarchy mismatch while parsing " << stage
+         << ": homogeneous=" << homogeneous
+         << ", declared=" << declared
+         << ", component_index=" << component_index << endl;
+    exit(1);
+  };
+
+  auto fatal_component_order_error = [&](const char* stage, unsigned int component_index) {
+    cerr << "McPAT XML component ordering mismatch while parsing " << stage
+         << ": component_index=" << component_index
+         << ", cores=" << sys.number_of_cores
+         << ", L2s=" << sys.number_of_L2s
+         << ", L3s=" << sys.number_of_L3s
+         << ", NoCs=" << sys.number_of_NoCs << endl;
+    exit(1);
+  };
  
    // this open and parse the XML file:
    XMLNode xMainNode=XMLNode::openFileHelper(filepath,"component"); //the 'component' in the first layer
@@ -977,8 +995,7 @@
      {
        xNode3=xNode2.getChildNode("component",w);
        if (xNode3.isEmpty()==1) {
-         printf("The value of homogeneous_L3s or number_of_L3s is not correct!");
-         exit(0);
+         fatal_hierarchy_error("system.L3", sys.homogeneous_L3s, sys.number_of_L3s, w);
        }
        else
        {
@@ -1101,8 +1118,7 @@
            w=w+1;
          }
          else {
-           printf("The value of homogeneous_L3s or number_of_L3s is not correct!");
-           exit(0);
+           fatal_hierarchy_error("system.L3", sys.homogeneous_L3s, sys.number_of_L3s, w);
          }
        }
      }
@@ -1116,8 +1132,7 @@
      {
        xNode3=xNode2.getChildNode("component",w);
        if (xNode3.isEmpty()==1) {
-         printf("The value of homogeneous_NoCs or number_of_NoCs is not correct!");
-         exit(0);
+         fatal_hierarchy_error("system.NoC", sys.homogeneous_NoCs, sys.number_of_NoCs, w);
        }
        else
        {
@@ -1268,8 +1283,7 @@
      if (OrderofComponents_3layer>0) OrderofComponents_3layer=OrderofComponents_3layer+1;
      xNode3=xNode2.getChildNode("component",OrderofComponents_3layer);
      if (xNode3.isEmpty()==1) {
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.mc", OrderofComponents_3layer);
      }
      if (strstr(xNode3.getAttribute("id"),"system.mc")!=NULL)
      {
@@ -1302,15 +1316,13 @@
        }
      }
      else{
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.mc", OrderofComponents_3layer);
      }
      //__________________________________________Get system.niu____________________________________________
      if (OrderofComponents_3layer>0) OrderofComponents_3layer=OrderofComponents_3layer+1;
      xNode3=xNode2.getChildNode("component",OrderofComponents_3layer);
      if (xNode3.isEmpty()==1) {
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.niu", OrderofComponents_3layer);
      }
      if (strstr(xNode3.getAttribute("id"),"system.niu")!=NULL)
      {
@@ -1332,16 +1344,14 @@
        }
      }
      else{
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.niu", OrderofComponents_3layer);
      }
- 
+
      //__________________________________________Get system.pcie____________________________________________
      if (OrderofComponents_3layer>0) OrderofComponents_3layer=OrderofComponents_3layer+1;
      xNode3=xNode2.getChildNode("component",OrderofComponents_3layer);
      if (xNode3.isEmpty()==1) {
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.pcie", OrderofComponents_3layer);
      }
      if (strstr(xNode3.getAttribute("id"),"system.pcie")!=NULL)
      {
@@ -1365,15 +1375,13 @@
        }
      }
      else{
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.pcie", OrderofComponents_3layer);
      }
      //__________________________________________Get system.flashcontroller____________________________________________
      if (OrderofComponents_3layer>0) OrderofComponents_3layer=OrderofComponents_3layer+1;
      xNode3=xNode2.getChildNode("component",OrderofComponents_3layer);
      if (xNode3.isEmpty()==1) {
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.flashc", OrderofComponents_3layer);
      }
      if (strstr(xNode3.getAttribute("id"),"system.flashc")!=NULL)
      {
@@ -1409,46 +1417,67 @@
        }
      }
      else{
-       printf("some value(s) of number_of_cores/number_of_L2s/number_of_L3s/number_of_NoCs is/are not correct!");
-       exit(0);
+       fatal_component_order_error("system.flashc", OrderofComponents_3layer);
      }
      
-     //__________________________________________Get system.CIM_SRAM____________________________________________
-     if (OrderofComponents_3layer>0) OrderofComponents_3layer=OrderofComponents_3layer+1;
-     xNode3=xNode2.getChildNode("component",OrderofComponents_3layer);
-     if (!xNode3.isEmpty()) {
-       if (strstr(xNode3.getAttribute("id"),"system.CIM_SRAM")!=NULL){
-         sys.number_of_custom_blocks += 1;
-         itmp=xNode3.nChildNode("param");
-         for(k=0; k<itmp; k++){
-           if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"static")==0)
-             sys.CIM_SRAM.static_power = atof(xNode3.getChildNode("param",k).getAttribute("value"));
-           if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"switch")==0)
-             sys.CIM_SRAM.switch_energy = atof(xNode3.getChildNode("param",k).getAttribute("value"));
-           if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"area")==0)
-             sys.CIM_SRAM.area = atof(xNode3.getChildNode("param",k).getAttribute("value"));  
-         }
-         itmp=xNode3.nChildNode("stat");
-         for(k=0; k<itmp; k++){
-           if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"frequency")==0)
-             sys.CIM_SRAM.frequency = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
-           if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"activation_factor")==0)
-             sys.CIM_SRAM.activation_factor = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
-           if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"switch_count")==0)
-             sys.CIM_SRAM.switch_count = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
-           if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"interval")==0)
-             sys.CIM_SRAM.interval = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
-         }
+     //__________________________________________Get system custom blocks____________________________________________
+     for (w = OrderofComponents_3layer + 1; w < NumofCom_3; w++)
+     {
+       xNode3 = xNode2.getChildNode("component", w);
+       if (xNode3.isEmpty()==1) continue;
+       if (sys.number_of_custom_blocks >= 16)
+       {
+         cerr << "McPAT custom block capacity exceeded while parsing component index "
+              << w << ". Increase the custom block array size in XML_Parse.h." << endl;
+         exit(1);
        }
+
+       custom_block *block = &sys.custom_blocks[sys.number_of_custom_blocks];
+       const char* block_name = xNode3.getAttribute("name");
+       if (block_name && strlen(block_name) > 0)
+         strncpy(block->name, block_name, sizeof(block->name) - 1);
+       else
+         strncpy(block->name, "CustomBlock", sizeof(block->name) - 1);
+       block->name[sizeof(block->name) - 1] = '\0';
+
+       itmp = xNode3.nChildNode("param");
+       for (k = 0; k < itmp; k++)
+       {
+         if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"static")==0)
+           block->static_power = atof(xNode3.getChildNode("param",k).getAttribute("value"));
+         if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"switch")==0)
+           block->switch_energy = atof(xNode3.getChildNode("param",k).getAttribute("value"));
+         if (strcmp(xNode3.getChildNode("param",k).getAttribute("name"),"area")==0)
+           block->area = atof(xNode3.getChildNode("param",k).getAttribute("value"));
+       }
+
+       itmp = xNode3.nChildNode("stat");
+       for (k = 0; k < itmp; k++)
+       {
+         if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"frequency")==0)
+           block->frequency = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
+         if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"activation_factor")==0)
+           block->activation_factor = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
+         if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"switch_count")==0)
+           block->switch_count = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
+         if (strcmp(xNode3.getChildNode("stat",k).getAttribute("name"),"interval")==0)
+           block->interval = atof(xNode3.getChildNode("stat",k).getAttribute("value"));
+       }
+
+       if (strstr(xNode3.getAttribute("id"),"system.CIM_SRAM")!=NULL)
+         sys.CIM_SRAM = *block;
+
+       sys.number_of_custom_blocks += 1;
      }
  
      
    }
  }
- void ParseXML::initialize() //Initialize all
- {
-   //All number_of_* at the level of 'system' 03/21/2009
-   sys.number_of_cores=1;
+void ParseXML::initialize() //Initialize all
+{
+  //All number_of_* at the level of 'system' 03/21/2009
+  sys.number_of_custom_blocks=0;
+  sys.number_of_cores=1;
    sys.number_of_L1Directories=1;
    sys.number_of_L2Directories=1;
    sys.number_of_L2s=1;
@@ -1880,4 +1909,24 @@
    sys.flashc.type =1;
    sys.flashc.duty_cycle =1;
    sys.flashc.total_load_perc=1;
+
+   for (i=0; i<16; i++)
+   {
+     strcpy(sys.custom_blocks[i].name, "CustomBlock");
+     sys.custom_blocks[i].area = 0;
+     sys.custom_blocks[i].static_power = 0;
+     sys.custom_blocks[i].switch_energy = 0;
+     sys.custom_blocks[i].frequency = 0;
+     sys.custom_blocks[i].activation_factor = 0;
+     sys.custom_blocks[i].switch_count = 0;
+     sys.custom_blocks[i].interval = 0;
+   }
+   strcpy(sys.CIM_SRAM.name, "CIM_SRAM");
+   sys.CIM_SRAM.area = 0;
+   sys.CIM_SRAM.static_power = 0;
+   sys.CIM_SRAM.switch_energy = 0;
+   sys.CIM_SRAM.frequency = 0;
+   sys.CIM_SRAM.activation_factor = 0;
+   sys.CIM_SRAM.switch_count = 0;
+   sys.CIM_SRAM.interval = 0;
  }

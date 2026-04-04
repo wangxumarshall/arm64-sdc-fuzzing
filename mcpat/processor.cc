@@ -67,8 +67,12 @@ Processor::Processor(ParseXML *XML_interface)
 
   if (XML->sys.Private_L2 && numCore != numL2)
   {
-    cout<<"Number of private L2 does not match number of cores"<<endl;
-      exit(0);
+    cerr << "Number of private L2s does not match number of cores: "
+         << "numCore=" << numCore
+         << ", numL2=" << numL2
+         << ", declared_cores=" << XML->sys.number_of_cores
+         << ", declared_L2s=" << XML->sys.number_of_L2s << endl;
+    exit(1);
   }
 
   if (procdynp.homoL3)
@@ -104,10 +108,15 @@ void Processor::initialize(){
   int i;
   double pppm_t[4]    = {1,1,1,1};
 
-  if (XML->sys.number_of_custom_blocks > 0){
-    CIM_SRAM.area = XML->sys.CIM_SRAM.area;
-    CIM_SRAM.static_power = XML->sys.CIM_SRAM.static_power;
-    CIM_SRAM.switching_energy = XML->sys.CIM_SRAM.switch_energy;
+  customBlocks.clear();
+  for (i = 0; i < XML->sys.number_of_custom_blocks; i++){
+    CustomBlock block(
+      XML->sys.custom_blocks[i].name,
+      XML->sys.custom_blocks[i].static_power,
+      XML->sys.custom_blocks[i].switch_energy
+    );
+    block.area = XML->sys.custom_blocks[i].area;
+    customBlocks.push_back(block);
   }
   
   for (i = 0;i < numCore; i++){
@@ -268,13 +277,24 @@ void Processor::compute(ParseXML *fresh_XML){
     clear_power();
   }
 
+  int i;
   /** Power Computation of Custom Block **/
   // Following are just example usage of given statistics
-  if(XML->sys.number_of_custom_blocks > 0){
-    CIM_SRAM.computePower_Frequency(XML->sys.CIM_SRAM.frequency, XML->sys.CIM_SRAM.activation_factor);
+  for (i = 0; i < XML->sys.number_of_custom_blocks; i++){
+    if (i >= (int)customBlocks.size()) break;
+    if (XML->sys.custom_blocks[i].switch_count > 0 && XML->sys.custom_blocks[i].interval > 0){
+      customBlocks[i].computePower_Interval(
+        XML->sys.custom_blocks[i].switch_count,
+        XML->sys.custom_blocks[i].interval
+      );
+    }
+    else{
+      customBlocks[i].computePower_Frequency(
+        XML->sys.custom_blocks[i].frequency,
+        XML->sys.custom_blocks[i].activation_factor
+      );
+    }
   }
-
-  int i;
   double pppm_t[4]    = {1,1,1,1};
   for (i = 0;i < numCore; i++)
   {
@@ -623,7 +643,10 @@ if (is_tdp)
         nocs[i]->displayEnergy(indent+4,plevel,is_tdp);
       }
     }
-    CIM_SRAM.displayPower();
+    for (i = 0; i < XML->sys.number_of_custom_blocks; i++){
+      if (i >= (int)customBlocks.size()) break;
+      customBlocks[i].displayPower();
+    }
   }
 }
 #else
@@ -1068,6 +1091,10 @@ void Processor::refresh_param(ParseXML *fresh_XML){
     //   nocs[i]->init_link_bus(sqrt(area.get_area()*XML->sys.NoC[i].chip_coverage));//compute global links
     // }
   }
+
+  for (i = 0; i < (int)customBlocks.size(); i++){
+    customBlocks[i].power = 0;
+  }
 }
 
 
@@ -1470,8 +1497,9 @@ void Processor::dump_stats(int plevel, ostream &out){
     out<<l2.get_power(1, power_gating, long_channel)<<" ";
   }
 
-  if(XML->sys.number_of_custom_blocks > 0){
-    out<<CIM_SRAM.power<<" ";
+  for (int custom_idx = 0; custom_idx < XML->sys.number_of_custom_blocks; custom_idx++){
+    if (custom_idx >= (int)customBlocks.size()) break;
+    out<<customBlocks[custom_idx].power<<" ";
   }
   
   out<<endl;
@@ -1554,8 +1582,9 @@ void Processor::dump_name(ostream &out){
     out<<"L2_shared ";
   }
 
-  if(XML->sys.number_of_custom_blocks > 0){
-    out<<CIM_SRAM.name<<" ";
+  for (int custom_idx = 0; custom_idx < XML->sys.number_of_custom_blocks; custom_idx++){
+    if (custom_idx >= (int)customBlocks.size()) break;
+    out<<customBlocks[custom_idx].name<<" ";
   }
 
   out<<endl;
@@ -1648,8 +1677,9 @@ void Processor::dump_area(ostream &out){
     out<<l2.area.get_area()<<" ";
   }
 
-  if(XML->sys.number_of_custom_blocks > 0){
-    out<<CIM_SRAM.area<<" ";
+  for (int custom_idx = 0; custom_idx < XML->sys.number_of_custom_blocks; custom_idx++){
+    if (custom_idx >= (int)customBlocks.size()) break;
+    out<<customBlocks[custom_idx].area<<" ";
   }
 
   out<<endl;

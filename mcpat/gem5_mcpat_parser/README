@@ -13,5 +13,11 @@ McPAT output will be stored in the `mcpat/results` folder
 Notes:
 - `Gem5McPATParser_custom.py` is now a compatibility wrapper around the newer
   `pypat` conversion path.
-- ARM64 XML generation is supported, but the local 2015 McPAT fork can still
-  reject some ARM-like cache/core configurations during execution.
+- The `arm64-kunpeng920` profile now emits explicit Kunpeng920 topology
+  parameters for NoC, L3, memory, and I/O blocks.
+- The Kunpeng920 template also emits custom blocks for HCCS, HPRE, SEC, and
+  ZIP so accelerator/coherency modeling can be calibrated explicitly.
+- Fatal McPAT log patterns are treated as conversion failures even when the
+  legacy binary exits with status `0`.
+- Architectural support details and remaining approximations are documented in
+  `docs/kunpeng920_support.md`.

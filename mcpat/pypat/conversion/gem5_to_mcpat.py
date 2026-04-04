@@ -169,7 +169,11 @@ def substitute_config_expression(value: str, config: Dict[str, object]) -> str:
         )
     if len(split_top_level_commas(rewritten)) > 1:
         return eval_csv_expression(rewritten)
-    return str(safe_eval(rewritten.replace("[", "").replace("]", "")))
+    cleaned = rewritten.replace("[", "").replace("]", "")
+    try:
+        return str(safe_eval(cleaned))
+    except (NameError, SyntaxError):
+        return cleaned
 
 
 def substitute_stat_expression(

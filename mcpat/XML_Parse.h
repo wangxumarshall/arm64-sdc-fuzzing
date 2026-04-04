@@ -536,6 +536,7 @@
  } system_pcie;
  
  typedef struct{
+  char name[64];
    //params
    double area;
    double static_power;
@@ -606,6 +607,7 @@
    system_mc flashc;
    system_niu niu;
    system_pcie pcie;
+   custom_block custom_blocks[16];
    custom_block CIM_SRAM;
  } root_system;
  

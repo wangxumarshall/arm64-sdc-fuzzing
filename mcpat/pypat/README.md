@@ -45,8 +45,15 @@ The default template path is the repository's existing
 `gem5_mcpat_parser/template_x86.xml`, so this wrapper and the older
 `run_mcpat.sh` flow can share the same template base.
 
-Current limitation:
+Kunpeng920 notes:
 
-- ARM64/Kunpeng920-like XML generation is wired up, but this local 2015 McPAT
-  fork can still reject ARM-like cache/core configurations at execution time.
-  The wrapper now surfaces the McPAT log excerpt so the failure is diagnosable.
+- `arm64-kunpeng920` now carries explicit topology fields for L3 slices, NoCs,
+  memory channels, and controller blocks.
+- Kunpeng920-specific custom blocks for HCCS, HPRE, SEC, and ZIP are emitted in
+  the XML template so accelerator/coherency modeling is no longer invisible.
+- Derived McPAT counters are recorded with provenance in the normalized
+  Kunpeng920 model so fallback/aggregated values are visible.
+- The wrapper now treats common fatal McPAT log lines as hard failures even if
+  the legacy binary exits with status `0`.
+- Architectural support status and remaining approximations are documented in
+  `docs/kunpeng920_support.md`.

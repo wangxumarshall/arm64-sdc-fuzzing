@@ -4,7 +4,7 @@ import copy
 import math
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Dict, Iterable, Mapping, Sequence
 
 
 _MISSING = object()
@@ -40,6 +40,8 @@ class Kunpeng920McPATModel:
     noc: Dict[str, Any]
     io: Dict[str, Dict[str, Any]]
     identity: Dict[str, Any]
+    topology: Dict[str, Any]
+    sources: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -174,6 +176,24 @@ def _first_config_value(
     return default
 
 
+def _first_config_value_with_source(
+    container: Mapping[str, Any],
+    parser,
+    paths: Iterable[str],
+    default: Any,
+    *,
+    default_source: str,
+) -> tuple[Any, str]:
+    for path in paths:
+        value = _lookup_path(container, path)
+        if value is _MISSING:
+            continue
+        parsed = parser(value) if parser is not None else value
+        if parsed is not None:
+            return parsed, f"config.{path}"
+    return default, default_source
+
+
 def _container_length(container: Any, paths: Iterable[str]) -> int | None:
     for path in paths:
         value = _lookup_path(container, path)
@@ -188,6 +208,24 @@ def _container_length(container: Any, paths: Iterable[str]) -> int | None:
             if value:
                 return len(value)
     return None
+
+
+def _container_length_with_source(
+    container: Any, paths: Iterable[str]
+) -> tuple[int | None, str | None]:
+    for path in paths:
+        value = _lookup_path(container, path)
+        if value is _MISSING:
+            continue
+        if isinstance(value, list):
+            return len(value), f"config.{path}"
+        if isinstance(value, dict):
+            numeric_keys = [key for key in value.keys() if str(key).isdigit()]
+            if numeric_keys:
+                return len(numeric_keys), f"config.{path}"
+            if value:
+                return len(value), f"config.{path}"
+    return None, None
 
 
 def _first_non_zero(*values: float) -> float:
@@ -215,6 +253,19 @@ def _find_first_stat(raw_stats: Mapping[str, Any], aliases: Iterable[str]) -> fl
     return 0.0
 
 
+def _find_first_stat_with_source(
+    raw_stats: Mapping[str, Any], aliases: Iterable[str]
+) -> tuple[float, str | None]:
+    for alias in aliases:
+        if alias in raw_stats:
+            return _to_stat_float(raw_stats[alias]), alias
+    for alias in aliases:
+        for key, value in raw_stats.items():
+            if key.endswith(alias):
+                return _to_stat_float(value), key
+    return 0.0, None
+
+
 def _sum_matching_suffixes(
     raw_stats: Mapping[str, Any], aliases: Iterable[str]
 ) -> float:
@@ -230,6 +281,23 @@ def _sum_matching_suffixes(
     return total
 
 
+def _sum_matching_suffixes_with_sources(
+    raw_stats: Mapping[str, Any], aliases: Iterable[str]
+) -> tuple[float, list[str]]:
+    matched_keys: list[str] = []
+    seen: set[str] = set()
+    total = 0.0
+    for alias in aliases:
+        for key, value in raw_stats.items():
+            if key in seen:
+                continue
+            if key == alias or key.endswith(alias):
+                seen.add(key)
+                matched_keys.append(key)
+                total += _to_stat_float(value)
+    return total, matched_keys
+
+
 def _sum_matching_fragments(
     raw_stats: Mapping[str, Any], required_fragments: Iterable[str]
 ) -> float:
@@ -242,17 +310,60 @@ def _sum_matching_fragments(
     return total
 
 
+def _sum_matching_fragments_with_sources(
+    raw_stats: Mapping[str, Any], required_fragments: Iterable[str]
+) -> tuple[float, list[str]]:
+    fragments = [fragment.lower() for fragment in required_fragments]
+    total = 0.0
+    matched_keys: list[str] = []
+    for key, value in raw_stats.items():
+        lowered = key.lower()
+        if all(fragment in lowered for fragment in fragments):
+            matched_keys.append(key)
+            total += _to_stat_float(value)
+    return total, matched_keys
+
+
+def _sum_matching_any_fragments_with_sources(
+    raw_stats: Mapping[str, Any], fragments: Iterable[str]
+) -> tuple[float, list[str]]:
+    lowered_fragments = [fragment.lower() for fragment in fragments]
+    total = 0.0
+    matched_keys: list[str] = []
+    for key, value in raw_stats.items():
+        lowered = key.lower()
+        if any(
+            re.search(r"(^|[^a-z0-9])" + re.escape(fragment) + r"([^a-z0-9]|$)", lowered)
+            for fragment in lowered_fragments
+        ):
+            matched_keys.append(key)
+            total += _to_stat_float(value)
+    return total, matched_keys
+
+
 def _format_stat(value: float) -> str:
     if math.isclose(value, round(value), rel_tol=0.0, abs_tol=1e-9):
         return str(int(round(value)))
     return f"{value:.6f}"
 
 
+def _normalize_sources(sources: Sequence[str | None]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        if source is None or source == "":
+            continue
+        if source not in seen:
+            seen.add(source)
+            ordered.append(source)
+    return ordered
+
+
 def build_kunpeng920_model(
     config: Mapping[str, Any], profile: Mapping[str, Any]
 ) -> Kunpeng920McPATModel:
     default_clock_mhz = int(profile.get("target_core_clockrate_mhz", 2600))
-    target_core_clockrate_mhz = _first_config_value(
+    target_core_clockrate_mhz, clock_source = _first_config_value_with_source(
         config,
         _coerce_frequency_mhz,
         (
@@ -262,63 +373,63 @@ def build_kunpeng920_model(
             "board.clock",
         ),
         default_clock_mhz,
+        default_source="profile.target_core_clockrate_mhz",
     )
 
-    number_of_cores = _first_non_zero(
-        float(
-            _first_config_value(
-                config,
-                _coerce_int,
-                (
-                    "system.processor.num_cores",
-                    "board.processor.num_cores",
-                    "system.num_cores",
-                    "board.num_cores",
-                ),
-                0,
-            )
+    explicit_core_count, explicit_core_source = _first_config_value_with_source(
+        config,
+        _coerce_int,
+        (
+            "system.processor.num_cores",
+            "board.processor.num_cores",
+            "system.num_cores",
+            "board.num_cores",
         ),
-        float(
-            _container_length(
-                config,
-                (
-                    "system.processor.cores",
-                    "board.processor.cores",
-                    "system.processor.o3",
-                    "board.processor.o3",
-                    "system.cpu",
-                    "board.cpu",
-                ),
-            )
-            or 0
-        ),
-        float(profile.get("number_of_cores", 64)),
+        None,
+        default_source="profile.number_of_cores",
     )
+    detected_core_count, detected_core_source = _container_length_with_source(
+        config,
+        (
+            "system.processor.cores",
+            "board.processor.cores",
+            "system.processor.o3",
+            "board.processor.o3",
+            "system.cpu",
+            "board.cpu",
+        ),
+    )
+    if explicit_core_count is not None and explicit_core_count > 0:
+        number_of_cores = explicit_core_count
+        core_count_source = explicit_core_source
+    elif detected_core_count is not None and detected_core_count > 0:
+        number_of_cores = detected_core_count
+        core_count_source = detected_core_source or "config.<container>"
+    else:
+        number_of_cores = int(profile.get("number_of_cores", 64))
+        core_count_source = "profile.number_of_cores"
     number_of_cores = max(1, int(number_of_cores))
 
-    number_hardware_threads = _first_non_zero(
-        float(
-            _first_config_value(
-                config,
-                _coerce_int,
-                (
-                    "system.processor.o3.0.core.numThreads",
-                    "board.processor.o3.0.core.numThreads",
-                    "system.processor.cores.0.core.numThreads",
-                    "board.processor.cores.0.core.numThreads",
-                    "system.cpu.0.numThreads",
-                    "board.cpu.0.numThreads",
-                ),
-                0,
-            )
+    number_hardware_threads, thread_source = _first_config_value_with_source(
+        config,
+        _coerce_int,
+        (
+            "system.processor.o3.0.core.numThreads",
+            "board.processor.o3.0.core.numThreads",
+            "system.processor.cores.0.core.numThreads",
+            "board.processor.cores.0.core.numThreads",
+            "system.cpu.0.numThreads",
+            "board.cpu.0.numThreads",
         ),
-        float(profile.get("number_hardware_threads", 1)),
+        int(profile.get("number_hardware_threads", 1)),
+        default_source="profile.number_hardware_threads",
     )
     number_hardware_threads = max(1, int(number_hardware_threads))
 
     cores_per_cluster = int(profile.get("cores_per_cluster", 4))
     default_clusters_per_die = int(profile.get("clusters_per_die", 8))
     default_compute_dies = int(profile.get("compute_dies", 2))
+    io_dies = int(profile.get("io_dies", 1))
     explicit_cache_hierarchy = _any_path_exists(
         config,
         (
@@ -348,25 +459,28 @@ def build_kunpeng920_model(
         min(default_compute_dies, compute_dies) if compute_dies > 0 else 0
     )
 
-    l1i_size = _first_config_value(
+    l1i_size, l1i_source = _first_config_value_with_source(
         config,
         _coerce_size_bytes,
         ("system.cache_hierarchy.l1i_size", "board.cache_hierarchy.l1i_size"),
         int(profile.get("l1i_size", 65536)),
+        default_source="profile.l1i_size",
     )
-    l1d_size = _first_config_value(
+    l1d_size, l1d_source = _first_config_value_with_source(
         config,
         _coerce_size_bytes,
         ("system.cache_hierarchy.l1d_size", "board.cache_hierarchy.l1d_size"),
         int(profile.get("l1d_size", 65536)),
+        default_source="profile.l1d_size",
     )
-    l2_size = _first_config_value(
+    l2_size, l2_source = _first_config_value_with_source(
         config,
         _coerce_size_bytes,
         ("system.cache_hierarchy.l2_size", "board.cache_hierarchy.l2_size"),
         int(profile.get("l2_size", 524288)),
+        default_source="profile.l2_size",
     )
-    l3_total_size = _first_config_value(
+    l3_total_size, l3_source = _first_config_value_with_source(
         config,
         _coerce_size_bytes,
         (
@@ -376,6 +490,7 @@ def build_kunpeng920_model(
             "board.cache_hierarchy.llc_size",
         ),
         int(profile.get("l3_total_size", profile.get("l3_size", 67108864))),
+        default_source="profile.l3_total_size",
     )
     l3_slice_size = (
         max(1, int(math.ceil(l3_total_size / number_of_l3s)))
@@ -383,7 +498,7 @@ def build_kunpeng920_model(
         else 0
     )
 
-    explicit_memory_channels = _first_config_value(
+    explicit_memory_channels, memory_channel_source = _first_config_value_with_source(
         config,
         _coerce_int,
         (
@@ -393,21 +508,45 @@ def build_kunpeng920_model(
             "board.mem_channels",
         ),
         None,
+        default_source="profile.number_mcs/profile.memory_channels_per_mc",
     )
     if explicit_memory_channels is None:
-        default_number_mcs = int(profile.get("number_mcs", 2))
-        default_channels_per_mc = int(profile.get("memory_channels_per_mc", 4))
-        number_mcs = default_number_mcs
-        memory_channels_per_mc = default_channels_per_mc
+        number_mcs = int(profile.get("number_mcs", 2))
+        memory_channels_per_mc = int(profile.get("memory_channels_per_mc", 4))
+        memory_channel_source = "profile.number_mcs/profile.memory_channels_per_mc"
+    elif explicit_memory_channels <= 4:
+        number_mcs = 1
+        memory_channels_per_mc = explicit_memory_channels
     else:
-        if explicit_memory_channels <= 4:
-            number_mcs = 1
-            memory_channels_per_mc = explicit_memory_channels
-        else:
-            number_mcs = min(int(profile.get("number_mcs", 2)), explicit_memory_channels)
-            memory_channels_per_mc = max(
-                1, math.ceil(explicit_memory_channels / number_mcs)
-            )
+        number_mcs = min(int(profile.get("number_mcs", 2)), explicit_memory_channels)
+        memory_channels_per_mc = max(
+            1, math.ceil(explicit_memory_channels / number_mcs)
+        )
+
+    l3_slices_per_die = (
+        max(1, int(math.ceil(number_of_l3s / max(1, compute_dies))))
+        if number_of_l3s > 0
+        else 0
+    )
+    memory_channels_total = int(number_mcs * memory_channels_per_mc)
+    noc_horizontal_nodes = int(
+        profile.get(
+            "noc_horizontal_nodes",
+            max(1, math.ceil(default_clusters_per_die / 2.0)),
+        )
+    )
+    noc_vertical_nodes = int(
+        profile.get(
+            "noc_vertical_nodes",
+            max(1, math.ceil(default_clusters_per_die / max(1, noc_horizontal_nodes))),
+        )
+    )
+    noc_chip_coverage = float(
+        profile.get(
+            "noc_chip_coverage",
+            (1.0 / float(max(1, number_of_nocs))) if number_of_nocs > 0 else 1.0,
+        )
+    )
 
     system = {
         "number_of_cores": number_of_cores,
@@ -436,6 +575,7 @@ def build_kunpeng920_model(
         "clusters": number_of_clusters,
         "cores_per_cluster": cores_per_cluster,
         "compute_dies": compute_dies,
+        "io_dies": io_dies,
     }
 
     core = {
@@ -514,6 +654,7 @@ def build_kunpeng920_model(
     memory = {
         "number_mcs": int(number_mcs),
         "memory_channels_per_mc": int(memory_channels_per_mc),
+        "memory_channels_total": memory_channels_total,
         "number_ranks": int(profile.get("number_ranks", 2)),
         "memory_clock_mhz": int(profile.get("memory_clock_mhz", 1466)),
         "ddr_data_rate_mtps": int(profile.get("ddr_data_rate_mtps", 2933)),
@@ -522,9 +663,32 @@ def build_kunpeng920_model(
     }
 
     noc = {
+        "topology": str(profile.get("noc_topology", "2d-mesh")),
+        "horizontal_nodes": noc_horizontal_nodes,
+        "vertical_nodes": noc_vertical_nodes,
+        "has_global_link": int(
+            profile.get("noc_has_global_link", 1 if number_of_nocs > 1 else 0)
+        ),
+        "link_throughput": int(profile.get("noc_link_throughput", 1)),
+        "link_latency": int(profile.get("noc_link_latency", 1)),
         "input_ports": int(profile.get("noc_input_ports", 2)),
         "output_ports": int(profile.get("noc_output_ports", 2)),
+        "virtual_channel_per_port": int(
+            profile.get("noc_virtual_channel_per_port", 4)
+        ),
+        "input_buffer_entries_per_vc": int(
+            profile.get("noc_input_buffer_entries_per_vc", 4)
+        ),
         "flit_bits": int(profile.get("noc_flit_bits", 256)),
+        "chip_coverage": noc_chip_coverage,
+        "route_over_perc": float(profile.get("noc_route_over_perc", 0.5)),
+        "number_of_crossbars": int(profile.get("noc_number_of_crossbars", 1)),
+        "crossbar_inputs": int(
+            profile.get("noc_crossbar_inputs", profile.get("noc_input_ports", 2))
+        ),
+        "crossbar_outputs": int(
+            profile.get("noc_crossbar_outputs", profile.get("noc_output_ports", 2))
+        ),
     }
 
     io = {
@@ -533,6 +697,8 @@ def build_kunpeng920_model(
             "clockrate_mhz": int(profile.get("niu_clockrate_mhz", 350)),
             "duty_cycle": float(profile.get("niu_duty_cycle", 0.0)),
             "total_load_perc": float(profile.get("niu_total_load_perc", 0.0)),
+            "roce_ports": int(profile.get("roce_ports", 2)),
+            "line_rate_gbps": int(profile.get("roce_line_rate_gbps", 100)),
         },
         "pcie": {
             "number_units": int(profile.get("pcie_units", 0)),
@@ -540,6 +706,7 @@ def build_kunpeng920_model(
             "clockrate_mhz": int(profile.get("pcie_clockrate_mhz", 350)),
             "duty_cycle": float(profile.get("pcie_duty_cycle", 0.0)),
             "total_load_perc": float(profile.get("pcie_total_load_perc", 0.0)),
+            "generation": int(profile.get("pcie_generation", 4)),
         },
         "flashc": {
             "number_flashcs": int(profile.get("flash_controllers", 0)),
@@ -547,6 +714,44 @@ def build_kunpeng920_model(
             "duty_cycle": float(profile.get("flash_duty_cycle", 0.0)),
             "total_load_perc": float(profile.get("flash_total_load_perc", 0.0)),
         },
+    }
+
+    topology = {
+        "cores_per_cluster": cores_per_cluster,
+        "clusters": number_of_clusters,
+        "clusters_per_die": default_clusters_per_die,
+        "compute_dies": compute_dies,
+        "io_dies": io_dies,
+        "l3_slices": number_of_l3s,
+        "l3_slices_per_die": l3_slices_per_die,
+        "l3_slice_mode": str(profile.get("l3_slice_mode", "cluster-shared")),
+        "l3_default_mode": str(profile.get("l3_default_mode", "partition")),
+        "memory_channels_total": memory_channels_total,
+        "memory_channels_per_mc": int(memory_channels_per_mc),
+        "number_mcs": int(number_mcs),
+    }
+
+    sources = {
+        "field_sources": {
+            "clock_mhz": clock_source,
+            "number_of_cores": core_count_source,
+            "number_hardware_threads": thread_source,
+            "l1i_size": l1i_source,
+            "l1d_size": l1d_source,
+            "l2_size": l2_source,
+            "l3_total_size": l3_source,
+            "memory_channels": memory_channel_source,
+        },
+        "modeling_notes": [
+            str(
+                profile.get(
+                    "profile_source",
+                    "kunpeng920.md plus conservative defaults where the note omits exact McPAT fields",
+                )
+            ),
+            "McPAT models Kunpeng920 as homogeneous ARMv8.2-A OoO cores with private L2s and homogeneous L3 slices.",
+            "Die-level coherency, RoCE, and accelerator behavior remain approximations even when the topology fields are explicit.",
+        ],
     }
 
     return Kunpeng920McPATModel(
@@ -561,6 +766,8 @@ def build_kunpeng920_model(
             "isa_name": str(profile.get("isa_name", "ARMv8.2-A")),
             "core_name": str(profile.get("core_name", "TaiShan V110-like")),
         },
+        topology=topology,
+        sources=sources,
     )
 
 
@@ -582,6 +789,14 @@ def normalize_kunpeng920_config(
             "number_of_l3s": model.system["number_of_l3s"],
             "number_of_nocs": model.system["number_of_nocs"],
             "number_cache_levels": model.system["number_cache_levels"],
+            "cores_per_cluster": model.topology["cores_per_cluster"],
+            "clusters": model.topology["clusters"],
+            "clusters_per_die": model.topology["clusters_per_die"],
+            "compute_dies": model.topology["compute_dies"],
+            "io_dies": model.topology["io_dies"],
+            "l3_slices_per_die": model.topology["l3_slices_per_die"],
+            "l3_slice_mode": model.topology["l3_slice_mode"],
+            "l3_default_mode": model.topology["l3_default_mode"],
             "l1i_size": model.caches["l1i"]["size_bytes"],
             "l1d_size": model.caches["l1d"]["size_bytes"],
             "l2_size": model.caches["l2"]["size_bytes"],
@@ -590,6 +805,23 @@ def normalize_kunpeng920_config(
             "memory_clock_mhz": model.memory["memory_clock_mhz"],
             "number_mcs": model.memory["number_mcs"],
             "memory_channels_per_mc": model.memory["memory_channels_per_mc"],
+            "memory_channels_total": model.memory["memory_channels_total"],
+            "noc_topology": model.noc["topology"],
+            "noc_horizontal_nodes": model.noc["horizontal_nodes"],
+            "noc_vertical_nodes": model.noc["vertical_nodes"],
+            "noc_has_global_link": model.noc["has_global_link"],
+            "noc_link_throughput": model.noc["link_throughput"],
+            "noc_link_latency": model.noc["link_latency"],
+            "noc_input_ports": model.noc["input_ports"],
+            "noc_output_ports": model.noc["output_ports"],
+            "noc_virtual_channel_per_port": model.noc["virtual_channel_per_port"],
+            "noc_input_buffer_entries_per_vc": model.noc["input_buffer_entries_per_vc"],
+            "noc_flit_bits": model.noc["flit_bits"],
+            "noc_chip_coverage": model.noc["chip_coverage"],
+            "noc_route_over_perc": model.noc["route_over_perc"],
+            "noc_number_of_crossbars": model.noc["number_of_crossbars"],
+            "noc_crossbar_inputs": model.noc["crossbar_inputs"],
+            "noc_crossbar_outputs": model.noc["crossbar_outputs"],
             "niu_units": model.io["niu"]["number_units"],
             "niu_clockrate_mhz": model.io["niu"]["clockrate_mhz"],
             "pcie_units": model.io["pcie"]["number_units"],
@@ -612,47 +844,89 @@ def normalize_kunpeng920_stats(
     issue_width = max(1, int(profile.get("issue_width", 4)))
     memory_ports = max(1, int(profile.get("memory_ports", 2)))
 
-    total_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("simInsts", "commitStats0.numInsts", "baseStats.numInsts")),
-        _find_first_stat(root_stats, ("fetch2.totalInstructions",)),
-        0.0,
+    derived_stats: Dict[str, float] = {}
+    derived_metadata: Dict[str, Dict[str, Any]] = {}
+
+    def remember(
+        name: str,
+        value: float,
+        *,
+        method: str,
+        sources: Sequence[str | None],
+        note: str | None = None,
+    ) -> None:
+        derived_stats[name] = value
+        metadata = {
+            "value": value,
+            "method": method,
+            "sources": _normalize_sources(sources),
+        }
+        if note:
+            metadata["note"] = note
+        derived_metadata[name] = metadata
+
+    total_instructions, total_instructions_source = _find_first_stat_with_source(
+        root_stats,
+        ("simInsts", "commitStats0.numInsts", "baseStats.numInsts"),
     )
-    total_ops = _first_non_zero(
-        _find_first_stat(root_stats, ("simOps", "commitStats0.numOps", "baseStats.numOps")),
-        total_instructions,
-        0.0,
+    if total_instructions <= 0:
+        total_instructions, total_instructions_source = _find_first_stat_with_source(
+            root_stats, ("fetch2.totalInstructions",)
+        )
+    total_instructions_method = (
+        "direct" if total_instructions > 0 and total_instructions_source else "default"
     )
-    total_cycles = _first_non_zero(
-        _find_first_stat(root_stats, ("baseStats.numCycles", "numCycles")),
-        (
-            _find_first_stat(root_stats, ("simTicks",))
-            / max(float(profile.get("clock_period_ps", 1.0)), 1.0)
-        ),
-        0.0,
+
+    total_ops, total_ops_source = _find_first_stat_with_source(
+        root_stats, ("simOps", "commitStats0.numOps", "baseStats.numOps")
     )
+    if total_ops <= 0:
+        total_ops = total_instructions
+        total_ops_source = total_instructions_source
+        total_ops_method = "fallback"
+    else:
+        total_ops_method = "direct"
+
+    total_cycles, total_cycles_source = _find_first_stat_with_source(
+        root_stats, ("baseStats.numCycles", "numCycles")
+    )
+    if total_cycles <= 0:
+        sim_ticks, sim_ticks_source = _find_first_stat_with_source(root_stats, ("simTicks",))
+        if sim_ticks > 0:
+            total_cycles = sim_ticks / max(float(profile.get("clock_period_ps", 1.0)), 1.0)
+            total_cycles_source = (
+                f"{sim_ticks_source} / profile.clock_period_ps"
+                if sim_ticks_source
+                else "profile.clock_period_ps"
+            )
+            total_cycles_method = "fallback"
+        else:
+            total_cycles_method = "default"
+    else:
+        total_cycles_method = "direct"
     busy_cycles = total_cycles
     idle_cycles = max(0.0, total_cycles - busy_cycles)
 
-    int_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numIntInsts",)),
-        _find_first_stat(root_stats, ("fetch2.intInstructions",)),
-        0.0,
+    int_instructions, int_instructions_source = _find_first_stat_with_source(
+        root_stats, ("commitStats0.numIntInsts", "fetch2.intInstructions")
     )
-    fp_scalar_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numFpInsts",)),
-        _find_first_stat(root_stats, ("fetch2.fpInstructions",)),
-        0.0,
+    int_instructions_method = (
+        "direct" if int_instructions > 0 and int_instructions_source else "default"
     )
-    vec_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numVecInsts",)),
-        _find_first_stat(root_stats, ("fetch2.vecInstructions",)),
-        0.0,
+
+    fp_scalar_instructions, fp_scalar_source = _find_first_stat_with_source(
+        root_stats, ("commitStats0.numFpInsts", "fetch2.fpInstructions")
+    )
+    vec_instructions, vec_instructions_source = _find_first_stat_with_source(
+        root_stats, ("commitStats0.numVecInsts", "fetch2.vecInstructions")
     )
     fp_instructions = fp_scalar_instructions + vec_instructions
 
-    branch_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("fetchStats0.numBranches", "executeStats0.numBranches")),
-        _sum_matching_suffixes(
+    branch_instructions, branch_instruction_source = _find_first_stat_with_source(
+        root_stats, ("fetchStats0.numBranches", "executeStats0.numBranches")
+    )
+    if branch_instructions <= 0:
+        branch_instructions, branch_sources = _sum_matching_suffixes_with_sources(
             root_stats,
             (
                 "commitStats0.committedControl::IsDirectControl",
@@ -661,74 +935,149 @@ def normalize_kunpeng920_stats(
                 "commitStats0.committedControl::IsCall",
                 "commitStats0.committedControl::IsReturn",
             ),
-        ),
-        0.0,
+        )
+        branch_instruction_source = ", ".join(branch_sources) if branch_sources else None
+        branch_instructions_method = "aggregated" if branch_sources else "default"
+    else:
+        branch_instructions_method = "direct"
+
+    branch_mispredictions, branch_mispred_source = _find_first_stat_with_source(
+        root_stats, ("numBranchMispred", "condIncorrect")
     )
-    branch_mispredictions = _first_non_zero(
-        _find_first_stat(root_stats, ("numBranchMispred", "condIncorrect")),
-        _sum_matching_suffixes(root_stats, ("mispredict", "mispredicted")),
-        0.0,
+    if branch_mispredictions <= 0:
+        branch_mispredictions, mispred_sources = _sum_matching_suffixes_with_sources(
+            root_stats, ("mispredict", "mispredicted")
+        )
+        branch_mispred_source = ", ".join(mispred_sources) if mispred_sources else None
+        branch_mispred_method = "aggregated" if mispred_sources else "default"
+    else:
+        branch_mispred_method = "direct"
+
+    load_instructions, load_instructions_source = _find_first_stat_with_source(
+        root_stats,
+        ("commitStats0.numLoadInsts", "executeStats0.numLoadInsts", "fetch2.loadInstructions"),
+    )
+    load_instructions_method = (
+        "direct" if load_instructions > 0 and load_instructions_source else "default"
     )
 
-    load_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numLoadInsts", "executeStats0.numLoadInsts")),
-        _find_first_stat(root_stats, ("fetch2.loadInstructions",)),
-        0.0,
-    )
-    store_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numStoreInsts", "executeStats0.numStoreInsts")),
-        _find_first_stat(root_stats, ("fetch2.storeInstructions",)),
-        max(
-            0.0,
-            _find_first_stat(root_stats, ("commitStats0.numMemRefs", "executeStats0.numMemRefs"))
-            - load_instructions,
+    store_instructions, store_instructions_source = _find_first_stat_with_source(
+        root_stats,
+        (
+            "commitStats0.numStoreInsts",
+            "executeStats0.numStoreInsts",
+            "fetch2.storeInstructions",
         ),
     )
-    committed_instructions = _first_non_zero(
-        _find_first_stat(root_stats, ("commitStats0.numInsts",)),
-        total_instructions,
-        0.0,
+    if store_instructions <= 0:
+        mem_refs, mem_refs_source = _find_first_stat_with_source(
+            root_stats, ("commitStats0.numMemRefs", "executeStats0.numMemRefs")
+        )
+        if mem_refs > 0:
+            store_instructions = max(0.0, mem_refs - load_instructions)
+            store_instructions_source = (
+                f"{mem_refs_source} - load_instructions" if mem_refs_source else "load_instructions"
+            )
+            store_instructions_method = "fallback"
+        else:
+            store_instructions_method = "default"
+    else:
+        store_instructions_method = "direct"
+
+    committed_instructions, committed_instructions_source = _find_first_stat_with_source(
+        root_stats, ("commitStats0.numInsts",)
     )
-    committed_int_instructions = _first_non_zero(int_instructions, committed_instructions)
+    if committed_instructions <= 0:
+        committed_instructions = total_instructions
+        committed_instructions_source = total_instructions_source
+        committed_instructions_method = "fallback"
+    else:
+        committed_instructions_method = "direct"
+    committed_int_instructions = (
+        int_instructions if int_instructions > 0 else committed_instructions
+    )
     committed_fp_instructions = fp_instructions
 
-    int_reg_reads = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numIntRegReads",)),
-        max(1.0, int_instructions * 2.0) if int_instructions > 0 else 0.0,
-        0.0,
+    int_reg_reads, int_reg_reads_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numIntRegReads",)
     )
-    int_reg_writes = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numIntRegWrites",)),
-        int_instructions,
-        0.0,
-    )
-    float_reg_reads = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numFpRegReads",)),
-        0.0,
-        0.0,
-    ) + _find_first_stat(root_stats, ("executeStats0.numVecRegReads",))
-    float_reg_writes = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numFpRegWrites",)),
-        0.0,
-        0.0,
-    ) + _find_first_stat(root_stats, ("executeStats0.numVecRegWrites",))
+    if int_reg_reads <= 0 and int_instructions > 0:
+        int_reg_reads = max(1.0, int_instructions * 2.0)
+        int_reg_reads_source = "int_instructions * 2.0"
+        int_reg_reads_method = "fallback"
+    else:
+        int_reg_reads_method = "direct" if int_reg_reads_source else "default"
 
-    ialu_accesses = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numIntAluAccesses",)),
-        int_instructions,
-        0.0,
+    int_reg_writes, int_reg_writes_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numIntRegWrites",)
     )
-    fpu_accesses = _first_non_zero(
-        _find_first_stat(root_stats, ("executeStats0.numFpAluAccesses",))
-        + _find_first_stat(root_stats, ("executeStats0.numVecAluAccesses",)),
-        fp_instructions,
-        0.0,
+    if int_reg_writes <= 0 and int_instructions > 0:
+        int_reg_writes = int_instructions
+        int_reg_writes_source = "int_instructions"
+        int_reg_writes_method = "fallback"
+    else:
+        int_reg_writes_method = "direct" if int_reg_writes_source else "default"
+
+    fp_reg_reads, fp_reg_reads_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numFpRegReads",)
     )
-    mul_accesses = _first_non_zero(
-        _sum_matching_fragments(root_stats, ("committedinsttype::", "mult")),
-        _sum_matching_fragments(root_stats, ("committedinsttype::", "div")),
-        fpu_accesses * 0.25 if fpu_accesses > 0 else int_instructions * 0.05,
+    vec_reg_reads, vec_reg_reads_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numVecRegReads",)
     )
+    float_reg_reads = fp_reg_reads + vec_reg_reads
+
+    fp_reg_writes, fp_reg_writes_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numFpRegWrites",)
+    )
+    vec_reg_writes, vec_reg_writes_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numVecRegWrites",)
+    )
+    float_reg_writes = fp_reg_writes + vec_reg_writes
+
+    ialu_accesses, ialu_accesses_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numIntAluAccesses",)
+    )
+    if ialu_accesses <= 0 and int_instructions > 0:
+        ialu_accesses = int_instructions
+        ialu_accesses_source = "int_instructions"
+        ialu_accesses_method = "fallback"
+    else:
+        ialu_accesses_method = "direct" if ialu_accesses_source else "default"
+
+    fp_alu_accesses, fp_alu_accesses_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numFpAluAccesses",)
+    )
+    vec_alu_accesses, vec_alu_accesses_source = _find_first_stat_with_source(
+        root_stats, ("executeStats0.numVecAluAccesses",)
+    )
+    fpu_accesses = fp_alu_accesses + vec_alu_accesses
+    if fpu_accesses <= 0 and fp_instructions > 0:
+        fpu_accesses = fp_instructions
+        fpu_accesses_method = "fallback"
+        fpu_accesses_sources = ["fp_instructions"]
+    else:
+        fpu_accesses_method = (
+            "aggregated"
+            if fp_alu_accesses_source or vec_alu_accesses_source
+            else "default"
+        )
+        fpu_accesses_sources = [fp_alu_accesses_source, vec_alu_accesses_source]
+
+    mul_accesses, mul_sources = _sum_matching_fragments_with_sources(
+        root_stats, ("committedinsttype::", "mult")
+    )
+    if mul_accesses <= 0:
+        div_accesses, div_sources = _sum_matching_fragments_with_sources(
+            root_stats, ("committedinsttype::", "div")
+        )
+        mul_accesses = div_accesses
+        mul_sources = div_sources
+    if mul_accesses <= 0:
+        mul_accesses = fpu_accesses * 0.25 if fpu_accesses > 0 else int_instructions * 0.05
+        mul_sources = ["fpu_accesses * 0.25" if fpu_accesses > 0 else "int_instructions * 0.05"]
+        mul_accesses_method = "fallback"
+    else:
+        mul_accesses_method = "aggregated"
 
     pipeline_duty_cycle = (
         min(1.0, committed_instructions / (total_cycles * issue_width))
@@ -741,250 +1090,816 @@ def normalize_kunpeng920_stats(
         else 0.0
     )
 
-    icache_read_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("icache.ReadReq_accesses::total", "icache.overallAccesses::total"),
-        ),
-        total_instructions,
-        0.0,
+    icache_read_accesses, icache_read_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("icache.ReadReq_accesses::total", "icache.overallAccesses::total"),
     )
-    icache_read_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("icache.ReadReq_misses::total", "icache.overallMisses::total"),
-        ),
-        0.0,
+    if icache_read_accesses <= 0:
+        icache_read_accesses = total_instructions
+        icache_read_accesses_source = total_instructions_source
+        icache_read_accesses_method = "fallback"
+    else:
+        icache_read_accesses_method = "direct"
+
+    icache_read_misses, icache_read_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("icache.ReadReq_misses::total", "icache.overallMisses::total"),
     )
-    dcache_read_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("dcache.ReadReq_accesses::total", "dcache.overallReadAccesses::total"),
-        ),
-        load_instructions,
-        0.0,
-    )
-    dcache_write_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("dcache.WriteReq_accesses::total", "dcache.overallWriteAccesses::total"),
-        ),
-        store_instructions,
-        0.0,
-    )
-    dcache_read_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("dcache.ReadReq_misses::total", "dcache.overallReadMisses::total"),
-        ),
-        0.0,
-    )
-    dcache_write_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("dcache.WriteReq_misses::total", "dcache.overallWriteMisses::total"),
-        ),
-        0.0,
+    icache_read_misses_method = (
+        "direct" if icache_read_misses_source else "default"
     )
 
-    l2_read_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l2.ReadReq_accesses::total", "l2cache.ReadReq_accesses::total", "l2.overallAccesses::total"),
-        ),
-        dcache_read_misses,
-        0.0,
+    dcache_read_accesses, dcache_read_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("dcache.ReadReq_accesses::total", "dcache.overallReadAccesses::total"),
     )
-    l2_write_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l2.WriteReq_accesses::total", "l2cache.WriteReq_accesses::total"),
-        ),
-        dcache_write_misses,
-        0.0,
-    )
-    l2_read_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l2.ReadReq_misses::total", "l2cache.ReadReq_misses::total", "l2.overallMisses::total"),
-        ),
-        0.0,
-    )
-    l2_write_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l2.WriteReq_misses::total", "l2cache.WriteReq_misses::total"),
-        ),
-        0.0,
-    )
+    if dcache_read_accesses <= 0:
+        dcache_read_accesses = load_instructions
+        dcache_read_accesses_source = load_instructions_source
+        dcache_read_accesses_method = "fallback"
+    else:
+        dcache_read_accesses_method = "direct"
 
-    l3_read_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l3.ReadReq_accesses::total", "l3cache.ReadReq_accesses::total", "l3.overallAccesses::total"),
-        ),
-        l2_read_misses,
-        0.0,
+    dcache_write_accesses, dcache_write_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("dcache.WriteReq_accesses::total", "dcache.overallWriteAccesses::total"),
     )
-    l3_write_accesses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l3.WriteReq_accesses::total", "l3cache.WriteReq_accesses::total"),
-        ),
-        l2_write_misses,
-        0.0,
-    )
-    l3_read_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l3.ReadReq_misses::total", "l3cache.ReadReq_misses::total", "l3.overallMisses::total"),
-        ),
-        0.0,
-    )
-    l3_write_misses = _first_non_zero(
-        _find_first_stat(
-            root_stats,
-            ("l3.WriteReq_misses::total", "l3cache.WriteReq_misses::total"),
-        ),
-        0.0,
-    )
+    if dcache_write_accesses <= 0:
+        dcache_write_accesses = store_instructions
+        dcache_write_accesses_source = store_instructions_source
+        dcache_write_accesses_method = "fallback"
+    else:
+        dcache_write_accesses_method = "direct"
 
-    memory_reads = _first_non_zero(
-        _sum_matching_suffixes(root_stats, ("mem_ctrl.readReqs", "dram.readBursts", "readReqs")),
-        l3_read_misses,
-        0.0,
+    dcache_read_misses, dcache_read_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("dcache.ReadReq_misses::total", "dcache.overallReadMisses::total"),
     )
-    memory_writes = _first_non_zero(
-        _sum_matching_suffixes(root_stats, ("mem_ctrl.writeReqs", "dram.writeBursts", "writeReqs")),
-        l3_write_misses,
-        0.0,
+    dcache_read_misses_method = "direct" if dcache_read_misses_source else "default"
+
+    dcache_write_misses, dcache_write_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("dcache.WriteReq_misses::total", "dcache.overallWriteMisses::total"),
     )
+    dcache_write_misses_method = "direct" if dcache_write_misses_source else "default"
+
+    l2_read_accesses, l2_read_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l2.ReadReq_accesses::total", "l2cache.ReadReq_accesses::total", "l2.overallAccesses::total"),
+    )
+    if l2_read_accesses <= 0:
+        l2_read_accesses = dcache_read_misses
+        l2_read_accesses_source = dcache_read_misses_source
+        l2_read_accesses_method = "fallback"
+    else:
+        l2_read_accesses_method = "direct"
+
+    l2_write_accesses, l2_write_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l2.WriteReq_accesses::total", "l2cache.WriteReq_accesses::total"),
+    )
+    if l2_write_accesses <= 0:
+        l2_write_accesses = dcache_write_misses
+        l2_write_accesses_source = dcache_write_misses_source
+        l2_write_accesses_method = "fallback"
+    else:
+        l2_write_accesses_method = "direct"
+
+    l2_read_misses, l2_read_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l2.ReadReq_misses::total", "l2cache.ReadReq_misses::total", "l2.overallMisses::total"),
+    )
+    l2_read_misses_method = "direct" if l2_read_misses_source else "default"
+
+    l2_write_misses, l2_write_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l2.WriteReq_misses::total", "l2cache.WriteReq_misses::total"),
+    )
+    l2_write_misses_method = "direct" if l2_write_misses_source else "default"
+
+    l3_read_accesses, l3_read_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l3.ReadReq_accesses::total", "l3cache.ReadReq_accesses::total", "l3.overallAccesses::total"),
+    )
+    if l3_read_accesses <= 0:
+        l3_read_accesses = l2_read_misses
+        l3_read_accesses_source = l2_read_misses_source
+        l3_read_accesses_method = "fallback"
+    else:
+        l3_read_accesses_method = "direct"
+
+    l3_write_accesses, l3_write_accesses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l3.WriteReq_accesses::total", "l3cache.WriteReq_accesses::total"),
+    )
+    if l3_write_accesses <= 0:
+        l3_write_accesses = l2_write_misses
+        l3_write_accesses_source = l2_write_misses_source
+        l3_write_accesses_method = "fallback"
+    else:
+        l3_write_accesses_method = "direct"
+
+    l3_read_misses, l3_read_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l3.ReadReq_misses::total", "l3cache.ReadReq_misses::total", "l3.overallMisses::total"),
+    )
+    l3_read_misses_method = "direct" if l3_read_misses_source else "default"
+
+    l3_write_misses, l3_write_misses_source = _find_first_stat_with_source(
+        root_stats,
+        ("l3.WriteReq_misses::total", "l3cache.WriteReq_misses::total"),
+    )
+    l3_write_misses_method = "direct" if l3_write_misses_source else "default"
+
+    memory_reads, memory_read_sources = _sum_matching_suffixes_with_sources(
+        root_stats, ("mem_ctrl.readReqs", "dram.readBursts", "readReqs")
+    )
+    if memory_reads <= 0:
+        memory_reads = l3_read_misses
+        memory_read_sources = [l3_read_misses_source]
+        memory_reads_method = "fallback"
+    else:
+        memory_reads_method = "aggregated"
+
+    memory_writes, memory_write_sources = _sum_matching_suffixes_with_sources(
+        root_stats, ("mem_ctrl.writeReqs", "dram.writeBursts", "writeReqs")
+    )
+    if memory_writes <= 0:
+        memory_writes = l3_write_misses
+        memory_write_sources = [l3_write_misses_source]
+        memory_writes_method = "fallback"
+    else:
+        memory_writes_method = "aggregated"
     memory_accesses = memory_reads + memory_writes
 
-    itlb_accesses = _first_non_zero(
-        _find_first_stat(root_stats, ("itlb.overallAccesses::total", "itlb.ReadReq_accesses::total")),
-        total_instructions,
-        0.0,
+    itlb_accesses, itlb_accesses_source = _find_first_stat_with_source(
+        root_stats, ("itlb.overallAccesses::total", "itlb.ReadReq_accesses::total")
     )
-    itlb_misses = _first_non_zero(
-        _find_first_stat(root_stats, ("itlb.overallMisses::total", "itlb.ReadReq_misses::total")),
-        0.0,
-    )
-    dtlb_accesses = _first_non_zero(
-        _find_first_stat(root_stats, ("dtlb.overallAccesses::total", "dtlb.ReadReq_accesses::total")),
-        load_instructions + store_instructions,
-        0.0,
-    )
-    dtlb_misses = _first_non_zero(
-        _find_first_stat(root_stats, ("dtlb.overallMisses::total", "dtlb.ReadReq_misses::total")),
-        0.0,
-    )
+    if itlb_accesses <= 0:
+        itlb_accesses = total_instructions
+        itlb_accesses_source = total_instructions_source
+        itlb_accesses_method = "fallback"
+    else:
+        itlb_accesses_method = "direct"
 
-    btb_read_accesses = _first_non_zero(
-        _find_first_stat(root_stats, ("BTBLookups",)),
-        branch_instructions,
-        0.0,
+    itlb_misses, itlb_misses_source = _find_first_stat_with_source(
+        root_stats, ("itlb.overallMisses::total", "itlb.ReadReq_misses::total")
     )
+    itlb_misses_method = "direct" if itlb_misses_source else "default"
+
+    dtlb_accesses, dtlb_accesses_source = _find_first_stat_with_source(
+        root_stats, ("dtlb.overallAccesses::total", "dtlb.ReadReq_accesses::total")
+    )
+    if dtlb_accesses <= 0:
+        dtlb_accesses = load_instructions + store_instructions
+        dtlb_accesses_source = "load_instructions + store_instructions"
+        dtlb_accesses_method = "fallback"
+    else:
+        dtlb_accesses_method = "direct"
+
+    dtlb_misses, dtlb_misses_source = _find_first_stat_with_source(
+        root_stats, ("dtlb.overallMisses::total", "dtlb.ReadReq_misses::total")
+    )
+    dtlb_misses_method = "direct" if dtlb_misses_source else "default"
+
+    btb_read_accesses, btb_read_accesses_source = _find_first_stat_with_source(
+        root_stats, ("BTBLookups",)
+    )
+    if btb_read_accesses <= 0:
+        btb_read_accesses = branch_instructions
+        btb_read_accesses_source = branch_instruction_source
+        btb_read_accesses_method = "fallback"
+    else:
+        btb_read_accesses_method = "direct"
     btb_write_accesses = branch_mispredictions
 
-    noc_total_accesses = _first_non_zero(
-        _sum_matching_suffixes(root_stats, ("xbar.pktCount::total",)),
-        l2_read_accesses + l2_write_accesses + l3_read_accesses + l3_write_accesses,
-        0.0,
+    noc_total_accesses, noc_total_accesses_sources = _sum_matching_suffixes_with_sources(
+        root_stats, ("xbar.pktCount::total",)
     )
+    if noc_total_accesses <= 0:
+        noc_total_accesses = (
+            l2_read_accesses + l2_write_accesses + l3_read_accesses + l3_write_accesses
+        )
+        noc_total_accesses_sources = [
+            "l2_read_accesses",
+            "l2_write_accesses",
+            "l3_read_accesses",
+            "l3_write_accesses",
+        ]
+        noc_total_accesses_method = "fallback"
+    else:
+        noc_total_accesses_method = "aggregated"
     noc_duty_cycle = (
         min(1.0, noc_total_accesses / total_cycles) if total_cycles > 0 else 0.0
     )
 
-    derived_stats = {
-        "mcpat.system.total_cycles": total_cycles,
-        "mcpat.system.idle_cycles": idle_cycles,
-        "mcpat.system.busy_cycles": busy_cycles,
-        "mcpat.core.total_instructions": total_instructions,
-        "mcpat.core.int_instructions": int_instructions,
-        "mcpat.core.fp_instructions": fp_instructions,
-        "mcpat.core.branch_instructions": branch_instructions,
-        "mcpat.core.branch_mispredictions": branch_mispredictions,
-        "mcpat.core.load_instructions": load_instructions,
-        "mcpat.core.store_instructions": store_instructions,
-        "mcpat.core.committed_instructions": committed_instructions,
-        "mcpat.core.committed_int_instructions": committed_int_instructions,
-        "mcpat.core.committed_fp_instructions": committed_fp_instructions,
-        "mcpat.core.pipeline_duty_cycle": pipeline_duty_cycle,
-        "mcpat.core.rob_reads": total_ops,
-        "mcpat.core.rob_writes": total_ops,
-        "mcpat.core.rename_reads": int_reg_reads,
-        "mcpat.core.rename_writes": int_reg_writes,
-        "mcpat.core.fp_rename_reads": float_reg_reads,
-        "mcpat.core.fp_rename_writes": float_reg_writes,
-        "mcpat.core.inst_window_reads": committed_instructions,
-        "mcpat.core.inst_window_writes": committed_instructions,
-        "mcpat.core.inst_window_wakeup_accesses": committed_instructions * 2.0,
-        "mcpat.core.fp_inst_window_reads": fp_instructions,
-        "mcpat.core.fp_inst_window_writes": fp_instructions,
-        "mcpat.core.fp_inst_window_wakeup_accesses": fp_instructions * 2.0,
-        "mcpat.core.int_regfile_reads": int_reg_reads,
-        "mcpat.core.float_regfile_reads": float_reg_reads,
-        "mcpat.core.int_regfile_writes": int_reg_writes,
-        "mcpat.core.float_regfile_writes": float_reg_writes,
-        "mcpat.core.function_calls": _find_first_stat(root_stats, ("commitStats0.functionCalls",)),
-        "mcpat.core.context_switches": 0.0,
-        "mcpat.core.ialu_accesses": ialu_accesses,
-        "mcpat.core.fpu_accesses": fpu_accesses,
-        "mcpat.core.mul_accesses": mul_accesses,
-        "mcpat.core.cdb_alu_accesses": ialu_accesses,
-        "mcpat.core.cdb_mul_accesses": mul_accesses,
-        "mcpat.core.cdb_fpu_accesses": fpu_accesses,
-        "mcpat.core.ifu_duty_cycle": pipeline_duty_cycle,
-        "mcpat.core.lsu_duty_cycle": lsu_duty_cycle,
-        "mcpat.core.mmu_i_duty_cycle": pipeline_duty_cycle,
-        "mcpat.core.mmu_d_duty_cycle": lsu_duty_cycle,
-        "mcpat.core.alu_duty_cycle": min(1.0, ialu_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.core.mul_duty_cycle": min(1.0, mul_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.core.fpu_duty_cycle": min(1.0, fpu_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.core.alu_cdb_duty_cycle": min(1.0, ialu_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.core.mul_cdb_duty_cycle": min(1.0, mul_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.core.fpu_cdb_duty_cycle": min(1.0, fpu_accesses / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.tlb.itlb.accesses": itlb_accesses,
-        "mcpat.tlb.itlb.misses": itlb_misses,
-        "mcpat.tlb.dtlb.accesses": dtlb_accesses,
-        "mcpat.tlb.dtlb.misses": dtlb_misses,
-        "mcpat.cache.l1i.read_accesses": icache_read_accesses,
-        "mcpat.cache.l1i.read_misses": icache_read_misses,
-        "mcpat.cache.l1d.read_accesses": dcache_read_accesses,
-        "mcpat.cache.l1d.write_accesses": dcache_write_accesses,
-        "mcpat.cache.l1d.read_misses": dcache_read_misses,
-        "mcpat.cache.l1d.write_misses": dcache_write_misses,
-        "mcpat.branch.btb.read_accesses": btb_read_accesses,
-        "mcpat.branch.btb.write_accesses": btb_write_accesses,
-        "mcpat.directory.l1.read_accesses": dcache_read_accesses,
-        "mcpat.directory.l1.write_accesses": dcache_write_accesses,
-        "mcpat.directory.l1.read_misses": dcache_read_misses,
-        "mcpat.directory.l1.write_misses": dcache_write_misses,
-        "mcpat.directory.l1.conflicts": 0.0,
-        "mcpat.directory.l2.read_accesses": l2_read_accesses,
-        "mcpat.directory.l2.write_accesses": l2_write_accesses,
-        "mcpat.directory.l2.read_misses": l2_read_misses,
-        "mcpat.directory.l2.write_misses": l2_write_misses,
-        "mcpat.directory.l2.conflicts": 0.0,
-        "mcpat.cache.l2.read_accesses": l2_read_accesses,
-        "mcpat.cache.l2.write_accesses": l2_write_accesses,
-        "mcpat.cache.l2.read_misses": l2_read_misses,
-        "mcpat.cache.l2.write_misses": l2_write_misses,
-        "mcpat.cache.l2.conflicts": 0.0,
-        "mcpat.cache.l2.duty_cycle": min(1.0, (l2_read_accesses + l2_write_accesses) / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.cache.l3.read_accesses": l3_read_accesses,
-        "mcpat.cache.l3.write_accesses": l3_write_accesses,
-        "mcpat.cache.l3.read_misses": l3_read_misses,
-        "mcpat.cache.l3.write_misses": l3_write_misses,
-        "mcpat.cache.l3.conflicts": 0.0,
-        "mcpat.cache.l3.duty_cycle": min(1.0, (l3_read_accesses + l3_write_accesses) / total_cycles) if total_cycles > 0 else 0.0,
-        "mcpat.noc.total_accesses": noc_total_accesses,
-        "mcpat.noc.duty_cycle": noc_duty_cycle,
-        "mcpat.memory.accesses": memory_accesses,
-        "mcpat.memory.reads": memory_reads,
-        "mcpat.memory.writes": memory_writes,
+    remember(
+        "mcpat.system.total_cycles",
+        total_cycles,
+        method=total_cycles_method,
+        sources=[total_cycles_source],
+    )
+    remember(
+        "mcpat.system.idle_cycles",
+        idle_cycles,
+        method="derived",
+        sources=["mcpat.system.total_cycles", "mcpat.system.busy_cycles"],
+    )
+    remember(
+        "mcpat.system.busy_cycles",
+        busy_cycles,
+        method="derived",
+        sources=["mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.core.total_instructions",
+        total_instructions,
+        method=total_instructions_method,
+        sources=[total_instructions_source],
+    )
+    remember(
+        "mcpat.core.int_instructions",
+        int_instructions,
+        method=int_instructions_method,
+        sources=[int_instructions_source],
+    )
+    remember(
+        "mcpat.core.fp_instructions",
+        fp_instructions,
+        method="aggregated",
+        sources=[fp_scalar_source, vec_instructions_source],
+        note="Scalar FP and vector NEON instructions are combined for McPAT FPU activity.",
+    )
+    remember(
+        "mcpat.core.branch_instructions",
+        branch_instructions,
+        method=branch_instructions_method,
+        sources=[branch_instruction_source],
+    )
+    remember(
+        "mcpat.core.branch_mispredictions",
+        branch_mispredictions,
+        method=branch_mispred_method,
+        sources=[branch_mispred_source],
+    )
+    remember(
+        "mcpat.core.load_instructions",
+        load_instructions,
+        method=load_instructions_method,
+        sources=[load_instructions_source],
+    )
+    remember(
+        "mcpat.core.store_instructions",
+        store_instructions,
+        method=store_instructions_method,
+        sources=[store_instructions_source],
+    )
+    remember(
+        "mcpat.core.committed_instructions",
+        committed_instructions,
+        method=committed_instructions_method,
+        sources=[committed_instructions_source],
+    )
+    remember(
+        "mcpat.core.committed_int_instructions",
+        committed_int_instructions,
+        method="fallback" if committed_int_instructions == committed_instructions else "direct",
+        sources=[int_instructions_source, committed_instructions_source],
+    )
+    remember(
+        "mcpat.core.committed_fp_instructions",
+        committed_fp_instructions,
+        method="aggregated",
+        sources=[fp_scalar_source, vec_instructions_source],
+    )
+    remember(
+        "mcpat.core.pipeline_duty_cycle",
+        pipeline_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.committed_instructions", "mcpat.system.total_cycles", "profile.issue_width"],
+    )
+    remember(
+        "mcpat.core.rob_reads",
+        total_ops,
+        method=total_ops_method,
+        sources=[total_ops_source],
+    )
+    remember(
+        "mcpat.core.rob_writes",
+        total_ops,
+        method=total_ops_method,
+        sources=[total_ops_source],
+    )
+    remember(
+        "mcpat.core.rename_reads",
+        int_reg_reads,
+        method=int_reg_reads_method,
+        sources=[int_reg_reads_source],
+    )
+    remember(
+        "mcpat.core.rename_writes",
+        int_reg_writes,
+        method=int_reg_writes_method,
+        sources=[int_reg_writes_source],
+    )
+    remember(
+        "mcpat.core.fp_rename_reads",
+        float_reg_reads,
+        method="aggregated" if float_reg_reads > 0 else "default",
+        sources=[fp_reg_reads_source, vec_reg_reads_source],
+    )
+    remember(
+        "mcpat.core.fp_rename_writes",
+        float_reg_writes,
+        method="aggregated" if float_reg_writes > 0 else "default",
+        sources=[fp_reg_writes_source, vec_reg_writes_source],
+    )
+    remember(
+        "mcpat.core.inst_window_reads",
+        committed_instructions,
+        method="fallback",
+        sources=[committed_instructions_source],
+    )
+    remember(
+        "mcpat.core.inst_window_writes",
+        committed_instructions,
+        method="fallback",
+        sources=[committed_instructions_source],
+    )
+    remember(
+        "mcpat.core.inst_window_wakeup_accesses",
+        committed_instructions * 2.0,
+        method="derived",
+        sources=["mcpat.core.committed_instructions"],
+    )
+    remember(
+        "mcpat.core.fp_inst_window_reads",
+        fp_instructions,
+        method="fallback",
+        sources=[fp_scalar_source, vec_instructions_source],
+    )
+    remember(
+        "mcpat.core.fp_inst_window_writes",
+        fp_instructions,
+        method="fallback",
+        sources=[fp_scalar_source, vec_instructions_source],
+    )
+    remember(
+        "mcpat.core.fp_inst_window_wakeup_accesses",
+        fp_instructions * 2.0,
+        method="derived",
+        sources=["mcpat.core.fp_instructions"],
+    )
+    remember(
+        "mcpat.core.int_regfile_reads",
+        int_reg_reads,
+        method=int_reg_reads_method,
+        sources=[int_reg_reads_source],
+    )
+    remember(
+        "mcpat.core.float_regfile_reads",
+        float_reg_reads,
+        method="aggregated" if float_reg_reads > 0 else "default",
+        sources=[fp_reg_reads_source, vec_reg_reads_source],
+    )
+    remember(
+        "mcpat.core.int_regfile_writes",
+        int_reg_writes,
+        method=int_reg_writes_method,
+        sources=[int_reg_writes_source],
+    )
+    remember(
+        "mcpat.core.float_regfile_writes",
+        float_reg_writes,
+        method="aggregated" if float_reg_writes > 0 else "default",
+        sources=[fp_reg_writes_source, vec_reg_writes_source],
+    )
+
+    function_calls, function_calls_source = _find_first_stat_with_source(
+        root_stats, ("commitStats0.functionCalls",)
+    )
+    remember(
+        "mcpat.core.function_calls",
+        function_calls,
+        method="direct" if function_calls_source else "default",
+        sources=[function_calls_source],
+    )
+    remember(
+        "mcpat.core.context_switches",
+        0.0,
+        method="default",
+        sources=[],
+    )
+    remember(
+        "mcpat.core.ialu_accesses",
+        ialu_accesses,
+        method=ialu_accesses_method,
+        sources=[ialu_accesses_source],
+    )
+    remember(
+        "mcpat.core.fpu_accesses",
+        fpu_accesses,
+        method=fpu_accesses_method,
+        sources=fpu_accesses_sources,
+    )
+    remember(
+        "mcpat.core.mul_accesses",
+        mul_accesses,
+        method=mul_accesses_method,
+        sources=mul_sources,
+    )
+    remember(
+        "mcpat.core.cdb_alu_accesses",
+        ialu_accesses,
+        method=ialu_accesses_method,
+        sources=[ialu_accesses_source],
+    )
+    remember(
+        "mcpat.core.cdb_mul_accesses",
+        mul_accesses,
+        method=mul_accesses_method,
+        sources=mul_sources,
+    )
+    remember(
+        "mcpat.core.cdb_fpu_accesses",
+        fpu_accesses,
+        method=fpu_accesses_method,
+        sources=fpu_accesses_sources,
+    )
+    remember(
+        "mcpat.core.ifu_duty_cycle",
+        pipeline_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.pipeline_duty_cycle"],
+    )
+    remember(
+        "mcpat.core.lsu_duty_cycle",
+        lsu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.load_instructions", "mcpat.core.store_instructions", "mcpat.system.total_cycles", "profile.memory_ports"],
+    )
+    remember(
+        "mcpat.core.mmu_i_duty_cycle",
+        pipeline_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.pipeline_duty_cycle"],
+    )
+    remember(
+        "mcpat.core.mmu_d_duty_cycle",
+        lsu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.lsu_duty_cycle"],
+    )
+
+    alu_duty_cycle = min(1.0, ialu_accesses / total_cycles) if total_cycles > 0 else 0.0
+    mul_duty_cycle = min(1.0, mul_accesses / total_cycles) if total_cycles > 0 else 0.0
+    fpu_duty_cycle = min(1.0, fpu_accesses / total_cycles) if total_cycles > 0 else 0.0
+    remember(
+        "mcpat.core.alu_duty_cycle",
+        alu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.ialu_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.core.mul_duty_cycle",
+        mul_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.mul_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.core.fpu_duty_cycle",
+        fpu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.fpu_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.core.alu_cdb_duty_cycle",
+        alu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.alu_duty_cycle"],
+    )
+    remember(
+        "mcpat.core.mul_cdb_duty_cycle",
+        mul_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.mul_duty_cycle"],
+    )
+    remember(
+        "mcpat.core.fpu_cdb_duty_cycle",
+        fpu_duty_cycle,
+        method="derived",
+        sources=["mcpat.core.fpu_duty_cycle"],
+    )
+    remember(
+        "mcpat.tlb.itlb.accesses",
+        itlb_accesses,
+        method=itlb_accesses_method,
+        sources=[itlb_accesses_source],
+    )
+    remember(
+        "mcpat.tlb.itlb.misses",
+        itlb_misses,
+        method=itlb_misses_method,
+        sources=[itlb_misses_source],
+    )
+    remember(
+        "mcpat.tlb.dtlb.accesses",
+        dtlb_accesses,
+        method=dtlb_accesses_method,
+        sources=[dtlb_accesses_source],
+    )
+    remember(
+        "mcpat.tlb.dtlb.misses",
+        dtlb_misses,
+        method=dtlb_misses_method,
+        sources=[dtlb_misses_source],
+    )
+    remember(
+        "mcpat.cache.l1i.read_accesses",
+        icache_read_accesses,
+        method=icache_read_accesses_method,
+        sources=[icache_read_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l1i.read_misses",
+        icache_read_misses,
+        method=icache_read_misses_method,
+        sources=[icache_read_misses_source],
+    )
+    remember(
+        "mcpat.cache.l1d.read_accesses",
+        dcache_read_accesses,
+        method=dcache_read_accesses_method,
+        sources=[dcache_read_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l1d.write_accesses",
+        dcache_write_accesses,
+        method=dcache_write_accesses_method,
+        sources=[dcache_write_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l1d.read_misses",
+        dcache_read_misses,
+        method=dcache_read_misses_method,
+        sources=[dcache_read_misses_source],
+    )
+    remember(
+        "mcpat.cache.l1d.write_misses",
+        dcache_write_misses,
+        method=dcache_write_misses_method,
+        sources=[dcache_write_misses_source],
+    )
+    remember(
+        "mcpat.branch.btb.read_accesses",
+        btb_read_accesses,
+        method=btb_read_accesses_method,
+        sources=[btb_read_accesses_source],
+    )
+    remember(
+        "mcpat.branch.btb.write_accesses",
+        btb_write_accesses,
+        method="fallback",
+        sources=[branch_mispred_source],
+    )
+    remember(
+        "mcpat.directory.l1.read_accesses",
+        dcache_read_accesses,
+        method=dcache_read_accesses_method,
+        sources=[dcache_read_accesses_source],
+    )
+    remember(
+        "mcpat.directory.l1.write_accesses",
+        dcache_write_accesses,
+        method=dcache_write_accesses_method,
+        sources=[dcache_write_accesses_source],
+    )
+    remember(
+        "mcpat.directory.l1.read_misses",
+        dcache_read_misses,
+        method=dcache_read_misses_method,
+        sources=[dcache_read_misses_source],
+    )
+    remember(
+        "mcpat.directory.l1.write_misses",
+        dcache_write_misses,
+        method=dcache_write_misses_method,
+        sources=[dcache_write_misses_source],
+    )
+    remember(
+        "mcpat.directory.l1.conflicts",
+        0.0,
+        method="default",
+        sources=[],
+    )
+    remember(
+        "mcpat.directory.l2.read_accesses",
+        l2_read_accesses,
+        method=l2_read_accesses_method,
+        sources=[l2_read_accesses_source],
+    )
+    remember(
+        "mcpat.directory.l2.write_accesses",
+        l2_write_accesses,
+        method=l2_write_accesses_method,
+        sources=[l2_write_accesses_source],
+    )
+    remember(
+        "mcpat.directory.l2.read_misses",
+        l2_read_misses,
+        method=l2_read_misses_method,
+        sources=[l2_read_misses_source],
+    )
+    remember(
+        "mcpat.directory.l2.write_misses",
+        l2_write_misses,
+        method=l2_write_misses_method,
+        sources=[l2_write_misses_source],
+    )
+    remember(
+        "mcpat.directory.l2.conflicts",
+        0.0,
+        method="default",
+        sources=[],
+    )
+    remember(
+        "mcpat.cache.l2.read_accesses",
+        l2_read_accesses,
+        method=l2_read_accesses_method,
+        sources=[l2_read_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l2.write_accesses",
+        l2_write_accesses,
+        method=l2_write_accesses_method,
+        sources=[l2_write_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l2.read_misses",
+        l2_read_misses,
+        method=l2_read_misses_method,
+        sources=[l2_read_misses_source],
+    )
+    remember(
+        "mcpat.cache.l2.write_misses",
+        l2_write_misses,
+        method=l2_write_misses_method,
+        sources=[l2_write_misses_source],
+    )
+    remember(
+        "mcpat.cache.l2.conflicts",
+        0.0,
+        method="default",
+        sources=[],
+    )
+    remember(
+        "mcpat.cache.l2.duty_cycle",
+        min(1.0, (l2_read_accesses + l2_write_accesses) / total_cycles) if total_cycles > 0 else 0.0,
+        method="derived",
+        sources=["mcpat.cache.l2.read_accesses", "mcpat.cache.l2.write_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.cache.l3.read_accesses",
+        l3_read_accesses,
+        method=l3_read_accesses_method,
+        sources=[l3_read_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l3.write_accesses",
+        l3_write_accesses,
+        method=l3_write_accesses_method,
+        sources=[l3_write_accesses_source],
+    )
+    remember(
+        "mcpat.cache.l3.read_misses",
+        l3_read_misses,
+        method=l3_read_misses_method,
+        sources=[l3_read_misses_source],
+    )
+    remember(
+        "mcpat.cache.l3.write_misses",
+        l3_write_misses,
+        method=l3_write_misses_method,
+        sources=[l3_write_misses_source],
+    )
+    remember(
+        "mcpat.cache.l3.conflicts",
+        0.0,
+        method="default",
+        sources=[],
+    )
+    remember(
+        "mcpat.cache.l3.duty_cycle",
+        min(1.0, (l3_read_accesses + l3_write_accesses) / total_cycles) if total_cycles > 0 else 0.0,
+        method="derived",
+        sources=["mcpat.cache.l3.read_accesses", "mcpat.cache.l3.write_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.noc.total_accesses",
+        noc_total_accesses,
+        method=noc_total_accesses_method,
+        sources=noc_total_accesses_sources,
+    )
+    remember(
+        "mcpat.noc.duty_cycle",
+        noc_duty_cycle,
+        method="derived",
+        sources=["mcpat.noc.total_accesses", "mcpat.system.total_cycles"],
+    )
+    remember(
+        "mcpat.memory.accesses",
+        memory_accesses,
+        method="derived",
+        sources=["mcpat.memory.reads", "mcpat.memory.writes"],
+    )
+    remember(
+        "mcpat.memory.reads",
+        memory_reads,
+        method=memory_reads_method,
+        sources=memory_read_sources,
+    )
+    remember(
+        "mcpat.memory.writes",
+        memory_writes,
+        method=memory_writes_method,
+        sources=memory_write_sources,
+    )
+
+    interval_seconds = (
+        (total_cycles * float(profile.get("clock_period_ps", 0.0))) / 1_000_000_000_000.0
+        if total_cycles > 0
+        else 0.0
+    )
+
+    hpre_switch_count, hpre_switch_sources = _sum_matching_any_fragments_with_sources(
+        root_stats, ("hpre", "rsa", "ecc")
+    )
+    sec_switch_count, sec_switch_sources = _sum_matching_any_fragments_with_sources(
+        root_stats, ("sec", "crypto", "aes", "sha")
+    )
+    zip_switch_count, zip_switch_sources = _sum_matching_any_fragments_with_sources(
+        root_stats, ("zip", "zlib", "gzip", "compress")
+    )
+
+    custom_blocks = {
+        "hccs": {
+            "switch_count": noc_total_accesses,
+            "sources": noc_total_accesses_sources,
+            "method": "derived",
+            "activation_factor": noc_duty_cycle,
+            "activation_sources": ["mcpat.noc.duty_cycle"],
+            "note": "HCCS activity is approximated from NoC traffic.",
+        },
+        "hpre": {
+            "switch_count": hpre_switch_count,
+            "sources": hpre_switch_sources,
+            "method": "aggregated" if hpre_switch_sources else "default",
+            "activation_factor": min(1.0, hpre_switch_count / total_cycles) if total_cycles > 0 and hpre_switch_count > 0 else 0.0,
+            "activation_sources": hpre_switch_sources,
+            "note": "HPRE activity defaults to 0 unless gem5 stats expose accelerator events.",
+        },
+        "sec": {
+            "switch_count": sec_switch_count,
+            "sources": sec_switch_sources,
+            "method": "aggregated" if sec_switch_sources else "default",
+            "activation_factor": min(1.0, sec_switch_count / total_cycles) if total_cycles > 0 and sec_switch_count > 0 else 0.0,
+            "activation_sources": sec_switch_sources,
+            "note": "SEC activity defaults to 0 unless gem5 stats expose accelerator events.",
+        },
+        "zip": {
+            "switch_count": zip_switch_count,
+            "sources": zip_switch_sources,
+            "method": "aggregated" if zip_switch_sources else "default",
+            "activation_factor": min(1.0, zip_switch_count / total_cycles) if total_cycles > 0 and zip_switch_count > 0 else 0.0,
+            "activation_sources": zip_switch_sources,
+            "note": "ZIP activity defaults to 0 unless gem5 stats expose compression events.",
+        },
     }
 
+    for custom_name, custom_info in custom_blocks.items():
+        remember(
+            f"mcpat.custom.{custom_name}.switch_count",
+            custom_info["switch_count"],
+            method=custom_info["method"],
+            sources=custom_info["sources"],
+            note=custom_info["note"],
+        )
+        remember(
+            f"mcpat.custom.{custom_name}.activation_factor",
+            custom_info["activation_factor"],
+            method="derived" if custom_name == "hccs" else custom_info["method"],
+            sources=custom_info["activation_sources"],
+            note=custom_info["note"],
+        )
+        remember(
+            f"mcpat.custom.{custom_name}.interval",
+            interval_seconds,
+            method="derived",
+            sources=["mcpat.system.total_cycles", "profile.clock_period_ps"],
+        )
+
     root_stats.update({key: _format_stat(value) for key, value in derived_stats.items()})
+    mcpat_model = config.get("mcpat")
+    if isinstance(mcpat_model, dict):
+        mcpat_model["stats"] = {"derived": derived_metadata}
     return normalized

@@ -9,7 +9,10 @@ if str(MCPAT_ROOT) not in sys.path:
     sys.path.insert(0, str(MCPAT_ROOT))
 
 from pypat.conversion.gem5_to_mcpat import run_conversion  # noqa: E402
-from pypat.conversion.profiles import normalize_gem5_config  # noqa: E402
+from pypat.conversion.profiles import (  # noqa: E402
+    normalize_gem5_config,
+    normalize_gem5_stats,
+)
 
 
 def _component(tree: ET.ElementTree, component_id: str) -> ET.Element:
@@ -54,8 +57,71 @@ def test_normalize_gem5_config_builds_kunpeng_mcpat_model():
     assert profile["number_of_nocs"] == 2
     assert profile["l3_size"] == 4 * 1024 * 1024
     assert profile["memory_channels_per_mc"] == 4
+    assert profile["noc_type"] == 1
+    assert profile["noc_horizontal_nodes"] == 4
+    assert profile["noc_vertical_nodes"] == 2
+    assert profile["noc_chip_coverage"] == 0.5
     assert mcpat["system"]["clusters"] == 16
+    assert mcpat["system"]["io_dies"] == 1
     assert mcpat["caches"]["l3"]["total_size_bytes"] == 64 * 1024 * 1024
+    assert mcpat["topology"]["l3_slices_per_die"] == 8
+    assert mcpat["sources"]["field_sources"]["number_of_cores"] == "config.board.processor.num_cores"
+
+
+def test_normalize_gem5_stats_records_kunpeng_stat_provenance():
+    config = {
+        "system": {"isa": "ArmISA"},
+        "board": {
+            "clk_freq": "2.6GHz",
+            "processor": {"num_cores": 64},
+            "cache_hierarchy": {
+                "l1i_size": "64KiB",
+                "l1d_size": "64KiB",
+                "l2_size": "512KiB",
+                "l3_size": "64MiB",
+            },
+            "memory": {"num_channels": 8},
+        },
+    }
+    normalized, selected = normalize_gem5_config(config, "arm64-kunpeng920")
+    assert selected == "arm64-kunpeng920"
+
+    stats = {
+        0: {
+            "simTicks": "2600000",
+            "simInsts": "4000",
+            "system.cpu.commitStats0.numIntInsts": "2500",
+            "system.cpu.commitStats0.numFpInsts": "500",
+            "system.cpu.commitStats0.numVecInsts": "300",
+            "system.cpu.commitStats0.numLoadInsts": "700",
+            "system.cpu.commitStats0.numStoreInsts": "300",
+            "system.cpu.executeStats0.numIntRegReads": "5000",
+            "system.cpu.executeStats0.numIntRegWrites": "2500",
+            "system.cpu.executeStats0.numFpRegReads": "1000",
+            "system.cpu.executeStats0.numFpRegWrites": "500",
+            "system.cpu.executeStats0.numVecRegReads": "600",
+            "system.cpu.executeStats0.numVecRegWrites": "300",
+            "system.cpu.executeStats0.numIntAluAccesses": "2600",
+            "system.cpu.executeStats0.numFpAluAccesses": "600",
+            "system.cpu.executeStats0.numVecAluAccesses": "400",
+            "system.cpu.fetchStats0.numBranches": "250",
+            "system.cpu.branchPred.condIncorrect": "5",
+            "system.mem_ctrl.readReqs": "2",
+            "system.mem_ctrl.writeReqs": "1",
+        }
+    }
+
+    normalized_stats = normalize_gem5_stats(stats, normalized, selected)
+    derived = normalized["mcpat"]["stats"]["derived"]
+
+    assert normalized_stats[0]["mcpat.core.fp_instructions"] == "800"
+    assert derived["mcpat.core.fp_instructions"]["method"] == "aggregated"
+    assert "system.cpu.commitStats0.numFpInsts" in derived["mcpat.core.fp_instructions"]["sources"]
+    assert "system.cpu.commitStats0.numVecInsts" in derived["mcpat.core.fp_instructions"]["sources"]
+    assert derived["mcpat.memory.reads"]["method"] == "aggregated"
+    assert "system.mem_ctrl.readReqs" in derived["mcpat.memory.reads"]["sources"]
+    assert derived["mcpat.custom.hccs.activation_factor"]["method"] == "derived"
+    assert derived["mcpat.custom.hpre.activation_factor"]["method"] == "default"
 
 
 def test_run_conversion_emits_derived_kunpeng_stats(tmp_path):
@@ -138,6 +204,14 @@ def test_run_conversion_emits_derived_kunpeng_stats(tmp_path):
 
     assert _named_value(tree, "system", "param", "number_of_cores") == "64"
     assert _named_value(tree, "system", "param", "number_of_L3s") == "16"
+    assert _named_value(tree, "system.NoC0", "param", "type") == "1"
+    assert _named_value(tree, "system.NoC0", "param", "horizontal_nodes") == "4"
+    assert _named_value(tree, "system.NoC0", "param", "vertical_nodes") == "2"
+    assert _named_value(tree, "system.NoC0", "param", "chip_coverage") == "0.5"
+    assert _named_value(tree, "system.KunpengHCCS", "param", "static") == "0.0"
+    assert _named_value(tree, "system.KunpengHPRE", "stat", "switch_count") == "0"
+    assert _named_value(tree, "system.KunpengSEC", "stat", "activation_factor") == "0"
+    assert _named_value(tree, "system.KunpengZIP", "stat", "interval") != "0"
     assert _named_value(tree, "system.core0", "stat", "total_instructions") == "4000"
     assert _named_value(tree, "system.core0", "stat", "fp_instructions") == "800"
     assert _named_value(tree, "system.core0.dcache", "stat", "write_accesses") == "300"

@@ -120,7 +120,9 @@ void MCBackend::compute()
   }
   else
   {//skip old model
-	  cout<<"Unknown memory controllers"<<endl;exit(0);
+	  cerr << "Unknown memory controller type: " << mcp.type
+	       << ". Supported types are 0 (high performance) and 1 (low power)." << endl;
+	  exit(1);
 	  area.set_area(0.243*mcp.dataBusWidth/8);//area based on Cadence ChipEstimator for 8bit bus
 	  //mc_power = 4.32*0.1;//4.32W@1GhzMHz @65nm Cadence ChipEstimator 10% for backend
 	  C_MCB = mc_power/1e9/72/1.1/1.1*l_ip.F_sz_um/0.065;
@@ -827,4 +829,3 @@ MemoryController ::~MemoryController(){
 	if(PHY) 	                   {delete PHY; PHY = 0;}
 	if(pipeLogic) 	               {delete pipeLogic; pipeLogic = 0;}
 }
-

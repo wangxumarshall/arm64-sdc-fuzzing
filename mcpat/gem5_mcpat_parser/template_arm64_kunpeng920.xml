@@ -347,25 +347,28 @@
 			<param name="clockrate" value="config.profile.target_core_clockrate_mhz"/>
 			<param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
 			<param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
-			<param name="type" value="0"/>
+			<param name="type" value="config.profile.noc_type"/>
 			<!--0:bus, 1:NoC , for bus no matter how many nodes sharing the bus
 				at each time only one node can send req -->
-			<param name="horizontal_nodes" value="1"/>
-			<param name="vertical_nodes" value="1"/>
-			<param name="has_global_link" value="0"/>
+			<param name="topology" value="config.profile.noc_topology"/>
+			<param name="horizontal_nodes" value="config.profile.noc_horizontal_nodes"/>
+			<param name="vertical_nodes" value="config.profile.noc_vertical_nodes"/>
+			<param name="has_global_link" value="config.profile.noc_has_global_link"/>
 			<!-- 1 has global link, 0 does not have global link -->
-			<param name="link_throughput" value="1"/><!--w.r.t clock -->
-			<param name="link_latency" value="1"/><!--w.r.t clock -->
+			<param name="link_throughput" value="config.profile.noc_link_throughput"/><!--w.r.t clock -->
+			<param name="link_latency" value="config.profile.noc_link_latency"/><!--w.r.t clock -->
 			<!-- throughput >= latency -->
 			<!-- Router architecture -->
 			<param name="input_ports" value="config.profile.noc_input_ports"/>
 			<param name="output_ports" value="config.profile.noc_output_ports"/>
+			<param name="virtual_channel_per_port" value="config.profile.noc_virtual_channel_per_port"/>
+			<param name="input_buffer_entries_per_vc" value="config.profile.noc_input_buffer_entries_per_vc"/>
 			<!-- For bus the I/O ports should be 1 -->
 			<param name="flit_bits" value="config.profile.noc_flit_bits"/>
-			<param name="chip_coverage" value="1"/>
+			<param name="chip_coverage" value="config.profile.noc_chip_coverage"/>
 			<!-- When multiple NOC present, one NOC will cover part of the whole chip.
 				chip_coverage <=1 -->
-			<param name="link_routing_over_percentage" value="0.5"/>
+			<param name="link_routing_over_percentage" value="config.profile.noc_route_over_perc"/>
 			<!-- Links can route over other components or occupy whole area.
 				by default, 50% of the NoC global links routes over other
 				components -->
@@ -446,6 +449,46 @@
 			<stat name="total_load_perc" value="config.profile.flash_total_load_perc"/> <!-- Percentage of total achieved load to total achieve-able bandwidth  -->
 			<!-- McPAT does not track individual flash controller, instead, it takes the total accesses and calculate
 			the average power per fc or per channel. This is sufficient for most application -->
+		</component>
+<!--**********************************************************************-->
+		<component id="system.KunpengHCCS" name="Kunpeng920_HCCS">
+			<param name="static" value="config.profile.custom_hccs_static_power"/>
+			<param name="switch" value="config.profile.custom_hccs_switch_energy"/>
+			<param name="area" value="config.profile.custom_hccs_area"/>
+			<stat name="frequency" value="config.profile.target_core_clockrate_mhz * 1000000"/>
+			<stat name="activation_factor" value="stats.mcpat.custom.hccs.activation_factor"/>
+			<stat name="switch_count" value="stats.mcpat.custom.hccs.switch_count"/>
+			<stat name="interval" value="stats.mcpat.custom.hccs.interval"/>
+		</component>
+<!--**********************************************************************-->
+		<component id="system.KunpengHPRE" name="Kunpeng920_HPRE">
+			<param name="static" value="config.profile.custom_hpre_static_power"/>
+			<param name="switch" value="config.profile.custom_hpre_switch_energy"/>
+			<param name="area" value="config.profile.custom_hpre_area"/>
+			<stat name="frequency" value="config.profile.pcie_clockrate_mhz * 1000000"/>
+			<stat name="activation_factor" value="stats.mcpat.custom.hpre.activation_factor"/>
+			<stat name="switch_count" value="stats.mcpat.custom.hpre.switch_count"/>
+			<stat name="interval" value="stats.mcpat.custom.hpre.interval"/>
+		</component>
+<!--**********************************************************************-->
+		<component id="system.KunpengSEC" name="Kunpeng920_SEC">
+			<param name="static" value="config.profile.custom_sec_static_power"/>
+			<param name="switch" value="config.profile.custom_sec_switch_energy"/>
+			<param name="area" value="config.profile.custom_sec_area"/>
+			<stat name="frequency" value="config.profile.niu_clockrate_mhz * 1000000"/>
+			<stat name="activation_factor" value="stats.mcpat.custom.sec.activation_factor"/>
+			<stat name="switch_count" value="stats.mcpat.custom.sec.switch_count"/>
+			<stat name="interval" value="stats.mcpat.custom.sec.interval"/>
+		</component>
+<!--**********************************************************************-->
+		<component id="system.KunpengZIP" name="Kunpeng920_ZIP">
+			<param name="static" value="config.profile.custom_zip_static_power"/>
+			<param name="switch" value="config.profile.custom_zip_switch_energy"/>
+			<param name="area" value="config.profile.custom_zip_area"/>
+			<stat name="frequency" value="config.profile.niu_clockrate_mhz * 1000000"/>
+			<stat name="activation_factor" value="stats.mcpat.custom.zip.activation_factor"/>
+			<stat name="switch_count" value="stats.mcpat.custom.zip.switch_count"/>
+			<stat name="interval" value="stats.mcpat.custom.zip.interval"/>
 		</component>
 <!--**********************************************************************-->
 

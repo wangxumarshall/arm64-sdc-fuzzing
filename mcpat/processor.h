@@ -63,7 +63,7 @@ class Processor : public Component
     NIUController    * niu;
     PCIeController   * pcie;
     FlashController  * flashcontroller;
-    CustomBlock CIM_SRAM{"CIM_SRAM",1,1};
+    vector<CustomBlock> customBlocks;
     InputParameter interface_ip;
     ProcParam procdynp;
     //wire	globalInterconnect;
