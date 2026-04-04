@@ -1,0 +1,25 @@
+{
+  "cli_version": "v0.5.0-dev-f46ed4f3",
+  "checkpoint_id": "fb6f4706eedc",
+  "strategy": "manual-commit",
+  "branch": "codex/monorepo-migration",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "microprobe/targets/arm64/policies/sdc_fuzzing_policy.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fb/6f4706eedc/0/metadata.json",
+      "transcript": "/fb/6f4706eedc/0/full.jsonl",
+      "content_hash": "/fb/6f4706eedc/0/content_hash.txt",
+      "prompt": "/fb/6f4706eedc/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7320332,
+    "cache_creation_tokens": 177978,
+    "cache_read_tokens": 210827212,
+    "output_tokens": 520635,
+    "api_call_count": 1873
+  }
+}
