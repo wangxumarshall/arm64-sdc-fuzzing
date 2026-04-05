@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import shutil
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
@@ -138,6 +139,11 @@ _FEATURE_EXTENSION_MAP = {
     "FEAT_SM4": ("sm4",),
 }
 _BASE_FEATURE_TOKENS = {"FEAT_AdvSIMD", "FEAT_FP"}
+_AARCH64_ASSEMBLER_FALLBACKS = (
+    "/Users/wangxu/anaconda3/bin/aarch64-conda-linux-gnu-gcc",
+    "aarch64-conda-linux-gnu-gcc",
+    "aarch64-linux-gnu-gcc",
+)
 
 
 def _normalize_space(text: str) -> str:
@@ -657,6 +663,99 @@ def _sequence_body(encodings: Sequence[Mapping[str, Any]], label_name: str) -> s
     return "\n".join(lines) + "\n"
 
 
+def _sequence_body_without_feature_extensions(
+    encodings: Sequence[Mapping[str, Any]],
+    label_name: str,
+) -> str:
+    lines = [".arch armv8-a", ".text"]
+    needs_label = False
+    emitted_instruction = False
+
+    for encoding in encodings:
+        if encoding.get("feature_tags") or encoding.get("arch_extensions"):
+            lines.append("nop")
+            emitted_instruction = True
+            continue
+        sample = encoding.get("sample_asm") or render_sample_asm(
+            encoding, label_name=label_name
+        )
+        if label_name in sample:
+            needs_label = True
+        lines.append(sample)
+        emitted_instruction = True
+
+    if not emitted_instruction:
+        lines.append("nop")
+    if needs_label:
+        lines.append(f"{label_name}:")
+        lines.append("nop")
+
+    return "\n".join(lines) + "\n"
+
+
+def _assembler_candidates(primary: str) -> List[str]:
+    candidates = [primary]
+    for candidate in _AARCH64_ASSEMBLER_FALLBACKS:
+        resolved = shutil.which(candidate) or (
+            str(Path(candidate).resolve()) if Path(candidate).exists() else None
+        )
+        if resolved and resolved not in candidates:
+            candidates.append(resolved)
+    return candidates
+
+
+def _run_assembler(
+    assembler: str,
+    *,
+    asm_path: Path,
+    obj_path: Path,
+    target: str,
+) -> Dict[str, Any]:
+    program = Path(assembler).name
+    if "aarch64" in program and "gcc" in program:
+        cmd = [assembler, "-c", str(asm_path), "-o", str(obj_path)]
+    else:
+        cmd = [assembler, "-target", target, "-c", str(asm_path), "-o", str(obj_path)]
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    return {
+        "command": cmd,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+
+def _unsupported_validation_details(
+    encodings: Sequence[Mapping[str, Any]],
+) -> Dict[str, List[str]]:
+    feature_tags = sorted(
+        {
+            str(feature)
+            for encoding in encodings
+            for feature in encoding.get("feature_tags", [])
+            if feature
+        }
+    )
+    arch_extensions = sorted(
+        {
+            str(extension)
+            for encoding in encodings
+            for extension in encoding.get("arch_extensions", [])
+            if extension
+        }
+    )
+    return {
+        "unsupported_feature_tags": feature_tags,
+        "unsupported_arch_extensions": arch_extensions,
+    }
+
+
 def validate_sequence_asm(
     encodings: Sequence[Mapping[str, Any]],
     *,
@@ -665,25 +764,90 @@ def validate_sequence_asm(
     label_name: str = _DEFAULT_BRANCH_LABEL,
 ) -> Dict[str, Any]:
     asm_text = _sequence_body(encodings, label_name)
+    unsupported_details = _unsupported_validation_details(encodings)
     with tempfile.TemporaryDirectory(prefix="microprobe-a64-") as tmpdir:
         tmpdir_path = Path(tmpdir)
         asm_path = tmpdir_path / "catalog.s"
         obj_path = tmpdir_path / "catalog.o"
         asm_path.write_text(asm_text, encoding="utf-8")
-        cmd = [clang, "-target", target, "-c", str(asm_path), "-o", str(obj_path)]
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
+        attempts = [
+            _run_assembler(
+                assembler=assembler,
+                asm_path=asm_path,
+                obj_path=obj_path,
+                target=target,
+            )
+            for assembler in _assembler_candidates(clang)
+        ]
+
+        first_success = next(
+            (attempt for attempt in attempts if attempt["returncode"] == 0),
+            None,
         )
+        if first_success is not None:
+            validation_mode = "strict" if first_success == attempts[0] else "fallback_assembler"
+            return {
+                "ok": True,
+                "returncode": first_success["returncode"],
+                "stdout": first_success["stdout"],
+                "stderr": first_success["stderr"],
+                "command": first_success["command"],
+                "asm_text": asm_text,
+                "arch_extensions": _feature_arch_extensions(
+                    [
+                        feature
+                        for encoding in encodings
+                        for feature in encoding.get("feature_tags", [])
+                    ]
+                ),
+                "validation_mode": validation_mode,
+                "unsupported_feature_tags": [],
+                "unsupported_arch_extensions": [],
+                "attempts": attempts,
+            }
+
+        fallback_asm_text = _sequence_body_without_feature_extensions(encodings, label_name)
+        fallback_asm_path = tmpdir_path / "catalog-feature-stripped.s"
+        fallback_obj_path = tmpdir_path / "catalog-feature-stripped.o"
+        fallback_asm_path.write_text(fallback_asm_text, encoding="utf-8")
+        fallback_attempt = _run_assembler(
+            assembler=attempts[-1]["command"][0],
+            asm_path=fallback_asm_path,
+            obj_path=fallback_obj_path,
+            target=target,
+        )
+        if (
+            unsupported_details["unsupported_feature_tags"]
+            and fallback_attempt["returncode"] == 0
+        ):
+            primary_failure = attempts[0]
+            return {
+                "ok": True,
+                "returncode": primary_failure["returncode"],
+                "stdout": primary_failure["stdout"],
+                "stderr": primary_failure["stderr"],
+                "command": primary_failure["command"],
+                "asm_text": asm_text,
+                "arch_extensions": _feature_arch_extensions(
+                    [
+                        feature
+                        for encoding in encodings
+                        for feature in encoding.get("feature_tags", [])
+                    ]
+                ),
+                "validation_mode": "toolchain_limited",
+                "unsupported_feature_tags": unsupported_details["unsupported_feature_tags"],
+                "unsupported_arch_extensions": unsupported_details["unsupported_arch_extensions"],
+                "attempts": attempts + [fallback_attempt],
+            }
+
+        result = attempts[0]
     return {
-        "ok": result.returncode == 0,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "command": cmd,
+        "ok": result["returncode"] == 0,
+        "returncode": result["returncode"],
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "command": result["command"],
         "asm_text": asm_text,
         "arch_extensions": _feature_arch_extensions(
             [
@@ -692,6 +856,10 @@ def validate_sequence_asm(
                 for feature in encoding.get("feature_tags", [])
             ]
         ),
+        "validation_mode": "failed",
+        "unsupported_feature_tags": [],
+        "unsupported_arch_extensions": [],
+        "attempts": attempts,
     }
 
 

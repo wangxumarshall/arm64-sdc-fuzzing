@@ -29,7 +29,7 @@ env \
     PATH="$COMMON_PATH" \
     ./configure \
         --python="$PYTHON_BIN" \
-        --target-list=aarch64-softmmu \
+        --target-list=aarch64-softmmu,aarch64-linux-user \
         --disable-cocoa \
         --disable-coreaudio \
         --disable-sdl \
@@ -52,3 +52,4 @@ env \
 echo ""
 echo "Build complete."
 echo "Expected binary: $QEMU_DIR/build/qemu-system-aarch64"
+echo "Expected binary: $QEMU_DIR/build/qemu-aarch64"

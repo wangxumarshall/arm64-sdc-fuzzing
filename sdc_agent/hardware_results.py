@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .power_backends.opendcdiag_backend import OpenDCDiagBackend
+from .tooling import resolve_local_tools
 from .vault import SDCVault
 
 
@@ -264,7 +265,22 @@ def execute_hardware_promotions(
     runtime_root = runtime_root.resolve()
     runtime_root.mkdir(parents=True, exist_ok=True)
 
-    backend = OpenDCDiagBackend()
+    default_backend = OpenDCDiagBackend()
+    resolved_tools = resolve_local_tools(
+        meson_binary=getattr(default_backend, "meson_binary", None),
+        opendcdiag_root=getattr(default_backend, "opendcdiag_root", None),
+    )
+    backend = default_backend
+    try:
+        backend = OpenDCDiagBackend(
+            meson_binary=resolved_tools.meson_binary or getattr(default_backend, "meson_binary", "meson"),
+            opendcdiag_root=Path(
+                resolved_tools.opendcdiag_root
+                or str(getattr(default_backend, "opendcdiag_root", REPO_ROOT / "opendcdiag"))
+            ),
+        )
+    except TypeError:
+        backend = default_backend
     executed: List[Dict[str, Any]] = []
 
     with SDCVault(db_path) as vault:

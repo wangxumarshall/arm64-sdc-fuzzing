@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -21,6 +20,13 @@ from .generation import (
 )
 from .materialize import SDC_MEMORY_SIZE, _asm_block, _benchmark_body_lines
 from .power_backends.mcpat_backend import McPATBackend
+from .tooling import (
+    DEFAULT_GEM5_BAREMETAL_CONFIG,
+    DEFAULT_GEM5_BINARY,
+    DEFAULT_MCPAT_BINARY,
+    DEFAULT_QEMU_SYSTEM_BINARY,
+    resolve_local_tools,
+)
 from .vault import SDCVault
 from .vault import VaultEntry
 
@@ -28,12 +34,7 @@ from .vault import VaultEntry
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = REPO_ROOT / "artifacts" / "sdc_vault.sqlite3"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "phase2-validation"
-DEFAULT_QEMU_SYSTEM_BINARY = REPO_ROOT / "qemu" / "build" / "qemu-system-aarch64"
-DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
-DEFAULT_GEM5_BAREMETAL_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "baremetal.py"
-DEFAULT_MCPAT_BINARY = REPO_ROOT / "mcpat" / "mcpat"
 DEFAULT_BOOT_ASM = REPO_ROOT / "qemu" / "tests" / "tcg" / "aarch64" / "system" / "boot.S"
-DEFAULT_CONDA_COMPILER = Path("/Users/wangxu/anaconda3/bin/aarch64-conda-linux-gnu-gcc")
 DIGEST_PATTERN = re.compile(r"SDC_(?:DIGEST|HASH)=([0-9a-fA-F]+)")
 DEFAULT_SAFE_VALIDATION_INSTRUCTIONS = (
     "MOVZ_X_V0",
@@ -54,15 +55,9 @@ SAFE_BASELINE_ASM = "\n".join(
 
 
 def _resolve_compiler() -> str:
-    candidates = [
-        str(DEFAULT_CONDA_COMPILER),
-        "aarch64-conda-linux-gnu-gcc",
-        "aarch64-linux-gnu-gcc",
-    ]
-    for candidate in candidates:
-        resolved = shutil.which(candidate) or (candidate if Path(candidate).exists() else None)
-        if resolved:
-            return str(resolved)
+    resolved = resolve_local_tools(compiler=None).compiler
+    if resolved:
+        return resolved
     raise FileNotFoundError("No usable AArch64 cross compiler found.")
 
 
@@ -535,7 +530,18 @@ def run_phase2_validation(
 ) -> Dict[str, Any]:
     output_root = output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    compiler = compiler or _resolve_compiler()
+    resolved_tools = resolve_local_tools(
+        compiler=compiler,
+        qemu_system_binary=qemu_binary,
+        gem5_binary=gem5_binary,
+        gem5_config=gem5_config,
+        mcpat_binary=mcpat_binary,
+    )
+    compiler = resolved_tools.compiler or _resolve_compiler()
+    qemu_binary = Path(resolved_tools.qemu_system_binary or qemu_binary).resolve()
+    gem5_binary = Path(resolved_tools.gem5_binary or gem5_binary).resolve()
+    gem5_config = Path(resolved_tools.gem5_config or gem5_config).resolve()
+    mcpat_binary = Path(resolved_tools.mcpat_binary or mcpat_binary).resolve()
 
     candidate = _select_validation_candidate(
         db_path=db_path,
@@ -570,7 +576,7 @@ def run_phase2_validation(
     )
     mcpat_result = McPATBackend(
         template_profile="arm64-kunpeng920",
-        mcpat_binary=mcpat_binary.resolve(),
+        mcpat_binary=mcpat_binary,
     ).run(gem5_outdir)
     mcpat_result = _json_safe(mcpat_result)
 
@@ -590,9 +596,9 @@ def run_phase2_validation(
         "mcpat": mcpat_result,
         "phase2_validation": {
             "compiler": compiler,
-            "qemu_binary": str(qemu_binary.resolve()),
-            "gem5_binary": str(gem5_binary.resolve()),
-            "mcpat_binary": str(mcpat_binary.resolve()),
+            "qemu_binary": str(qemu_binary),
+            "gem5_binary": str(gem5_binary),
+            "mcpat_binary": str(mcpat_binary),
             "source_path": str(build_artifacts["source_path"]),
             "elf_path": str(build_artifacts["elf_path"]),
             "boot_obj": str(build_artifacts["boot_obj"]),
@@ -641,9 +647,9 @@ def run_phase2_validation(
         profile_name=str(metadata.get("profile_name", PROFILE_SIM_SAFE)),
         requested_profile_name=str(metadata.get("requested_profile_name", metadata.get("profile_name", PROFILE_SIM_SAFE))),
         compiler=compiler,
-        qemu_binary=str(qemu_binary.resolve()),
-        gem5_binary=str(gem5_binary.resolve()),
-        mcpat_binary=str(mcpat_binary.resolve()),
+        qemu_binary=str(qemu_binary),
+        gem5_binary=str(gem5_binary),
+        mcpat_binary=str(mcpat_binary),
         source_path=str(build_artifacts["source_path"]),
         elf_path=str(build_artifacts["elf_path"]),
         qemu_golden_digest=qemu_result["golden_digest"],

@@ -1,4 +1,7 @@
-from sdc_agent.agent import run_cycle, summarize_vault
+import json
+from pathlib import Path
+
+from sdc_agent.agent import run_cycle, run_e2e_local, summarize_vault
 from sdc_agent.vault import SDCVault, VaultEntry
 
 
@@ -120,3 +123,100 @@ def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, 
     assert payload["campaign"]["ok"] is True
     assert payload["evolve"]["emitted"] == 2
     assert payload["summary"]["counts"]["ALL"] == 1
+
+
+def test_sdc_agent_run_e2e_local_writes_unified_report(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "checks": [],
+            "resolved_paths": {
+                "compiler": "cc",
+                "qemu_user_binary": "/tmp/qemu-aarch64",
+                "qemu_system_binary": "/tmp/qemu-system-aarch64",
+                "gem5_binary": "/tmp/gem5.opt",
+                "gem5_config": str((tmp_path / "baremetal.py").resolve()),
+                "mcpat_binary": str((tmp_path / "mcpat").resolve()),
+                "meson_binary": "/opt/homebrew/bin/meson",
+                "ninja_binary": "/opt/homebrew/bin/ninja",
+                "opendcdiag_root": str((tmp_path / "opendcdiag").resolve()),
+            },
+            "missing_steps": [],
+            "qemu_user_binary": "/tmp/qemu-aarch64",
+            "qemu_system_binary": "/tmp/qemu-system-aarch64",
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_phase2_validation",
+        lambda **kwargs: {
+            "status": "INNER_READY",
+            "report_path": str((output_root / "phase2" / "phase2-validation.json").resolve()),
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_phase4_validation",
+        lambda **kwargs: {
+            "summary_status": "MATCHED",
+            "report_path": str((output_root / "phase4" / "phase4-validation.json").resolve()),
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_cycle",
+        lambda **kwargs: {
+            "generate": {"inserted": 4},
+            "campaign": {"counts": {"executed": 2}},
+            "evolve": {"emitted": 2},
+            "summary": {"counts": {"ALL": 6}},
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_hardware_promotion",
+        lambda **kwargs: {
+            "promotions": [
+                {
+                    "promotion_id": 7,
+                    "testcase_key": "seed-hw",
+                    "status": "EMITTED",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.execute_hardware_promotions",
+        lambda **kwargs: {
+            "executed": [
+                {
+                    "promotion_id": 7,
+                    "result_status": "PASS",
+                    "ingest": {"hardware_run_id": 9},
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.summarize_vault",
+        lambda db_path, limit=5: {"counts": {"ALL": 6}, "db": str(db_path)},
+    )
+
+    payload = run_e2e_local(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=False,
+        timeout=5,
+    )
+
+    assert payload["mode"] == "e2e-local"
+    assert payload["phase2"]["status"] == "INNER_READY"
+    assert payload["phase4"]["summary_status"] == "MATCHED"
+    assert payload["latest_promotion"]["promotion_id"] == 7
+    assert payload["latest_hardware_run"]["promotion_id"] == 7
+
+    report_path = Path(payload["report_json"])
+    assert report_path.exists()
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report_payload["resolved_paths"]["compiler"] == "cc"
+    assert report_payload["build"]["requested"] is False

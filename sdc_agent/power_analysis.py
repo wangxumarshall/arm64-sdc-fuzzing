@@ -15,14 +15,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .tooling import DEFAULT_GEM5_BINARY, DEFAULT_MCPAT_BINARY
+
 # Repo root
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = REPO_ROOT / "artifacts" / "sdc_vault.sqlite3"
-DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
 DEFAULT_GEM5_CONFIG = (
     REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_baremetal_se.py"
 )
-DEFAULT_MCPAT_BINARY = REPO_ROOT / "mcpat" / "mcpat" / "mcpat"
 DEFAULT_MATERIALIZED_ROOT = REPO_ROOT / "artifacts" / "materialized"
 DIGEST_RE = re.compile(r"SDC_DIGEST=([0-9a-fA-F]+)")
 

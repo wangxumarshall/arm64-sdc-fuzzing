@@ -362,3 +362,8 @@ def test_validate_sequence_asm_enables_required_arch_extensions():
     assert "memtag" in validation["arch_extensions"]
     assert ".arch_extension cssc" in validation["asm_text"]
     assert ".arch_extension memtag" in validation["asm_text"]
+    assert validation["validation_mode"] in {
+        "strict",
+        "fallback_assembler",
+        "toolchain_limited",
+    }

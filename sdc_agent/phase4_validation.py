@@ -14,9 +14,9 @@ from .differential import (
     fault_request_has_observed_injection,
     fault_request_requires_injection,
 )
+from .tooling import resolve_local_tools
 from .outer_loop import FaultSpec, build_campaign_identity, plan_fault_matrix
 from .phase2_validation import (
-    DEFAULT_CONDA_COMPILER,
     DEFAULT_DB,
     DEFAULT_GEM5_BAREMETAL_CONFIG,
     DEFAULT_GEM5_BINARY,
@@ -190,7 +190,18 @@ def run_phase4_validation(
 ) -> Dict[str, Any]:
     output_root = output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    compiler = compiler or _resolve_compiler()
+    resolved_tools = resolve_local_tools(
+        compiler=compiler,
+        qemu_system_binary=qemu_binary,
+        gem5_binary=gem5_binary,
+        gem5_config=gem5_config,
+        mcpat_binary=mcpat_binary,
+    )
+    compiler = resolved_tools.compiler or _resolve_compiler()
+    qemu_binary = Path(resolved_tools.qemu_system_binary or qemu_binary).resolve()
+    gem5_binary = Path(resolved_tools.gem5_binary or gem5_binary).resolve()
+    gem5_config = Path(resolved_tools.gem5_config or gem5_config).resolve()
+    mcpat_binary = Path(resolved_tools.mcpat_binary or mcpat_binary).resolve()
 
     with SDCVault(db_path) as vault:
         vault.upsert_testcase(_build_validation_entry(profile_name))
@@ -257,7 +268,7 @@ def run_phase4_validation(
             if int(gem5_result.get("returncode", -1)) == 0:
                 mcpat_result = McPATBackend(
                     template_profile="arm64-kunpeng920",
-                    mcpat_binary=mcpat_binary.resolve(),
+                    mcpat_binary=mcpat_binary,
                 ).run(gem5_outdir)
                 latest_mcpat_power = float(mcpat_result["power_total"])
             result_json = run_dir / "result.json"
@@ -317,9 +328,9 @@ def run_phase4_validation(
             **aggregate,
             "campaign_key": campaign_key,
             "validation_mode": "phase4_real_e2e",
-            "qemu_binary": str(qemu_binary.resolve()),
-            "gem5_binary": str(gem5_binary.resolve()),
-            "mcpat_binary": str(mcpat_binary.resolve()),
+            "qemu_binary": str(qemu_binary),
+            "gem5_binary": str(gem5_binary),
+            "mcpat_binary": str(mcpat_binary),
         }
         vault.update_execution_result(
             testcase_key,

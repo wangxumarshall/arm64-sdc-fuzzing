@@ -191,21 +191,35 @@ PENDING ──▶ GOLDEN_READY ──▶ MATCHED
 
 ### 3.4 顶层控制入口
 
-`tools/sdc_agent.py` 提供四个常用子命令：
+`tools/sdc_agent.py` 现在提供一个推荐主入口和若干分阶段子命令。
+
+推荐主入口：
+
+- `e2e-local`
+
+常用分阶段子命令：
 
 - `status`
 - `generate`
 - `evolve`
 - `cycle`
+- `promote-hw`
+- `run-hw`
+- `ingest-hw`
 
-其中 `cycle` 会串联：
+其中：
 
-1. 离线生成
-2. 在线 campaign
-3. offspring 进化
-4. Vault 状态汇总
+1. `e2e-local`
+   - 固定串联 `preflight -> Phase2 -> Phase4 -> cycle -> promote-hw -> run-hw -> ingest-hw -> status`
+   - 默认写入隔离的 `artifacts/e2e-local/<run-id>/`
+   - 产出统一 `report.json`
+2. `cycle` 会串联：
+   - 离线生成
+   - 在线 campaign
+   - offspring 进化
+   - Vault 状态汇总
 
-它是对现有脚本的轻量编排，不替代底层脚本本身。
+因此，`e2e-local` 是“本机一键端到端”入口，`cycle` 和其他子命令保留给分阶段调试或批量运行。
 
 ### 3.5 外部依赖边界
 
@@ -309,6 +323,8 @@ sdc-fuzzing/
 ├── scripts/
 │   ├── build_gem5.sh
 │   ├── build_gem5_noninteractive.sh
+│   ├── build_mcpat.sh
+│   ├── build_qemu_headless.sh
 │   └── setup_environment.sh
 ├── dev/
 │   ├── debug/
@@ -341,13 +357,44 @@ sdc-fuzzing/
 
 ## 六、快速开始
 
-### 6.1 预检
+### 6.1 一键本机 E2E
+
+这是当前推荐入口。它会使用独立 `output-root` 和独立 SQLite，避免污染已有 `artifacts/sdc_vault.sqlite3`。
 
 ```bash
-python3 tools/sdc_preflight.py --verbose
+python3 tools/sdc_agent.py e2e-local \
+  --output-root artifacts/e2e-local/smoke
 ```
 
-### 6.2 批量生成候选
+如果缺少 repo 内二进制，可允许它自动补建 `qemu/gem5/mcpat`：
+
+```bash
+python3 tools/sdc_agent.py e2e-local \
+  --output-root artifacts/e2e-local/smoke \
+  --build-missing
+```
+
+执行成功后，统一报告位于：
+
+```text
+artifacts/e2e-local/<run-id>/report.json
+```
+
+### 6.2 预检
+
+```bash
+python3 -m sdc_agent.preflight --verbose
+```
+
+默认 preflight 会同时检查：
+
+- AArch64 交叉编译器
+- QEMU user-mode 与 system-mode 二进制
+- gem5 / McPAT
+- `meson` / `ninja`
+- `opendcdiag` 源树
+
+### 6.3 批量生成候选
 
 ```bash
 python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
@@ -358,13 +405,13 @@ python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
   --output-dir artifacts/generated
 ```
 
-### 6.3 查看 Vault 状态
+### 6.4 查看 Vault 状态
 
 ```bash
 python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3 --limit 5
 ```
 
-### 6.4 运行一次完整循环
+### 6.5 运行一次完整循环
 
 ```bash
 python3 tools/sdc_agent.py cycle \
@@ -376,7 +423,7 @@ python3 tools/sdc_agent.py cycle \
   --skip-preflight
 ```
 
-### 6.5 直接跑单个差分样本
+### 6.6 直接跑单个差分样本
 
 ```bash
 python3 tools/run_sdc_differential.py \
@@ -389,7 +436,7 @@ python3 tools/run_sdc_differential.py \
   --timeout 120
 ```
 
-### 6.6 只做进化回灌
+### 6.7 只做进化回灌
 
 ```bash
 python3 tools/sdc_agent.py evolve \
@@ -420,6 +467,18 @@ python3 tools/sdc_agent.py evolve \
 2. materialize / campaign / scheduler 的主流程仍然成立。
 3. 新增的 `SDCFuzzingGeneticDriver` 能把 offspring 重新注入 Vault。
 4. 新增的 `tools/sdc_agent.py` 可以编排主流程并汇总状态。
+
+### 7.1 本机 staging 与真机回灌的区别
+
+当前 README 中的“端到端”分成两种完成标准：
+
+1. 本机 staging 硬件 lane
+   - 使用 `e2e-local`
+   - 在本机 `opendcdiag` workspace 中完成 promotion、build、run、ingest
+   - 这是当前仓库内可重复执行的主验收口径
+2. 真实 ARM 机器回灌
+   - 需要额外的 ARM64 服务器、部署流程和运行权限
+   - 不属于本机一键 E2E 的默认范围
 
 注意：
 

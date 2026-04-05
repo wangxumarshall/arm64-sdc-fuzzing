@@ -21,18 +21,27 @@ def test_run_preflight_is_not_ready_when_required_binaries_are_missing(tmp_path)
     result = run_preflight(
         compiler="__missing_compiler__",
         qemu_binary="__missing_qemu__",
+        qemu_system_binary="__missing_system_qemu__",
         gem5_binary=tmp_path / "missing-gem5.opt",
         mcpat_binary=tmp_path / "missing-mcpat",
         gem5_config=tmp_path / "missing-config.py",
         vault_path=tmp_path / "artifacts" / "vault.sqlite3",
+        check_build_deps=False,
+        check_hardware_tools=True,
+        require_qemu_system=True,
     )
 
     assert result["ready"] is False
     failed_checks = {check["name"] for check in result["checks"] if not check["ok"]}
     assert {
-        "__missing_compiler__",
-        "__missing_qemu__",
+        "compiler",
+        "qemu_user_binary",
+        "qemu_system_binary",
         "gem5_binary",
         "mcpat_binary",
         "gem5_config",
     }.issubset(failed_checks)
+    assert "resolved_paths" in result
+    assert result["qemu_user_binary"] is None
+    assert result["qemu_system_binary"] is None
+    assert any(step["step_id"] == "build_qemu" for step in result["missing_steps"])

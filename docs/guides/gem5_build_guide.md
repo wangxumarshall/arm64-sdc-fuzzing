@@ -18,6 +18,21 @@
 - Python: 3.13.3
 - 编译器: Apple Clang 17.0.0
 
+推荐的本机端到端入口现在是：
+
+```bash
+python3 tools/sdc_agent.py e2e-local \
+    --output-root artifacts/e2e-local/smoke
+```
+
+如果 repo 内 `qemu/gem5/mcpat` 二进制尚未构建，可改用：
+
+```bash
+python3 tools/sdc_agent.py e2e-local \
+    --output-root artifacts/e2e-local/smoke \
+    --build-missing
+```
+
 ## 第一步：安装依赖
 
 ### 1.1 使用Homebrew安装系统依赖
@@ -143,6 +158,21 @@ aarch64-linux-gnu-gcc --version
 # 检查QEMU
 qemu-aarch64 --version
 ```
+
+### 3.4 构建 repo 内 QEMU / McPAT 二进制
+
+如果你希望 `preflight` 和 `e2e-local` 优先使用 monorepo 内构建产物，而不是 PATH 上的系统安装，请执行：
+
+```bash
+cd /Users/wangxu/1-project/sdc-fuzzing
+./scripts/build_qemu_headless.sh
+./scripts/build_mcpat.sh
+```
+
+其中：
+
+- `build_qemu_headless.sh` 会同时构建 `qemu/build/qemu-system-aarch64` 和 `qemu/build/qemu-aarch64`
+- `build_mcpat.sh` 会产出 `mcpat/mcpat`
 
 ## 第四步：生成测试用例
 
@@ -322,7 +352,7 @@ cat m5out-sdc/guest.stderr
 ### McPAT运行失败
 ```bash
 # 检查McPAT二进制
-file mcpat/mcpat/mcpat
+file mcpat/mcpat
 
 # 检查输入文件
 cat m5out-sdc/mcpat_input.xml
