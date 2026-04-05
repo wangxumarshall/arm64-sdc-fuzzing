@@ -14,6 +14,36 @@ The overall workflow is:
 2. Build or auto-synthesize `kunpeng920_calibration.json`
 3. Run `pypat` or `run_mcpat.sh` with the calibrated profile
 
+One-command end-to-end wrapper
+------------------------------
+
+Use the wrapper below to execute the whole flow end to end.
+
+Automatic calibration:
+
+```bash
+sudo mcpat/tools/run_kunpeng920_end_to_end.sh \
+  --target-dir /path/to/m5out \
+  --out-dir artifacts/kunpeng920-e2e \
+  --calibration-mode auto
+```
+
+Manual explicit calibration:
+
+```bash
+sudo mcpat/tools/run_kunpeng920_end_to_end.sh \
+  --target-dir /path/to/m5out \
+  --out-dir artifacts/kunpeng920-e2e \
+  --calibration-mode manual
+```
+
+The wrapper:
+
+1. runs batch collection via `collect_kunpeng920_matrix.sh`
+2. either builds `kunpeng920_calibration.json` explicitly or lets `pypat`
+   synthesize it automatically
+3. runs `python3 -m pypat ... --template-profile arm64-kunpeng920`
+
 One-shot batch collection
 -------------------------
 
@@ -161,6 +191,5 @@ How to use?
   2. The instantiation of it in "processor.h".
   
   3. The calculation for it in "processor.cc". It's at the beginning of `void Processor::compute(ParseXML *fresh_XML)`. 
-
 
 

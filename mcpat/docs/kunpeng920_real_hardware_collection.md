@@ -325,6 +325,8 @@ Use:
 
 - [collect_kunpeng920_counters.sh](/Users/wangxu/1-project/sdc-fuzzing/mcpat/tools/collect_kunpeng920_counters.sh)
 - [build_kunpeng920_calibration.py](/Users/wangxu/1-project/sdc-fuzzing/mcpat/tools/build_kunpeng920_calibration.py)
+- [collect_kunpeng920_matrix.sh](/Users/wangxu/1-project/sdc-fuzzing/mcpat/tools/collect_kunpeng920_matrix.sh)
+- [run_kunpeng920_end_to_end.sh](/Users/wangxu/1-project/sdc-fuzzing/mcpat/tools/run_kunpeng920_end_to_end.sh)
 
 Example:
 
@@ -371,6 +373,15 @@ Let `pypat` synthesize and apply the calibration on the fly:
 python3 -m pypat /path/to/m5out \
   --template-profile arm64-kunpeng920 \
   --calibration-dataset artifacts/kunpeng920-calibration-runs
+```
+
+For a single command that performs collection plus calibrated McPAT execution:
+
+```bash
+sudo mcpat/tools/run_kunpeng920_end_to_end.sh \
+  --target-dir /path/to/m5out \
+  --out-dir artifacts/kunpeng920-e2e \
+  --calibration-mode auto
 ```
 
 ## Minimum Deliverable For McPAT Calibration
