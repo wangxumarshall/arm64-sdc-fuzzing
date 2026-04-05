@@ -1,0 +1,6 @@
+# name	label	perf_events	command
+idle	idle	-	sleep 20
+hpre-rsa2048	hpre rsa2048	hisi_sccl0_hha0/rx_operations/,hisi_sccl0_ddrc0/flux_wr/	uadk_tool benchmark --alg rsa-2048 --mode sva --opt 4 --sync --seconds 20 --thread 1 --multi 1 --ctxnum 1
+sec-sm4	sec sm4-cbc	hisi_sccl0_hha0/rx_operations/,hisi_sccl0_ddrc0/flux_wr/,hns3_pmu_sicl_0/bandwidth/	uadk_tool benchmark --alg sm4-128-cbc --mode sva --opt 0 --sync --pktlen 8192 --seconds 20 --thread 1 --multi 1 --ctxnum 1
+zip-gzip	zip gzip compress	hisi_sccl0_hha0/rx_operations/,hisi_sccl0_ddrc0/flux_wr/	uadk_tool benchmark --alg gzip --mode sva --opt 0 --sync --pktlen 131072 --seconds 20 --thread 1 --multi 1 --ctxnum 1
+hccs-stream	hccs remote-numa stream	hisi_sccl0_hha0/rx_operations/,hisi_sccl0_hha1/tx_operations/,hisi_sccl0_l3c0/read_hit_cpipe/,hisi_sccl0_ddrc0/flux_rd/	numactl --cpunodebind=0 --membind=1 stream
