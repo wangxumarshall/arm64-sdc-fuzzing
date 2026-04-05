@@ -52,6 +52,19 @@ def main() -> None:
         default=None,
         help="Optional path to the mcpat executable. Defaults to ./mcpat in the repository root.",
     )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        help="Optional Kunpeng920 calibration JSON. When provided, runtime profile overrides are applied automatically.",
+    )
+    parser.add_argument(
+        "--calibration-dataset",
+        type=Path,
+        default=None,
+        help="Optional directory produced by collect_kunpeng920_counters.sh. "
+        "When provided, pypat synthesizes a calibration JSON before conversion.",
+    )
     args = parser.parse_args()
 
     run_pypat(
@@ -62,6 +75,8 @@ def main() -> None:
         print_level=args.print_level,
         opt_for_clk=args.opt_for_clk,
         mcpat_binary=args.mcpat_binary,
+        calibration_file=args.calibration_file,
+        calibration_dataset=args.calibration_dataset,
     )
 
 

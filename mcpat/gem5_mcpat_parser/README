@@ -7,6 +7,10 @@ Code modified from https://github.com/saideeptiku/Gem5McPatParser
    e.g. bash run_mcpat.sh 2 0 McPAT_out
    ARM64 / Kunpeng920-like profile:
    `MCPAT_TEMPLATE_PROFILE=arm64-kunpeng920 bash run_mcpat.sh 2 0 McPAT_out`
+   Method 1, manual explicit calibration:
+   `MCPAT_TEMPLATE_PROFILE=arm64-kunpeng920 MCPAT_KUNPENG920_CALIBRATION=/path/to/kunpeng920_calibration.json bash run_mcpat.sh 2 0 McPAT_out`
+   Method 2, automatic calibration:
+   `MCPAT_TEMPLATE_PROFILE=arm64-kunpeng920 MCPAT_KUNPENG920_CALIBRATION_DATASET=/path/to/kunpeng920-calibration-runs bash run_mcpat.sh 2 0 McPAT_out`
 4. The script auto-creates `McPAT_input/` and `results/` if they do not exist
 McPAT output will be stored in the `mcpat/results` folder
 
@@ -17,6 +21,10 @@ Notes:
   parameters for NoC, L3, memory, and I/O blocks.
 - The Kunpeng920 template also emits custom blocks for HCCS, HPRE, SEC, and
   ZIP so accelerator/coherency modeling can be calibrated explicitly.
+- `Gem5McPATParser_custom.py` exposes exactly two calibration modes:
+  `--calibration-file` and `--calibration-dataset`.
+- `run_mcpat.sh` forwards `MCPAT_KUNPENG920_CALIBRATION` and
+  `MCPAT_KUNPENG920_CALIBRATION_DATASET`.
 - Fatal McPAT log patterns are treated as conversion failures even when the
   legacy binary exits with status `0`.
 - Architectural support details and remaining approximations are documented in

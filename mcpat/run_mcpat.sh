@@ -8,6 +8,8 @@ mcpat_input_path="./McPAT_input/mcpat_in.xml"
 output_file="./results/${3:-McPAT_out}"
 template_path="${MCPAT_TEMPLATE:-}"
 template_profile="${MCPAT_TEMPLATE_PROFILE:-auto}"
+calibration_file="${MCPAT_KUNPENG920_CALIBRATION:-}"
+calibration_dataset="${MCPAT_KUNPENG920_CALIBRATION_DATASET:-}"
 
 mkdir -p "$(dirname "${mcpat_input_path}")" "$(dirname "${output_file}")"
 
@@ -21,6 +23,14 @@ if [[ -n "${template_path}" ]]; then
   parser_args+=(-t "${template_path}")
 else
   parser_args+=(--template-profile "${template_profile}")
+fi
+
+if [[ -n "${calibration_file}" ]]; then
+  parser_args+=(--calibration-file "${calibration_file}")
+fi
+
+if [[ -n "${calibration_dataset}" ]]; then
+  parser_args+=(--calibration-dataset "${calibration_dataset}")
 fi
 
 python3 "${parser_dir}/Gem5McPATParser_custom.py" "${parser_args[@]}"

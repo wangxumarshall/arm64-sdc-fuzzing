@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from .calibration import resolve_kunpeng920_calibration_file
 from .gem5_to_mcpat import run_conversion
 from pypat.parsers.mcpat_text import parse_mcpat_summary
 
@@ -105,6 +106,8 @@ def run(
     print_level: int = 1,
     opt_for_clk: int = 0,
     mcpat_binary: Optional[Path] = None,
+    calibration_file: Optional[Path] = None,
+    calibration_dataset: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if isinstance(target_dir, str):
         target_dir = Path(target_dir)
@@ -113,6 +116,12 @@ def run(
     repo_root = Path(__file__).resolve().parents[2]
     mcpat_input = outfile if outfile is not None else target_dir / "conv.xml"
     mcpat_binary = mcpat_binary if mcpat_binary is not None else repo_root / "mcpat"
+    calibration_file = resolve_kunpeng920_calibration_file(
+        target_dir=target_dir,
+        explicit_file=calibration_file,
+        explicit_dataset=calibration_dataset,
+        default_repo_file=repo_root / "gem5_mcpat_parser" / "kunpeng920_calibration.json",
+    )
 
     selected_profile = run_conversion(
         stats_file=dirs["stats_file"],
@@ -120,6 +129,7 @@ def run(
         outfile=mcpat_input,
         template=template,
         template_profile=template_profile,
+        calibration_file=calibration_file,
     )
 
     mcpat_output = run_mcpat(
@@ -140,5 +150,6 @@ def run(
         "stats_file": dirs["stats_file"],
         "config_file": dirs["config_file"],
         "template_profile": selected_profile,
+        "calibration_file": str(calibration_file) if calibration_file is not None else "",
         **power_summary,
     }

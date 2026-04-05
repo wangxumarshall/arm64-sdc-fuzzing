@@ -62,6 +62,8 @@ The tests verify:
   fallback/aggregated inference.
 - Kunpeng920 custom blocks are parsed generically, so additional named custom
   blocks can be appended after the fixed `flashc` section in the XML template.
+- `pypat` can now auto-apply Kunpeng920 calibration overrides from either an
+  existing `kunpeng920_calibration.json` or a raw collection dataset directory.
 - `pypat` treats common McPAT fatal log patterns as hard failures even when the
   legacy McPAT binary reports success via exit code `0`.
 - The C++ side now emits more specific hierarchy and topology mismatch messages

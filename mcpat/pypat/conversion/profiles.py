@@ -3,9 +3,10 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from .arm64_kunpeng920 import normalize_kunpeng920_config, normalize_kunpeng920_stats
+from .calibration import apply_kunpeng920_calibration, load_kunpeng920_calibration
 from .templates import canonical_template_profile_name
 
 
@@ -43,17 +44,25 @@ def infer_template_profile(config: Dict[str, Any]) -> str:
     return "x86"
 
 
-def load_profile(profile_name: str) -> Dict[str, Any]:
+def load_profile(
+    profile_name: str, calibration_file: Optional[Path] = None
+) -> Dict[str, Any]:
     canonical = canonical_template_profile_name(profile_name)
     if canonical == "x86":
         return {}
     path = _profile_path(profile_name)
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        profile = json.load(handle)
+    if canonical == "arm64-kunpeng920" and calibration_file is not None:
+        calibration_payload = load_kunpeng920_calibration(calibration_file)
+        profile = apply_kunpeng920_calibration(profile, calibration_payload)
+    return profile
 
 
 def normalize_gem5_config(
-    config: Dict[str, Any], template_profile: str = "auto"
+    config: Dict[str, Any],
+    template_profile: str = "auto",
+    calibration_file: Optional[Path] = None,
 ) -> Tuple[Dict[str, Any], str]:
     normalized: Dict[str, Any] = copy.deepcopy(config)
 
@@ -68,7 +77,7 @@ def normalize_gem5_config(
         else canonical_template_profile_name(template_profile)
     )
 
-    normalized["profile"] = load_profile(selected_profile)
+    normalized["profile"] = load_profile(selected_profile, calibration_file)
     if selected_profile == "arm64-kunpeng920":
         normalized = normalize_kunpeng920_config(normalized, normalized["profile"])
     normalized["selected_template_profile"] = selected_profile

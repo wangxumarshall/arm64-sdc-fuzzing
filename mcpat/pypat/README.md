@@ -36,6 +36,24 @@ python3 -m pypat /path/to/m5out \
   --outfile /path/to/m5out/conv.xml
 ```
 
+Kunpeng920 calibration has exactly two supported entry modes:
+
+1. Manual explicit calibration via `--calibration-file`
+
+```bash
+python3 -m pypat /path/to/m5out \
+  --template-profile arm64-kunpeng920 \
+  --calibration-file /path/to/kunpeng920_calibration.json
+```
+
+2. Automatic calibration via `--calibration-dataset`
+
+```bash
+python3 -m pypat /path/to/m5out \
+  --template-profile arm64-kunpeng920 \
+  --calibration-dataset /path/to/kunpeng920-calibration-runs
+```
+
 Dependencies:
 
 - Python 3
@@ -53,6 +71,9 @@ Kunpeng920 notes:
   the XML template so accelerator/coherency modeling is no longer invisible.
 - Derived McPAT counters are recorded with provenance in the normalized
   Kunpeng920 model so fallback/aggregated values are visible.
+- `--calibration-file` applies an existing Kunpeng920 override table.
+- `--calibration-dataset` synthesizes the override table from
+  `collect_kunpeng920_counters.sh` output and applies it automatically.
 - The wrapper now treats common fatal McPAT log lines as hard failures even if
   the legacy binary exits with status `0`.
 - Architectural support status and remaining approximations are documented in

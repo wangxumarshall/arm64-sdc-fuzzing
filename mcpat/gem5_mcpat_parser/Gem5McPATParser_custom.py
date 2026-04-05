@@ -55,6 +55,21 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Output path for the generated McPAT XML.",
     )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Optional Kunpeng920 calibration JSON used to override the default profile.",
+    )
+    parser.add_argument(
+        "--calibration-dataset",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Optional directory of real-hardware collection runs. "
+        "When set, a calibration JSON is synthesized before conversion.",
+    )
     return parser
 
 
@@ -63,15 +78,23 @@ def main() -> None:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
+    from pypat.conversion.calibration import resolve_kunpeng920_calibration_file
     from pypat.conversion.gem5_to_mcpat import run_conversion
 
     args = create_parser().parse_args()
+    calibration_file = resolve_kunpeng920_calibration_file(
+        target_dir=args.output.parent,
+        explicit_file=args.calibration_file,
+        explicit_dataset=args.calibration_dataset,
+        default_repo_file=repo_root / "gem5_mcpat_parser" / "kunpeng920_calibration.json",
+    )
     run_conversion(
         stats_file=args.stats,
         config_file=args.config,
         outfile=args.output,
         template=args.template,
         template_profile=args.template_profile,
+        calibration_file=calibration_file,
     )
 
 

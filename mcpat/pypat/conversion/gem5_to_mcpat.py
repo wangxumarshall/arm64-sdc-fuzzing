@@ -7,6 +7,7 @@ from typing import Dict, Optional
 
 import h5py
 
+from .calibration import resolve_kunpeng920_calibration_file
 from .profiles import normalize_gem5_config, normalize_gem5_stats
 from .templates import default_template_path
 
@@ -225,10 +226,15 @@ def run_conversion(
     outfile: Path,
     template: Optional[Path] = None,
     template_profile: str = "auto",
+    calibration_file: Optional[Path] = None,
 ) -> str:
     stats = read_stats_file(stats_file)
     raw_config = read_config_file(config_file)
-    config, selected_profile = normalize_gem5_config(raw_config, template_profile)
+    config, selected_profile = normalize_gem5_config(
+        raw_config,
+        template_profile,
+        calibration_file=calibration_file,
+    )
     stats = normalize_gem5_stats(stats, config, selected_profile)
     template_tree = load_template(template, selected_profile)
     dump_mcpat_out(stats, config, template_tree, outfile)
@@ -258,13 +264,32 @@ def main() -> None:
         default=Path("mcpat_input.xml"),
         help="Output McPAT XML file.",
     )
+    parser.add_argument(
+        "--calibration-file",
+        type=Path,
+        default=None,
+        help="Optional Kunpeng920 calibration JSON used to override the default profile.",
+    )
+    parser.add_argument(
+        "--calibration-dataset",
+        type=Path,
+        default=None,
+        help="Optional directory of real-hardware collection runs used to synthesize a calibration JSON.",
+    )
     args = parser.parse_args()
+    calibration_file = resolve_kunpeng920_calibration_file(
+        target_dir=args.outfile.parent,
+        explicit_file=args.calibration_file,
+        explicit_dataset=args.calibration_dataset,
+        default_repo_file=Path(__file__).resolve().parents[2] / "gem5_mcpat_parser" / "kunpeng920_calibration.json",
+    )
     run_conversion(
         stats_file=args.stats_file,
         config_file=args.config_file,
         outfile=args.outfile,
         template=args.template,
         template_profile=args.template_profile,
+        calibration_file=calibration_file,
     )
 
 
