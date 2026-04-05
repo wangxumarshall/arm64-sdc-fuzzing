@@ -7,6 +7,7 @@ from microprobe.utils.arm64_isa_catalog import (
     build_catalog,
     build_catalog_summary,
     iter_catalog_encodings,
+    render_sample_asm,
     save_catalog,
     validate_sequence_asm,
 )
@@ -140,6 +141,88 @@ def _write_cas_xml(path: Path) -> None:
     )
 
 
+def _write_add_immediate_xml(path: Path) -> None:
+    path.write_text(
+        """<?xml version="1.0"?>
+<instructionsection id="ADD_addsub_imm" title="ADD (immediate) -- A64" type="instruction">
+  <docvars>
+    <docvar key="instr-class" value="general"/>
+    <docvar key="isa" value="A64"/>
+    <docvar key="mnemonic" value="ADD"/>
+  </docvars>
+  <heading>ADD (immediate)</heading>
+  <desc><brief><para>Add immediate</para></brief></desc>
+  <alias_list howmany="0"/>
+  <classes>
+    <iclass name="General" oneof="1" id="iclass_general" no_encodings="1" isa="A64">
+      <encoding name="ADD_32_addsub_imm" oneofinclass="1" oneof="1" label="32-bit">
+        <docvars>
+          <docvar key="instr-class" value="general"/>
+          <docvar key="isa" value="A64"/>
+          <docvar key="mnemonic" value="ADD"/>
+        </docvars>
+        <asmtemplate>
+          <text>ADD </text>
+          <a hover="Is the 32-bit name of the destination general-purpose register or stack pointer, encoded in the &quot;Rd&quot; field." link="Wd|WSP">&lt;Wd|WSP&gt;</a>
+          <text>, </text>
+          <a hover="Is the 32-bit name of the source general-purpose register or stack pointer, encoded in the &quot;Rn&quot; field." link="Wn|WSP">&lt;Wn|WSP&gt;</a>
+          <text>, #</text>
+          <a hover="Is an unsigned immediate, in the range 0 to 4095, encoded in the &quot;imm12&quot; field." link="imm">&lt;imm&gt;</a>
+          <text>{, </text>
+          <a hover="Is the optional left shift to apply to the immediate, defaulting to LSL #0 and sh &lt;shift&gt; 0 LSL #0 1 LSL #12" link="shift">&lt;shift&gt;</a>
+          <text>}</text>
+        </asmtemplate>
+      </encoding>
+    </iclass>
+  </classes>
+</instructionsection>
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_add_extended_xml(path: Path) -> None:
+    path.write_text(
+        """<?xml version="1.0"?>
+<instructionsection id="ADD_addsub_ext" title="ADD (extended register) -- A64" type="instruction">
+  <docvars>
+    <docvar key="instr-class" value="general"/>
+    <docvar key="isa" value="A64"/>
+    <docvar key="mnemonic" value="ADD"/>
+  </docvars>
+  <heading>ADD (extended register)</heading>
+  <desc><brief><para>Add extended register</para></brief></desc>
+  <alias_list howmany="0"/>
+  <classes>
+    <iclass name="General" oneof="1" id="iclass_general" no_encodings="1" isa="A64">
+      <encoding name="ADD_32_addsub_ext" oneofinclass="1" oneof="1" label="32-bit">
+        <docvars>
+          <docvar key="instr-class" value="general"/>
+          <docvar key="isa" value="A64"/>
+          <docvar key="mnemonic" value="ADD"/>
+        </docvars>
+        <asmtemplate>
+          <text>ADD </text>
+          <a hover="Is the 32-bit name of the destination general-purpose register or stack pointer, encoded in the &quot;Rd&quot; field." link="Wd|WSP">&lt;Wd|WSP&gt;</a>
+          <text>, </text>
+          <a hover="Is the 32-bit name of the first source general-purpose register or stack pointer, encoded in the &quot;Rn&quot; field." link="Wn|WSP">&lt;Wn|WSP&gt;</a>
+          <text>, </text>
+          <a hover="Is the 32-bit name of the second general-purpose source register, encoded in the &quot;Rm&quot; field." link="Wm">&lt;Wm&gt;</a>
+          <text>{, </text>
+          <a hover="For the &quot;32-bit&quot; variant: is the extension to be applied to the second source operand. In all other cases &lt;extend&gt; is required and must be UXTW when &quot;option&quot; is '010'." link="extend">&lt;extend&gt;</a>
+          <text> {#</text>
+          <a hover="Is the left shift amount to be applied after extension in the range 0 to 4, defaulting to 0, encoded in the &quot;imm3&quot; field." link="amount">&lt;amount&gt;</a>
+          <text>}}</text>
+        </asmtemplate>
+      </encoding>
+    </iclass>
+  </classes>
+</instructionsection>
+""",
+        encoding="utf-8",
+    )
+
+
 def test_build_catalog_parses_xml_docs_and_execution_metadata(tmp_path):
     xml_dir = tmp_path / "xml"
     docs_dir = tmp_path / "docs"
@@ -224,3 +307,58 @@ def test_build_catalog_uses_encoding_level_mnemonics_when_page_root_lacks_one(tm
     instruction = catalog["instructions"][0]
     assert instruction["mnemonics"] == ["CAS", "CASA"]
     assert instruction["doc_path"].endswith("Atomic-CAS_CASA_CASAL_CASL.md")
+
+
+def test_render_sample_asm_respects_base_shift_and_extend_constraints(tmp_path):
+    xml_dir = tmp_path / "xml"
+    docs_dir = tmp_path / "docs"
+    xml_dir.mkdir()
+    docs_dir.mkdir()
+
+    _write_add_immediate_xml(xml_dir / "add_imm.xml")
+    _write_add_extended_xml(xml_dir / "add_ext.xml")
+    (docs_dir / "Arithmetic-ADD_immediate.md").write_text(
+        "# ADD (immediate)\n", encoding="utf-8"
+    )
+    (docs_dir / "Arithmetic-ADD_extended_register.md").write_text(
+        "# ADD (extended register)\n", encoding="utf-8"
+    )
+
+    catalog = build_catalog(xml_dir, docs_dir=docs_dir, classes=("general",))
+    encodings = {
+        encoding["name"]: encoding
+        for instruction in catalog["instructions"]
+        for encoding in instruction["encodings"]
+    }
+
+    add_imm = render_sample_asm(encodings["ADD_32_addsub_imm"])
+    add_ext = render_sample_asm(encodings["ADD_32_addsub_ext"])
+
+    assert add_imm == "ADD w0, w1, #0, lsl #0"
+    assert add_ext == "ADD w0, w1, w2, uxtw #0"
+
+    imm_validation = validate_sequence_asm([encodings["ADD_32_addsub_imm"]])
+    ext_validation = validate_sequence_asm([encodings["ADD_32_addsub_ext"]])
+    assert imm_validation["ok"] is True
+    assert ext_validation["ok"] is True
+
+
+def test_validate_sequence_asm_enables_required_arch_extensions():
+    validation = validate_sequence_asm(
+        [
+            {
+                "sample_asm": "ABS w0, w1",
+                "feature_tags": ["FEAT_CSSC"],
+            },
+            {
+                "sample_asm": "ADDG x0, x1, #0, #0",
+                "feature_tags": ["FEAT_MTE"],
+            },
+        ]
+    )
+
+    assert validation["ok"] is True
+    assert "cssc" in validation["arch_extensions"]
+    assert "memtag" in validation["arch_extensions"]
+    assert ".arch_extension cssc" in validation["asm_text"]
+    assert ".arch_extension memtag" in validation["asm_text"]

@@ -108,6 +108,36 @@ _CATEGORY_TO_CLASS = {
     "System": "system",
     "Barrier-Hint": "system",
 }
+_FEATURE_TOKEN_RE = re.compile(r"FEAT_[A-Za-z0-9_]+")
+_FEATURE_EXTENSION_MAP = {
+    "FEAT_AES": ("aes",),
+    "FEAT_BF16": ("bf16",),
+    "FEAT_CRC32": ("crc",),
+    "FEAT_CSSC": ("cssc",),
+    "FEAT_DotProd": ("dotprod",),
+    "FEAT_FHM": ("fhm",),
+    "FEAT_FP16": ("fp16",),
+    "FEAT_FlagM": ("flagm",),
+    "FEAT_FlagM2": ("flagm",),
+    "FEAT_I8MM": ("i8mm",),
+    "FEAT_LRCPC": ("rcpc",),
+    "FEAT_LRCPC2": ("rcpc",),
+    "FEAT_LRCPC3": ("rcpc3",),
+    "FEAT_LSE": ("lse",),
+    "FEAT_LSE128": ("lse",),
+    "FEAT_MOPS": ("mops",),
+    "FEAT_MTE": ("memtag",),
+    "FEAT_MTE2": ("memtag",),
+    "FEAT_PAuth": ("pauth",),
+    "FEAT_PAuth_LR": ("pauth",),
+    "FEAT_RDM": ("rdm",),
+    "FEAT_SHA1": ("sha2",),
+    "FEAT_SHA256": ("sha2",),
+    "FEAT_SHA3": ("sha3",),
+    "FEAT_SHA512": ("sha3",),
+    "FEAT_SM4": ("sm4",),
+}
+_BASE_FEATURE_TOKENS = {"FEAT_AdvSIMD", "FEAT_FP"}
 
 
 def _normalize_space(text: str) -> str:
@@ -401,6 +431,46 @@ def _extract_multiple(text: str) -> int:
     return max(int(match.group(1)), 1)
 
 
+def _gpr_from_hover(token: str, hover_text: str, operand_index: int) -> Optional[str]:
+    if "general-purpose" not in hover_text and "stack pointer" not in hover_text:
+        return None
+
+    token_upper = token.upper()
+    if any(marker in token_upper for marker in ("W", "WSP")):
+        return _register_value("w", min(operand_index, 5))
+    if any(marker in token_upper for marker in ("X", "SP")):
+        return _register_value("x", min(operand_index, 5))
+    return None
+
+
+def _shift_value(hover_text: str) -> str:
+    if "lsl #12" in hover_text:
+        return "lsl #0"
+    return "lsl"
+
+
+def _extend_value(hover_text: str) -> str:
+    if "must be uxtw" in hover_text or '32-bit' in hover_text:
+        return "uxtw"
+    if "must be uxtx" in hover_text or '64-bit' in hover_text:
+        return "uxtx"
+    if "sxtw" in hover_text:
+        return "sxtw"
+    return "uxtx"
+
+
+def _feature_arch_extensions(feature_tags: Sequence[str]) -> List[str]:
+    extensions: List[str] = []
+    for tag in feature_tags:
+        for token in _FEATURE_TOKEN_RE.findall(str(tag)):
+            if token in _BASE_FEATURE_TOKENS:
+                continue
+            for extension in _FEATURE_EXTENSION_MAP.get(token, ()):
+                if extension not in extensions:
+                    extensions.append(extension)
+    return extensions
+
+
 def _render_symbol_value(
     symbol: str,
     hover: str,
@@ -432,10 +502,10 @@ def _render_symbol_value(
         return "4s"
 
     if "shift type" in hover_text or lower_token == "shift":
-        return "lsl"
+        return _shift_value(hover_text)
 
     if "extend option" in hover_text or lower_token == "extend":
-        return "uxtx"
+        return _extend_value(hover_text)
 
     if lower_token in {"prfop", "prfop1"} or "prefetch operation" in hover_text:
         return "pldl1keep"
@@ -448,6 +518,16 @@ def _render_symbol_value(
 
     if "name 'cm'" in hover_text or lower_token == "cm":
         return "c0"
+
+    gpr = _gpr_from_hover(token, hover_text, operand_index)
+    if gpr is not None:
+        return gpr
+
+    if lower_token == "r":
+        return "x"
+
+    if lower_token == "m":
+        return "2"
 
     if lower_token in {"op0", "op1", "op2", "imm", "amount", "lsb", "width", "index"}:
         if lower_token == "op0":
@@ -470,7 +550,7 @@ def _render_symbol_value(
         return str(candidate)
 
     if "stack pointer" in hover_text or "base register or stack pointer" in hover_text:
-        return "sp"
+        return _register_value("x", min(operand_index, 5))
 
     if any(name in upper for name in ["XD", "XN", "XM", "XA", "XT", "XR", "XS"]):
         return _register_value("x", min(operand_index, 5))
@@ -549,7 +629,17 @@ def render_sample_asm(
 
 
 def _sequence_body(encodings: Sequence[Mapping[str, Any]], label_name: str) -> str:
-    lines: List[str] = [".arch armv8-a", ".text"]
+    lines: List[str] = [".arch armv8-a"]
+    extensions = _feature_arch_extensions(
+        [
+            feature
+            for encoding in encodings
+            for feature in encoding.get("feature_tags", [])
+        ]
+    )
+    for extension in extensions:
+        lines.append(f".arch_extension {extension}")
+    lines.append(".text")
     needs_label = False
 
     for encoding in encodings:
@@ -595,6 +685,13 @@ def validate_sequence_asm(
         "stderr": result.stderr,
         "command": cmd,
         "asm_text": asm_text,
+        "arch_extensions": _feature_arch_extensions(
+            [
+                feature
+                for encoding in encodings
+                for feature in encoding.get("feature_tags", [])
+            ]
+        ),
     }
 
 
@@ -618,6 +715,7 @@ def _encoding_payload(
         "mnemonic": mnemonic,
         "instr_class": instr_class,
         "feature_tags": _extract_features(root, encoding),
+        "arch_extensions": _feature_arch_extensions(_extract_features(root, encoding)),
         "kunpeng_hotness": _kunpeng_score(mnemonic, instr_class),
     }
     entry.update(payload)

@@ -79,3 +79,21 @@ def test_sdc_genetic_driver_uses_profile_aware_instruction_fallback(monkeypatch)
 
     assert names == ["HW_AGGRESSIVE_OP"]
     assert observed == [("arm64-target", "HW_AGGRESSIVE")]
+
+
+def test_sdc_genetic_driver_cycles_padding_across_filtered_instruction_set(monkeypatch):
+    driver = SDCFuzzingGeneticDriver(config=EvolutionConfig(sequence_length=4))
+
+    monkeypatch.setattr(
+        driver,
+        "_fallback_instruction_names",
+        lambda target_name, *, profile_name="SIM_SAFE": ["OP_A", "OP_B"],
+    )
+
+    filtered = driver._filter_instruction_names_for_profile(
+        ["OP_A", "OP_B"],
+        target_name="arm64-target",
+        profile_name="SIM_SAFE",
+    )
+
+    assert filtered == ["OP_A", "OP_B", "OP_A", "OP_B"]

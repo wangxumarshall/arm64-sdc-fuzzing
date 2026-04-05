@@ -507,8 +507,11 @@ class SDCFuzzingGeneticDriver(object):
         if not filtered:
             return []
 
+        source_cycle = list(filtered)
+        pad_index = 0
         while len(filtered) < self.config.sequence_length:
-            filtered.append(filtered[len(filtered) % len(filtered)])
+            filtered.append(source_cycle[pad_index % len(source_cycle)])
+            pad_index += 1
 
         return filtered[: self.config.sequence_length]
 
