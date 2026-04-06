@@ -45,7 +45,7 @@
 
 1. 根目录文档与 `docs/` 文档曾长期重复。
 2. 当前 root `plan.md`、`findings.md`、`progress.md` 已成为权威文档。
-3. `docs/spec.md`、`docs/plan.md`、`docs/state.md` 现在仅保留兼容入口。
+3. `docs/spec.md`、`docs/state.md` 现在仅保留兼容入口，旧 `docs/plan.md` 已删除。
 
 ### 3.2 Control Plane And Tooling
 

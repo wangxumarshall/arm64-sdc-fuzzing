@@ -11,7 +11,7 @@
 - `progress.md`
   描述实施日志、验证结果与本轮变更产出。
 
-`docs/spec.md`、`docs/plan.md`、`docs/state.md` 只保留兼容入口，不再承载规范正文。
+`docs/spec.md`、`docs/state.md` 只保留兼容入口，不再承载规范正文；旧 `docs/plan.md` 已移除。
 
 ## 2. Objective
 
@@ -299,5 +299,5 @@ macOS 或其他开发主机只承诺 `dev` lane smoke，不承诺完整 sim 闭�
 
 1. 默认解释器为当前 shell 的 `python3`，不再依赖用户私有 Conda 路径。
 2. 根目录 `requirements.txt` / `requirements-dev.txt` 是控制面的 Python 依赖清单。
-3. `docs/spec.md`、`docs/plan.md`、`docs/state.md` 仅为兼容入口。
+3. `docs/spec.md`、`docs/state.md` 仅为兼容入口；旧 `docs/plan.md` 已删除。
 4. 专题文档如 [docs/monorepo.md](./docs/monorepo.md) 与 [docs/kunpeng920.md](./docs/kunpeng920.md) 继续保留在 `docs/`。

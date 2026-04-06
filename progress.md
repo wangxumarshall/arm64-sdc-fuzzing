@@ -11,6 +11,12 @@
 - `docs/spec.md`、`docs/plan.md`、`docs/state.md` 已改为兼容入口。
 - README 与构建指南已改为引用根级文档。
 
+### Documentation Cleanup
+
+- 删除根级 `task_plan.md` 兼容别名。
+- 删除 `docs/plan.md` 兼容 stub。
+- 当前仅保留根级 `plan.md`、`findings.md`、`progress.md` 作为权威文档；`docs/spec.md` 与 `docs/state.md` 继续作为兼容入口。
+
 ### Control Plane Fixes
 
 - 将 `sdc_agent/agent.py` 改为 lazy import：
