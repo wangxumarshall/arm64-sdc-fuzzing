@@ -12,7 +12,7 @@
 
 ## 1. Current Phase
 
-日期：`2026-04-04`
+日期：`2026-04-06`
 
 当前主阶段：
 
@@ -34,6 +34,8 @@
 8. `Phase 5` 当前已从两类 scripted fault model 扩到第三类：`memory_bit_flip`。
 9. `Phase 6` 当前已从“回写原始 hardware payload”推进到“规范化 detectors / detector summary / machine-build-runtime metadata”。
 10. `Phase 7` 当前已把 template/PCFG generation 和 heuristic mutation advisor 真正挂进主控制平面路径。
+11. 真实仿真执行面现已明确迁移到 `Ubuntu 24.04 aarch64`，macOS 只保留 `dev` 控制面 smoke。
+12. `tools/sdc_agent.py` 现已拆分出 `e2e-dev` / `e2e-sim` / `e2e-hw`，`e2e-local` 仅作为 `e2e-dev` 兼容别名保留。
 
 当前阶段的核心目标：
 
@@ -86,6 +88,8 @@
 29. gem5 Python 层 `physProxy.read/write` 足以支撑第一版真实 `memory_bit_flip`，不必等待更深的 C++ memory injector hook。
 30. hardware result ingest 现在不仅保存原始 payload，还会提炼 stage detector 状态和可查询的 detector summary。
 31. Phase 7 的智能生成现在不再只停留在文档里；`generate_batch()`、scheduler mutation plan、以及 `tools/sdc_agent.py generate/cycle` 已能消费 template / pcfg / mutation advice。
+32. 工具解析现在已去掉用户私有路径假设，并支持 `SDC_COMPILER` / `SDC_QEMU_USER_BINARY` / `SDC_QEMU_SYSTEM_BINARY` / `SDC_GEM5_BINARY` / `SDC_MCPAT_BINARY` / `SDC_OPENDCDIAG_ROOT`。
+33. `preflight` 现已按 `dev / sim / hw` profile 报告 host 兼容性和运行能力，不再把 mock 控制面测试误报成真实 E2E 就绪。
 
 ---
 

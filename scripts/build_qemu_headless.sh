@@ -4,8 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 QEMU_DIR="$REPO_ROOT/qemu"
-PYTHON_BIN="${PYTHON_BIN:-/Users/wangxu/anaconda3/bin/python3}"
-COMMON_PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/wangxu/anaconda3/bin"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
+NUM_JOBS="${NUM_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)}"
+COMMON_PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+
+if [ -z "$PYTHON_BIN" ]; then
+    echo "ERROR: python3 is required to configure QEMU."
+    exit 1
+fi
 
 cd "$QEMU_DIR"
 
@@ -47,9 +53,34 @@ env \
     NM=nm \
     RANLIB=ranlib \
     PATH="$COMMON_PATH" \
-    make -C build -j8
+    make -C build -j"$NUM_JOBS"
+
+TARGET_DIRS="$(grep '^TARGET_DIRS=' build/config-host.mak 2>/dev/null | cut -d= -f2- || true)"
+USER_BINARY="$QEMU_DIR/build/qemu-aarch64"
+SYSTEM_BINARY="$QEMU_DIR/build/qemu-system-aarch64"
+SYSTEM_BINARY_UNSIGNED="$QEMU_DIR/build/qemu-system-aarch64-unsigned"
+
+if [ -z "$TARGET_DIRS" ] || [[ "$TARGET_DIRS" != *"aarch64-linux-user"* ]]; then
+    echo "ERROR: QEMU was not configured with the aarch64-linux-user target."
+    echo "TARGET_DIRS=$TARGET_DIRS"
+    exit 1
+fi
+
+if [ ! -x "$USER_BINARY" ]; then
+    echo "ERROR: Expected user-mode binary at $USER_BINARY"
+    exit 1
+fi
+
+if [ ! -x "$SYSTEM_BINARY" ] && [ ! -x "$SYSTEM_BINARY_UNSIGNED" ]; then
+    echo "ERROR: Expected system-mode binary at $SYSTEM_BINARY or $SYSTEM_BINARY_UNSIGNED"
+    exit 1
+fi
 
 echo ""
 echo "Build complete."
-echo "Expected binary: $QEMU_DIR/build/qemu-system-aarch64"
-echo "Expected binary: $QEMU_DIR/build/qemu-aarch64"
+echo "User binary: $USER_BINARY"
+if [ -x "$SYSTEM_BINARY" ]; then
+    echo "System binary: $SYSTEM_BINARY"
+else
+    echo "System binary: $SYSTEM_BINARY_UNSIGNED"
+fi

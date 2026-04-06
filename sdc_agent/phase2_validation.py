@@ -24,7 +24,6 @@ from .tooling import (
     DEFAULT_GEM5_BAREMETAL_CONFIG,
     DEFAULT_GEM5_BINARY,
     DEFAULT_MCPAT_BINARY,
-    DEFAULT_QEMU_SYSTEM_BINARY,
     resolve_local_tools,
 )
 from .vault import SDCVault
@@ -522,7 +521,7 @@ def run_phase2_validation(
     instruction_names: Optional[list[str]] = None,
     candidate_kind: str = "baseline",
     compiler: Optional[str] = None,
-    qemu_binary: Path = DEFAULT_QEMU_SYSTEM_BINARY,
+    qemu_binary: str | Path = "qemu-system-aarch64",
     gem5_binary: Path = DEFAULT_GEM5_BINARY,
     gem5_config: Path = DEFAULT_GEM5_BAREMETAL_CONFIG,
     mcpat_binary: Path = DEFAULT_MCPAT_BINARY,
@@ -698,7 +697,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional instruction names for deterministic validation generation. Repeat as needed.",
     )
     parser.add_argument("--compiler", default=None)
-    parser.add_argument("--qemu-binary", type=Path, default=DEFAULT_QEMU_SYSTEM_BINARY)
+    parser.add_argument("--qemu-binary", default="qemu-system-aarch64")
     parser.add_argument("--gem5-binary", type=Path, default=DEFAULT_GEM5_BINARY)
     parser.add_argument("--gem5-config", type=Path, default=DEFAULT_GEM5_BAREMETAL_CONFIG)
     parser.add_argument("--mcpat-binary", type=Path, default=DEFAULT_MCPAT_BINARY)

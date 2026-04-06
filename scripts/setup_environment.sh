@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "=========================================="
 echo "ARM64 SDC Fuzzing Environment Setup"
@@ -7,10 +7,18 @@ echo "=========================================="
 echo ""
 
 PLATFORM=$(uname -s)
+MACHINE=$(uname -m)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ "$PLATFORM" = "Linux" ] && { [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; }; then
+    echo "Detected Linux ARM host. Delegating to bootstrap_ubuntu_24_04_arm.sh..."
+    exec "$SCRIPT_DIR/bootstrap_ubuntu_24_04_arm.sh"
+fi
+
 if [ "$PLATFORM" != "Darwin" ]; then
-    echo "This script is designed for macOS. For Linux, use apt-get or yum."
-    echo "Example for Ubuntu/Debian:"
-    echo "  sudo apt-get install scons swig protobuf-compiler qemu-user gcc-aarch64-linux-gnu"
+    echo "This helper only supports macOS developer setup or Ubuntu 24.04 ARM bootstrap."
+    echo "For Ubuntu 24.04 ARM, run:"
+    echo "  ./scripts/bootstrap_ubuntu_24_04_arm.sh"
     exit 1
 fi
 

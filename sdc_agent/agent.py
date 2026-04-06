@@ -29,14 +29,20 @@ from .campaign import execute_campaign
 from .hardware_lane import run_hardware_promotion
 from .hardware_results import execute_hardware_promotions, ingest_hardware_result
 from .managed_domains import collect_domain_statuses, diff_for_domain, summarize_managed_domains
+from .materialize import materialize_testcase
 from .phase2_validation import run_phase2_validation
 from .phase4_validation import run_phase4_validation
-from .preflight import DEFAULT_GEM5_BINARY, DEFAULT_MCPAT_BINARY, run_preflight
+from .preflight import (
+    DEFAULT_GEM5_BINARY,
+    DEFAULT_MCPAT_BINARY,
+    PROFILE_DEV,
+    PROFILE_HW,
+    PROFILE_SIM,
+    run_preflight,
+    summarize_runtime_capabilities,
+)
 from .scheduler import FeedbackScheduler
 from .tooling import (
-    DEFAULT_QEMU_SYSTEM_BINARY,
-    DEFAULT_QEMU_USER_BINARY,
-    DEFAULT_GEM5_BAREMETAL_CONFIG,
     resolve_local_tools,
 )
 from .vault import SDCVault
@@ -45,6 +51,9 @@ from .vault import SDCVault
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = REPO_ROOT / "artifacts" / "sdc_vault.sqlite3"
 DEFAULT_AGENT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "sdc-agent"
+DEFAULT_E2E_DEV_ROOT = REPO_ROOT / "artifacts" / "e2e-dev"
+DEFAULT_E2E_SIM_ROOT = REPO_ROOT / "artifacts" / "e2e-sim"
+DEFAULT_E2E_HW_ROOT = REPO_ROOT / "artifacts" / "e2e-hw"
 DEFAULT_E2E_LOCAL_ROOT = REPO_ROOT / "artifacts" / "e2e-local"
 
 
@@ -95,6 +104,7 @@ def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
         "top_candidates": top_candidates,
         "top_promotion_candidates": top_promotion_candidates,
         "managed_domains_summary": summarize_managed_domains(REPO_ROOT),
+        "runtime_capabilities": summarize_runtime_capabilities(),
     }
 
 
@@ -296,70 +306,157 @@ def _run_build_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return results
 
 
-def _default_e2e_output_root(output_root: Optional[Path]) -> Path:
+def _default_e2e_output_root(output_root: Optional[Path], *, root: Path) -> Path:
     if output_root is not None:
         return output_root.resolve()
     run_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    return (DEFAULT_E2E_LOCAL_ROOT / run_id).resolve()
+    return (root / run_id).resolve()
 
 
-def run_e2e_local(
+def _prepare_e2e_paths(
     *,
-    output_root: Optional[Path] = None,
-    db_path: Optional[Path] = None,
-    build_missing: bool = False,
-    timeout: int = 30,
-) -> Dict[str, Any]:
-    output_root = _default_e2e_output_root(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    db_path = db_path.resolve() if db_path is not None else (output_root / "vault.sqlite3")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    output_root: Optional[Path],
+    db_path: Optional[Path],
+    default_root: Path,
+) -> tuple[Path, Path]:
+    resolved_output_root = _default_e2e_output_root(output_root, root=default_root)
+    resolved_output_root.mkdir(parents=True, exist_ok=True)
+    resolved_db_path = db_path.resolve() if db_path is not None else (resolved_output_root / "vault.sqlite3")
+    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
+    return resolved_output_root, resolved_db_path
 
+
+def _run_profile_preflight(
+    *,
+    profile: str,
+    db_path: Path,
+    build_missing: bool,
+    error_mode: str,
+    error_message: str,
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     preflight = run_preflight(
-        compiler=None,
-        qemu_user_binary=DEFAULT_QEMU_USER_BINARY,
-        qemu_system_binary=DEFAULT_QEMU_SYSTEM_BINARY,
-        gem5_binary=DEFAULT_GEM5_BINARY,
-        mcpat_binary=DEFAULT_MCPAT_BINARY,
-        gem5_config=DEFAULT_GEM5_BAREMETAL_CONFIG,
+        profile=profile,
         vault_path=db_path,
-        check_build_deps=False,
-        check_hardware_tools=True,
-        require_qemu_user=True,
-        require_qemu_system=True,
-        require_mcpat=True,
     )
 
     build_results: List[Dict[str, Any]] = []
     if not preflight["ready"] and build_missing:
         build_results = _run_build_steps(list(preflight["missing_steps"]))
         preflight = run_preflight(
-            compiler=None,
-            qemu_user_binary=DEFAULT_QEMU_USER_BINARY,
-            qemu_system_binary=DEFAULT_QEMU_SYSTEM_BINARY,
-            gem5_binary=DEFAULT_GEM5_BINARY,
-            mcpat_binary=DEFAULT_MCPAT_BINARY,
-            gem5_config=DEFAULT_GEM5_BAREMETAL_CONFIG,
+            profile=profile,
             vault_path=db_path,
-            check_build_deps=False,
-            check_hardware_tools=True,
-            require_qemu_user=True,
-            require_qemu_system=True,
-            require_mcpat=True,
         )
 
     if not preflight["ready"]:
         raise AgentCommandError(
-            "Local E2E preflight failed. Resolve the reported missing_steps or rerun with --build-missing.",
+            error_message,
             payload={
                 "ok": False,
-                "mode": "e2e-local",
-                "output_root": str(output_root),
+                "mode": error_mode,
                 "db": str(db_path),
-                "error": "Local E2E preflight failed.",
+                "error": error_message,
                 "preflight": preflight,
             },
         )
+
+    return preflight, build_results
+
+
+def _write_report(output_root: Path, report: Dict[str, Any]) -> Dict[str, Any]:
+    report_path = output_root / "report.json"
+    report["report_json"] = str(report_path)
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return report
+
+
+def run_e2e_dev(
+    *,
+    output_root: Optional[Path] = None,
+    db_path: Optional[Path] = None,
+    build_missing: bool = False,
+    timeout: int = 30,
+    invoked_as: str = "e2e-dev",
+) -> Dict[str, Any]:
+    del timeout
+    default_root = DEFAULT_E2E_LOCAL_ROOT if invoked_as == "e2e-local" else DEFAULT_E2E_DEV_ROOT
+    output_root, db_path = _prepare_e2e_paths(
+        output_root=output_root,
+        db_path=db_path,
+        default_root=default_root,
+    )
+    preflight, build_results = _run_profile_preflight(
+        profile=PROFILE_DEV,
+        db_path=db_path,
+        build_missing=build_missing,
+        error_mode=invoked_as,
+        error_message="Developer E2E preflight failed.",
+    )
+
+    generation_payload = generate_batch(
+        db_path=db_path,
+        target=DEFAULT_TARGET,
+        policy=DEFAULT_POLICY,
+        profile_name=PROFILE_SIM_SAFE,
+        generation_strategy=GENERATION_STRATEGY_BASELINE,
+        template_name=None,
+        wrapper=DEFAULT_WRAPPER,
+        count=1,
+        jobs=1,
+        sequence_length=4,
+        benchmark_size=32,
+        dependency_distance=1,
+        strict_validation=False,
+        output_dir=output_root / "generated",
+    )
+
+    materialized_source: Optional[Path] = None
+    testcase_keys = list(generation_payload.get("testcase_keys") or [])
+    if testcase_keys:
+        with SDCVault(db_path) as vault:
+            materialized_source = materialize_testcase(
+                vault,
+                testcase_keys[0],
+                output_root=output_root / "materialized",
+            )
+
+    report = {
+        "ok": True,
+        "mode": "e2e-dev",
+        "invoked_as": invoked_as,
+        "output_root": str(output_root),
+        "db": str(db_path),
+        "resolved_paths": dict(preflight["resolved_paths"]),
+        "preflight": preflight,
+        "build": {
+            "requested": build_missing,
+            "results": build_results,
+        },
+        "generate": generation_payload,
+        "materialized_source": str(materialized_source) if materialized_source is not None else None,
+        "summary": summarize_vault(db_path),
+    }
+    return _write_report(output_root, report)
+
+
+def run_e2e_sim(
+    *,
+    output_root: Optional[Path] = None,
+    db_path: Optional[Path] = None,
+    build_missing: bool = False,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    output_root, db_path = _prepare_e2e_paths(
+        output_root=output_root,
+        db_path=db_path,
+        default_root=DEFAULT_E2E_SIM_ROOT,
+    )
+    preflight, build_results = _run_profile_preflight(
+        profile=PROFILE_SIM,
+        db_path=db_path,
+        build_missing=build_missing,
+        error_mode="e2e-sim",
+        error_message="Simulation E2E preflight failed.",
+    )
 
     resolved_paths = dict(preflight["resolved_paths"])
     compiler = str(resolved_paths["compiler"])
@@ -376,7 +473,7 @@ def run_e2e_local(
         profile_name=PROFILE_SIM_SAFE,
         candidate_kind="baseline",
         compiler=compiler,
-        qemu_binary=Path(qemu_system_binary),
+        qemu_binary=qemu_system_binary,
         gem5_binary=Path(gem5_binary),
         gem5_config=gem5_config,
         mcpat_binary=mcpat_binary,
@@ -387,7 +484,7 @@ def run_e2e_local(
         output_root=output_root / "phase4",
         profile_name=PROFILE_SIM_SAFE,
         compiler=compiler,
-        qemu_binary=Path(qemu_system_binary),
+        qemu_binary=qemu_system_binary,
         gem5_binary=Path(gem5_binary),
         gem5_config=gem5_config,
         mcpat_binary=mcpat_binary,
@@ -430,6 +527,55 @@ def run_e2e_local(
         skip_preflight=False,
         timeout=timeout,
     )
+    if phase2_payload.get("status") != "INNER_READY":
+        raise RuntimeError("Phase 2 simulation validation did not reach INNER_READY.")
+    if phase4_payload.get("summary_status") not in {"MATCHED", "SDC_FOUND"}:
+        raise RuntimeError("Phase 4 simulation validation did not produce a valid summary status.")
+    if int(cycle_payload.get("generate", {}).get("inserted", 0)) <= 0:
+        raise RuntimeError("Cycle generation produced no inserted testcases.")
+    if int(cycle_payload.get("campaign", {}).get("counts", {}).get("executed", 0)) <= 0:
+        raise RuntimeError("Cycle campaign executed zero runs.")
+    if int(cycle_payload.get("evolve", {}).get("emitted", 0)) <= 0:
+        raise RuntimeError("Cycle evolution emitted zero offspring.")
+
+    report = {
+        "ok": True,
+        "mode": "e2e-sim",
+        "output_root": str(output_root),
+        "db": str(db_path),
+        "resolved_paths": resolved_paths,
+        "preflight": preflight,
+        "build": {
+            "requested": build_missing,
+            "results": build_results,
+        },
+        "phase2": phase2_payload,
+        "phase4": phase4_payload,
+        "cycle": cycle_payload,
+        "summary": summarize_vault(db_path),
+    }
+    return _write_report(output_root, report)
+
+
+def run_e2e_hw(
+    *,
+    output_root: Optional[Path] = None,
+    db_path: Optional[Path] = None,
+    build_missing: bool = False,
+) -> Dict[str, Any]:
+    output_root, db_path = _prepare_e2e_paths(
+        output_root=output_root,
+        db_path=db_path,
+        default_root=DEFAULT_E2E_HW_ROOT,
+    )
+    preflight, build_results = _run_profile_preflight(
+        profile=PROFILE_HW,
+        db_path=db_path,
+        build_missing=build_missing,
+        error_mode="e2e-hw",
+        error_message="Hardware-lane preflight failed.",
+    )
+
     promotion_payload = run_hardware_promotion(
         db_path=db_path,
         output_root=output_root / "hardware-promotion",
@@ -445,46 +591,45 @@ def run_e2e_local(
         runtime_root=output_root / "hardware-runtime",
         auto_ingest=True,
     )
-    if phase2_payload.get("status") != "INNER_READY":
-        raise RuntimeError("Phase 2 local E2E validation did not reach INNER_READY.")
-    if phase4_payload.get("summary_status") not in {"MATCHED", "SDC_FOUND"}:
-        raise RuntimeError("Phase 4 local E2E validation did not produce a valid summary status.")
-    if int(cycle_payload.get("generate", {}).get("inserted", 0)) <= 0:
-        raise RuntimeError("Cycle generation produced no inserted testcases.")
-    if int(cycle_payload.get("campaign", {}).get("counts", {}).get("executed", 0)) <= 0:
-        raise RuntimeError("Cycle campaign executed zero runs.")
-    if int(cycle_payload.get("evolve", {}).get("emitted", 0)) <= 0:
-        raise RuntimeError("Cycle evolution emitted zero offspring.")
     if not promotion_payload.get("promotions"):
         raise RuntimeError("Hardware promotion emitted no bundles.")
     if not hardware_payload.get("executed"):
         raise RuntimeError("Hardware lane executed no promotions.")
 
-    summary = summarize_vault(db_path)
     report = {
         "ok": True,
-        "mode": "e2e-local",
+        "mode": "e2e-hw",
         "output_root": str(output_root),
         "db": str(db_path),
-        "resolved_paths": resolved_paths,
+        "resolved_paths": dict(preflight["resolved_paths"]),
         "preflight": preflight,
         "build": {
             "requested": build_missing,
             "results": build_results,
         },
-        "phase2": phase2_payload,
-        "phase4": phase4_payload,
-        "cycle": cycle_payload,
         "promote_hw": promotion_payload,
         "run_hw": hardware_payload,
-        "summary": summary,
+        "summary": summarize_vault(db_path),
         "latest_promotion": promotion_payload["promotions"][0] if promotion_payload.get("promotions") else None,
         "latest_hardware_run": hardware_payload["executed"][0] if hardware_payload.get("executed") else None,
     }
-    report_path = output_root / "report.json"
-    report["report_json"] = str(report_path)
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return report
+    return _write_report(output_root, report)
+
+
+def run_e2e_local(
+    *,
+    output_root: Optional[Path] = None,
+    db_path: Optional[Path] = None,
+    build_missing: bool = False,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    return run_e2e_dev(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=build_missing,
+        timeout=timeout,
+        invoked_as="e2e-local",
+    )
 
 
 def _add_common_generation_args(parser: argparse.ArgumentParser) -> None:
@@ -589,6 +734,23 @@ def _build_parser() -> argparse.ArgumentParser:
     cycle.add_argument("--skip-preflight", action="store_true")
     cycle.add_argument("--timeout", type=int, default=120)
 
+    e2e_dev = subparsers.add_parser("e2e-dev")
+    e2e_dev.add_argument("--output-root", type=Path, default=None)
+    e2e_dev.add_argument("--db", type=Path, default=None)
+    e2e_dev.add_argument("--build-missing", action="store_true")
+    e2e_dev.add_argument("--timeout", type=int, default=30)
+
+    e2e_sim = subparsers.add_parser("e2e-sim")
+    e2e_sim.add_argument("--output-root", type=Path, default=None)
+    e2e_sim.add_argument("--db", type=Path, default=None)
+    e2e_sim.add_argument("--build-missing", action="store_true")
+    e2e_sim.add_argument("--timeout", type=int, default=30)
+
+    e2e_hw = subparsers.add_parser("e2e-hw")
+    e2e_hw.add_argument("--output-root", type=Path, default=None)
+    e2e_hw.add_argument("--db", type=Path, default=None)
+    e2e_hw.add_argument("--build-missing", action="store_true")
+
     e2e_local = subparsers.add_parser("e2e-local")
     e2e_local.add_argument("--output-root", type=Path, default=None)
     e2e_local.add_argument("--db", type=Path, default=None)
@@ -668,6 +830,26 @@ def main() -> int:
                 db_path=args.db,
                 result_json=args.result_json,
                 machine_id=args.machine_id,
+            )
+        elif args.command == "e2e-dev":
+            payload = run_e2e_dev(
+                output_root=args.output_root,
+                db_path=args.db,
+                build_missing=args.build_missing,
+                timeout=args.timeout,
+            )
+        elif args.command == "e2e-sim":
+            payload = run_e2e_sim(
+                output_root=args.output_root,
+                db_path=args.db,
+                build_missing=args.build_missing,
+                timeout=args.timeout,
+            )
+        elif args.command == "e2e-hw":
+            payload = run_e2e_hw(
+                output_root=args.output_root,
+                db_path=args.db,
+                build_missing=args.build_missing,
             )
         elif args.command == "e2e-local":
             payload = run_e2e_local(

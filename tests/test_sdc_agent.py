@@ -1,7 +1,14 @@
 import json
 from pathlib import Path
 
-from sdc_agent.agent import run_cycle, run_e2e_local, summarize_vault
+from sdc_agent.agent import (
+    run_cycle,
+    run_e2e_dev,
+    run_e2e_hw,
+    run_e2e_local,
+    run_e2e_sim,
+    summarize_vault,
+)
 from sdc_agent.vault import SDCVault, VaultEntry
 
 
@@ -54,6 +61,7 @@ def test_sdc_agent_summarizes_vault(tmp_path):
     assert payload["top_candidates"][0]["promotion_ready"] is True
     assert payload["top_promotion_candidates"][0]["testcase_key"] == "sdc-seed"
     assert payload["managed_domains_summary"]["domain_count"] == 6
+    assert set(payload["runtime_capabilities"]["profiles"].keys()) == {"dev", "sim", "hw"}
 
 
 def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, tmp_path):
@@ -125,14 +133,15 @@ def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, 
     assert payload["summary"]["counts"]["ALL"] == 1
 
 
-def test_sdc_agent_run_e2e_local_writes_unified_report(monkeypatch, tmp_path):
-    output_root = tmp_path / "e2e"
+def test_sdc_agent_run_e2e_sim_writes_unified_report(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-sim"
     db_path = output_root / "vault.sqlite3"
 
     monkeypatch.setattr(
         "sdc_agent.agent.run_preflight",
         lambda **kwargs: {
             "ready": True,
+            "profile": "sim",
             "checks": [],
             "resolved_paths": {
                 "compiler": "cc",
@@ -174,6 +183,143 @@ def test_sdc_agent_run_e2e_local_writes_unified_report(monkeypatch, tmp_path):
         },
     )
     monkeypatch.setattr(
+        "sdc_agent.agent.summarize_vault",
+        lambda db_path, limit=5: {"counts": {"ALL": 6}, "db": str(db_path)},
+    )
+
+    payload = run_e2e_sim(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=False,
+        timeout=5,
+    )
+
+    assert payload["mode"] == "e2e-sim"
+    assert payload["phase2"]["status"] == "INNER_READY"
+    assert payload["phase4"]["summary_status"] == "MATCHED"
+
+    report_path = Path(payload["report_json"])
+    assert report_path.exists()
+    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report_payload["resolved_paths"]["compiler"] == "cc"
+    assert report_payload["build"]["requested"] is False
+
+
+def test_sdc_agent_run_e2e_dev_generates_materialized_smoke(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-dev"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "profile": "dev",
+            "checks": [],
+            "resolved_paths": {
+                "compiler": "cc",
+                "qemu_user_binary": None,
+                "qemu_system_binary": None,
+                "gem5_binary": None,
+                "gem5_config": None,
+                "mcpat_binary": None,
+                "meson_binary": None,
+                "ninja_binary": None,
+                "opendcdiag_root": None,
+            },
+            "missing_steps": [],
+            "qemu_user_binary": None,
+            "qemu_system_binary": None,
+        },
+    )
+
+    def fake_generate_batch(**kwargs):
+        with SDCVault(kwargs["db_path"]) as vault:
+            vault.upsert_testcase(
+                VaultEntry(
+                    testcase_key="dev-seed",
+                    asm_content="mov x0, x0",
+                    target_name="arm64",
+                    status="PENDING",
+                )
+            )
+        return {
+            "requested": 1,
+            "planned": 1,
+            "inserted": 1,
+            "testcase_keys": ["dev-seed"],
+            "failed": [],
+            "db": str(kwargs["db_path"]),
+        }
+
+    monkeypatch.setattr("sdc_agent.agent.generate_batch", fake_generate_batch)
+    monkeypatch.setattr(
+        "sdc_agent.agent.summarize_vault",
+        lambda db_path, limit=5: {"counts": {"ALL": 1}, "db": str(db_path)},
+    )
+
+    payload = run_e2e_dev(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=False,
+        timeout=5,
+    )
+
+    assert payload["mode"] == "e2e-dev"
+    assert payload["generate"]["inserted"] == 1
+    assert payload["materialized_source"].endswith("dev-seed.c")
+    report_payload = json.loads(Path(payload["report_json"]).read_text(encoding="utf-8"))
+    assert report_payload["invoked_as"] == "e2e-dev"
+
+
+def test_sdc_agent_run_e2e_local_maps_to_dev_alias(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_e2e_dev",
+        lambda **kwargs: {
+            "ok": True,
+            "mode": "e2e-dev",
+            "invoked_as": kwargs["invoked_as"],
+            "report_json": str((tmp_path / "report.json").resolve()),
+        },
+    )
+
+    payload = run_e2e_local(
+        output_root=tmp_path / "e2e-local",
+        db_path=tmp_path / "vault.sqlite3",
+        build_missing=False,
+        timeout=5,
+    )
+
+    assert payload["mode"] == "e2e-dev"
+    assert payload["invoked_as"] == "e2e-local"
+
+
+def test_sdc_agent_run_e2e_hw_writes_unified_report(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-hw"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "profile": "hw",
+            "checks": [],
+            "resolved_paths": {
+                "compiler": None,
+                "qemu_user_binary": None,
+                "qemu_system_binary": None,
+                "gem5_binary": None,
+                "gem5_config": None,
+                "mcpat_binary": None,
+                "meson_binary": "/usr/bin/meson",
+                "ninja_binary": "/usr/bin/ninja",
+                "opendcdiag_root": str((tmp_path / "opendcdiag").resolve()),
+            },
+            "missing_steps": [],
+            "qemu_user_binary": None,
+            "qemu_system_binary": None,
+        },
+    )
+    monkeypatch.setattr(
         "sdc_agent.agent.run_hardware_promotion",
         lambda **kwargs: {
             "promotions": [
@@ -199,24 +345,15 @@ def test_sdc_agent_run_e2e_local_writes_unified_report(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "sdc_agent.agent.summarize_vault",
-        lambda db_path, limit=5: {"counts": {"ALL": 6}, "db": str(db_path)},
+        lambda db_path, limit=5: {"counts": {"ALL": 1}, "db": str(db_path)},
     )
 
-    payload = run_e2e_local(
+    payload = run_e2e_hw(
         output_root=output_root,
         db_path=db_path,
         build_missing=False,
-        timeout=5,
     )
 
-    assert payload["mode"] == "e2e-local"
-    assert payload["phase2"]["status"] == "INNER_READY"
-    assert payload["phase4"]["summary_status"] == "MATCHED"
+    assert payload["mode"] == "e2e-hw"
     assert payload["latest_promotion"]["promotion_id"] == 7
     assert payload["latest_hardware_run"]["promotion_id"] == 7
-
-    report_path = Path(payload["report_json"])
-    assert report_path.exists()
-    report_payload = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report_payload["resolved_paths"]["compiler"] == "cc"
-    assert report_payload["build"]["requested"] is False

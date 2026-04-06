@@ -22,7 +22,6 @@ from .phase2_validation import (
     DEFAULT_GEM5_BINARY,
     DEFAULT_MCPAT_BINARY,
     DEFAULT_OUTPUT_ROOT as DEFAULT_PHASE2_OUTPUT_ROOT,
-    DEFAULT_QEMU_SYSTEM_BINARY,
     PROFILE_SIM_SAFE,
     _decode_metadata,
     _resolve_compiler,
@@ -178,7 +177,7 @@ def run_phase4_validation(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     profile_name: str = PROFILE_SIM_SAFE,
     compiler: Optional[str] = None,
-    qemu_binary: Path = DEFAULT_QEMU_SYSTEM_BINARY,
+    qemu_binary: str | Path = "qemu-system-aarch64",
     gem5_binary: Path = DEFAULT_GEM5_BINARY,
     gem5_config: Path = DEFAULT_GEM5_BAREMETAL_CONFIG,
     mcpat_binary: Path = DEFAULT_MCPAT_BINARY,
@@ -404,7 +403,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--profile", default=PROFILE_SIM_SAFE)
     parser.add_argument("--compiler", default=None)
-    parser.add_argument("--qemu-binary", type=Path, default=DEFAULT_QEMU_SYSTEM_BINARY)
+    parser.add_argument("--qemu-binary", default="qemu-system-aarch64")
     parser.add_argument("--gem5-binary", type=Path, default=DEFAULT_GEM5_BINARY)
     parser.add_argument("--gem5-config", type=Path, default=DEFAULT_GEM5_BAREMETAL_CONFIG)
     parser.add_argument("--mcpat-binary", type=Path, default=DEFAULT_MCPAT_BINARY)

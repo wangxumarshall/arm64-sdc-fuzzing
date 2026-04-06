@@ -3,7 +3,7 @@
 > 项目代号：SDC-Agent
 > 架构版本：v2.1
 > 目标微架构：TaiShan v110 / Kunpeng 920（ARMv8.2-A）
-> 最后更新：2026-04-02
+> 最后更新：2026-04-06
 
 ---
 
@@ -191,11 +191,11 @@ PENDING ──▶ GOLDEN_READY ──▶ MATCHED
 
 ### 3.4 顶层控制入口
 
-`tools/sdc_agent.py` 现在提供一个推荐主入口和若干分阶段子命令。
+`tools/sdc_agent.py` 现在提供三个分层入口和若干分阶段子命令。
 
 推荐主入口：
 
-- `e2e-local`
+- `e2e-sim`
 
 常用分阶段子命令：
 
@@ -209,17 +209,26 @@ PENDING ──▶ GOLDEN_READY ──▶ MATCHED
 
 其中：
 
-1. `e2e-local`
-   - 固定串联 `preflight -> Phase2 -> Phase4 -> cycle -> promote-hw -> run-hw -> ingest-hw -> status`
-   - 默认写入隔离的 `artifacts/e2e-local/<run-id>/`
+1. `e2e-dev`
+   - 面向本机控制面 smoke
+   - 固定串联 `preflight(dev) -> generate -> materialize -> status`
+   - 默认写入隔离的 `artifacts/e2e-dev/<run-id>/`
+   - `e2e-local` 已降级为它的兼容别名
+2. `e2e-sim`
+   - 面向 Ubuntu 24.04 ARM 真实仿真执行面
+   - 固定串联 `preflight(sim) -> Phase2 -> Phase4 -> cycle -> status`
+   - 默认写入隔离的 `artifacts/e2e-sim/<run-id>/`
    - 产出统一 `report.json`
-2. `cycle` 会串联：
+3. `e2e-hw`
+   - 面向硬件 promotion / OpenDCDiag staging lane
+   - 固定串联 `preflight(hw) -> promote-hw -> run-hw -> status`
+4. `cycle` 会串联：
    - 离线生成
    - 在线 campaign
    - offspring 进化
    - Vault 状态汇总
 
-因此，`e2e-local` 是“本机一键端到端”入口，`cycle` 和其他子命令保留给分阶段调试或批量运行。
+因此，当前仓库不再把“本机一键全链路”作为默认承诺，而是把 `dev / sim / hw` 三条验收口径明确拆开。真实仿真主入口是 `e2e-sim`，`cycle` 和其他子命令保留给分阶段调试或批量运行。
 
 ### 3.5 外部依赖边界
 
@@ -357,44 +366,53 @@ sdc-fuzzing/
 
 ## 六、快速开始
 
-### 6.1 一键本机 E2E
+### 6.1 Ubuntu 24.04 ARM 仿真 E2E
 
-这是当前推荐入口。它会使用独立 `output-root` 和独立 SQLite，避免污染已有 `artifacts/sdc_vault.sqlite3`。
+这是当前推荐入口。真实仿真执行面统一放在 Ubuntu 24.04 ARM 主机上。建议先完成 bootstrap，再运行 `e2e-sim`。
+
+```bash
+./scripts/bootstrap_ubuntu_24_04_arm.sh
+./scripts/build_gem5_linux_arm.sh
+./scripts/build_mcpat.sh
+python3 tools/sdc_agent.py e2e-sim \
+  --output-root artifacts/e2e-sim/smoke
+```
+
+执行成功后，统一报告位于：
+
+```text
+artifacts/e2e-sim/<run-id>/report.json
+```
+
+### 6.2 本机开发 smoke
+
+macOS 或任意开发主机上的推荐入口是 `e2e-dev`。它只验证控制面、生成和物料化，不再假装承担完整仿真闭环。
+
+```bash
+python3 tools/sdc_agent.py e2e-dev \
+  --output-root artifacts/e2e-dev/smoke
+```
+
+旧命令仍可用，但现在只是兼容别名：
 
 ```bash
 python3 tools/sdc_agent.py e2e-local \
   --output-root artifacts/e2e-local/smoke
 ```
 
-如果缺少 repo 内二进制，可允许它自动补建 `qemu/gem5/mcpat`：
+### 6.3 预检
 
 ```bash
-python3 tools/sdc_agent.py e2e-local \
-  --output-root artifacts/e2e-local/smoke \
-  --build-missing
+python3 -m sdc_agent.preflight --profile sim --verbose
 ```
 
-执行成功后，统一报告位于：
+常用 profile：
 
-```text
-artifacts/e2e-local/<run-id>/report.json
-```
+- `dev`：控制面开发 smoke
+- `sim`：Ubuntu 24.04 ARM 真实仿真执行面
+- `hw`：OpenDCDiag staging / promotion lane
 
-### 6.2 预检
-
-```bash
-python3 -m sdc_agent.preflight --verbose
-```
-
-默认 preflight 会同时检查：
-
-- AArch64 交叉编译器
-- QEMU user-mode 与 system-mode 二进制
-- gem5 / McPAT
-- `meson` / `ninja`
-- `opendcdiag` 源树
-
-### 6.3 批量生成候选
+### 6.4 批量生成候选
 
 ```bash
 python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
@@ -405,13 +423,15 @@ python3 microprobe/targets/generic/tools/mp_sdc_offline_gen.py \
   --output-dir artifacts/generated
 ```
 
-### 6.4 查看 Vault 状态
+### 6.5 查看 Vault 状态
 
 ```bash
 python3 tools/sdc_agent.py status --db artifacts/sdc_vault.sqlite3 --limit 5
 ```
 
-### 6.5 运行一次完整循环
+`status` 现在会额外输出 host / profile runtime capability 摘要，用来区分“控制面测试已通过”和“真实 sim 环境已就绪”。
+
+### 6.6 运行一次完整循环
 
 ```bash
 python3 tools/sdc_agent.py cycle \
@@ -423,7 +443,7 @@ python3 tools/sdc_agent.py cycle \
   --skip-preflight
 ```
 
-### 6.6 直接跑单个差分样本
+### 6.7 直接跑单个差分样本
 
 ```bash
 python3 tools/run_sdc_differential.py \
@@ -436,7 +456,7 @@ python3 tools/run_sdc_differential.py \
   --timeout 120
 ```
 
-### 6.7 只做进化回灌
+### 6.8 只做进化回灌
 
 ```bash
 python3 tools/sdc_agent.py evolve \
@@ -468,19 +488,22 @@ python3 tools/sdc_agent.py evolve \
 3. 新增的 `SDCFuzzingGeneticDriver` 能把 offspring 重新注入 Vault。
 4. 新增的 `tools/sdc_agent.py` 可以编排主流程并汇总状态。
 
-### 7.1 本机 staging 与真机回灌的区别
+### 7.1 三层验收口径
 
-当前 README 中的“端到端”分成两种完成标准：
+当前仓库把“端到端”拆成三层：
 
-1. 本机 staging 硬件 lane
-   - 使用 `e2e-local`
-   - 在本机 `opendcdiag` workspace 中完成 promotion、build、run、ingest
-   - 这是当前仓库内可重复执行的主验收口径
-2. 真实 ARM 机器回灌
-   - 需要额外的 ARM64 服务器、部署流程和运行权限
-   - 不属于本机一键 E2E 的默认范围
+1. `e2e-dev`
+   - 控制面 / 生成 / 物料化 smoke
+   - 适合 macOS 或任意开发主机
+2. `e2e-sim`
+   - Ubuntu 24.04 ARM 上的真实仿真验收
+   - 这是当前仓库对“真实端到端”默认采用的主验收口径
+3. `e2e-hw`
+   - OpenDCDiag staging 与硬件回灌 lane
+   - 只验证 promotion / build / run / ingest，不替代 sim 验收
 
 注意：
 
 - 仓库中的 `gem5/ext/pybind11/tests` 属于第三方测试目录，直接运行 `pytest -q` 会因该目录缺少外部构建产物而失败。
+- `tests/test_e2e_sim_integration_smoke.py` 是手动或 nightly 运行的真实 sim smoke，不进入默认快速单测集。
 - `gem5` 真实 fault injection 目前仍是后续工程项；当前已验证的是控制面、manifest 和差分流程，不是最终版 fault injector。
