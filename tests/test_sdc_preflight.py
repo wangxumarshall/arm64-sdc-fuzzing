@@ -1,11 +1,14 @@
 from pathlib import Path
+import sys
 
 from sdc_agent.preflight import (
     PROFILE_DEV,
     PROFILE_HW,
     PROFILE_SIM,
+    PreflightCheck,
     check_command,
     check_path,
+    main,
     run_preflight,
 )
 from sdc_agent.tooling import HostContext, LocalToolResolution, resolve_local_tools
@@ -58,6 +61,16 @@ def test_run_preflight_is_not_ready_when_required_binaries_are_missing(tmp_path)
 
 def test_run_preflight_dev_profile_only_requires_compiler(monkeypatch, tmp_path):
     monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=True,
+            required=kwargs.get("required", True),
+            detail="available",
+            install_hint=None,
+        ),
+    )
+    monkeypatch.setattr(
         "sdc_agent.preflight.resolve_local_tools",
         lambda **kwargs: LocalToolResolution(
             compiler="/usr/bin/cc",
@@ -88,6 +101,16 @@ def test_run_preflight_dev_profile_only_requires_compiler(monkeypatch, tmp_path)
 
 
 def test_run_preflight_hw_profile_requires_hardware_tools(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=True,
+            required=kwargs.get("required", True),
+            detail="available",
+            install_hint=None,
+        ),
+    )
     monkeypatch.setattr(
         "sdc_agent.preflight.resolve_local_tools",
         lambda **kwargs: LocalToolResolution(
@@ -120,6 +143,16 @@ def test_run_preflight_hw_profile_requires_hardware_tools(monkeypatch, tmp_path)
 
 def test_run_preflight_sim_profile_reports_host_incompatibility(monkeypatch, tmp_path):
     monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=True,
+            required=kwargs.get("required", True),
+            detail="available",
+            install_hint=None,
+        ),
+    )
+    monkeypatch.setattr(
         "sdc_agent.preflight.get_host_context",
         lambda: HostContext(system="Darwin", machine="arm64", python_version="3.12.2"),
     )
@@ -139,6 +172,43 @@ def test_run_preflight_sim_profile_reports_host_incompatibility(monkeypatch, tmp
     failed_required = {check["name"] for check in result["checks"] if check["required"] and not check["ok"]}
     assert "host_profile_compatibility" in failed_required
     assert any(step["step_id"] == "use_linux_arm_runner" for step in result["missing_steps"])
+
+
+def test_run_preflight_reports_missing_python_runtime_modules(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sdc_agent.preflight.resolve_local_tools",
+        lambda **kwargs: LocalToolResolution(
+            compiler="/usr/bin/cc",
+            qemu_user_binary=None,
+            qemu_system_binary=None,
+            gem5_binary=None,
+            gem5_config=None,
+            mcpat_binary=None,
+            meson_binary=None,
+            ninja_binary=None,
+            opendcdiag_root=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=False,
+            required=kwargs.get("required", True),
+            detail="missing modules: cachetools, rxjson",
+            install_hint="bootstrap",
+        ),
+    )
+
+    result = run_preflight(
+        profile=PROFILE_DEV,
+        vault_path=tmp_path / "artifacts" / "vault.sqlite3",
+        check_build_deps=False,
+    )
+
+    failed_required = {check["name"] for check in result["checks"] if check["required"] and not check["ok"]}
+    assert "python_runtime_modules" in failed_required
+    assert any(step["step_id"] == "install_python_runtime_deps" for step in result["missing_steps"])
 
 
 def test_resolve_local_tools_accepts_native_gcc_on_linux_arm(monkeypatch):
@@ -191,3 +261,29 @@ def test_resolve_local_tools_prefers_env_over_repo_and_path(monkeypatch, tmp_pat
     )
 
     assert resolved.compiler == str(env_compiler.resolve())
+
+
+def test_preflight_cli_only_overrides_profile_checks_when_skip_flags_are_set(monkeypatch, tmp_path, capsys):
+    captured = {}
+
+    def fake_run_preflight(**kwargs):
+        captured.update(kwargs)
+        return {
+            "ready": True,
+            "profile": "dev",
+            "profile_description": "Developer/control-plane smoke on any supported host.",
+            "repo_root": str(tmp_path),
+            "platform": "Linux",
+            "python_version": "3.12.2",
+            "checks": [],
+            "resolved_paths": {},
+            "missing_steps": [],
+        }
+
+    monkeypatch.setattr("sdc_agent.preflight.run_preflight", fake_run_preflight)
+    monkeypatch.setattr(sys, "argv", ["preflight.py", "--profile", "dev"])
+
+    assert main() == 0
+    assert captured["check_build_deps"] is None
+    assert captured["check_hardware_tools"] is None
+    assert captured["require_qemu_system"] is None

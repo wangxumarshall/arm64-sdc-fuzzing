@@ -240,22 +240,22 @@
 
 - Name: s.imm14_shift2
   Description: Signed 14-bit Immediate (shifted left 2)
-  Min: -16384
-  Max: 16382
+  MinDisplacement: -16384
+  MaxDisplacement: 16382
   Shift: 2
   Relative: True
 
 - Name: s.imm19_shift2
   Description: Signed 19-bit Immediate (shifted left 2)
-  Min: -262144
-  Max: 262142
+  MinDisplacement: -262144
+  MaxDisplacement: 262142
   Shift: 2
   Relative: True
 
 - Name: s.imm26_shift2
   Description: Signed 26-bit Immediate (shifted left 2)
-  Min: -33554432
-  Max: 33554430
+  MinDisplacement: -33554432
+  MaxDisplacement: 33554430
   Shift: 2
   Relative: True
 

@@ -1,81 +1,98 @@
-# Findings & Decisions
+# Findings And Current State
 
-## Requirements
-- Use `docs/spec.md` and `docs/plan.md` as the authoritative definition of project scope and completion criteria.
-- Continue working until the end-to-end source implementation is complete, rather than stopping at analysis.
-- Preserve the monorepo control-plane architecture centered on `sdc_agent/*`, `tools/*`, Vault persistence, inner loop, outer loop, and hardware lane.
-- Ensure the delivered source aligns with the three-loop system in the spec: high-frequency inner loop, low-frequency outer loop, and hardware validation lane.
+本文件是仓库根目录下的当前状态、源码事实、关键发现与技术决策主文档，吸收了此前 `docs/state.md` 中的当前阶段、最新发现与源码基线内容。
 
-## Research Findings
-- The repository is already a large monorepo containing `microprobe`, `qemu`, `gem5`, `mcpat`, `opendcdiag`, `sdc_agent`, `tools`, and `tests`.
-- `docs/spec.md` describes a completed architecture where the database is the system bus and where inner loop, outer loop, and hardware lane all write back structured records.
-- `docs/plan.md` states that Phase 2 and Phase 4 are largely implemented, while Phase 3, Phase 5, Phase 6, and Phase 7 still contain real gaps.
-- The plan specifically calls out partially completed work in power-driven evolution, gem5 real injector coverage, richer hardware ingest, and broader intelligent generation.
-- The current git worktree is clean, which lowers merge-risk for substantial edits.
-- `docs/state.md` confirms that Phase 2, Phase 4, and a bootstrap version of Phase 6 are already wired through the control plane, and that the main remaining risks are broader injector coverage, hardware validation depth, and deployment maturity.
-- The repository has no `pyproject.toml`, `pytest.ini`, `setup.py`, or `setup.cfg`, so Python import/test behavior is not codified at the repo level.
-- Running plain `pytest` from the repo root fails collection with `ModuleNotFoundError: sdc_agent`, which exposes a reproducibility gap in local verification.
-- The machine has multiple Python interpreters; the usable testing stack appears to live under `/Users/wangxu/anaconda3/bin/python` and `/Users/wangxu/anaconda3/bin/pytest`, not `/usr/bin/python3`.
-- The most actionable gap against `docs/plan.md` was Phase 3: the scheduler exposed `fitness` and outer-loop signals, but did not yet model a separate `inner_value_score` or feed diversity/profile-aware breakdowns back into evolution.
-- `microprobe/src/microprobe/driver/genetic.py` already had a Python 3 evolution path, but partner selection was simplistic, profile-aware fallback instruction recovery was incomplete, and lineage metadata did not explain why a parent/partner pair was chosen.
-- A small repo-local test bootstrap is enough to make direct `pytest` from the root work again without changing user shell state.
+## 1. Current Phase
 
-## Technical Decisions
-| Decision | Rationale |
-|----------|-----------|
-| Use planning files in the project root | This is a long-running, multi-phase implementation task with many tool calls |
-| Prioritize inspecting `sdc_agent/*`, `tools/*`, and `tests/*` before editing | These paths likely contain the integration gaps implied by the docs |
-| Let tests drive the concrete implementation target | The docs are strategic; tests will show the executable contract |
-| Fix repo-local verification ergonomics alongside feature work | A source-complete project still needs a predictable way to run tests from the root |
-| Implement Phase 3 feedback in scheduler and genetic driver without forcing a new DB migration | The required signals can be computed from existing projections and stored in testcase metadata/lineage |
+日期：`2026-04-06`
 
-## Issues Encountered
-| Issue | Resolution |
-|-------|------------|
-| `rg --files .` returned the full monorepo and was too broad to reason about directly | Narrow subsequent inspection to docs, control-plane modules, CLIs, and tests |
-| Validation depends on interpreter choice and import path behavior | Capture this as a concrete repo gap and verify against the available Conda Python |
-| Phase 3 scoring and evolution feedback were under-modeled relative to the plan | Extended scheduler ranking metadata, mutation planning, and genetic lineage feedback to expose inner-loop value and diversity signals |
+当前主阶段：
 
-## Resources
-- `/Users/wangxu/1-project/sdc-fuzzing/docs/spec.md`
-- `/Users/wangxu/1-project/sdc-fuzzing/docs/plan.md`
-- `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent`
-- `/Users/wangxu/1-project/sdc-fuzzing/tools`
-- `/Users/wangxu/1-project/sdc-fuzzing/tests`
-- `/Users/wangxu/1-project/sdc-fuzzing/docs/state.md`
-- `/Users/wangxu/anaconda3/bin/python`
-- `/Users/wangxu/anaconda3/bin/pytest`
+- `Phase 3`: 功耗驱动的进化闭环 hardening
+- `Phase 4`: 低频外循环产品化
+- `Phase 5`: gem5 scripted injector expansion
+- `Phase 6`: 硬件 promotion lane bootstrap
+- `Phase 7`: template / PCFG / advisor generation bootstrap
 
-## Visual/Browser Findings
-- No browser or image-based inspection has been used; current findings come from local repository documents and shell inspection.
+当前判断：
 
-## Implementation Outcomes
-- Added repo-root pytest bootstrap via `/Users/wangxu/1-project/sdc-fuzzing/tests/conftest.py`, which fixes direct `pytest` collection for `sdc_agent`.
-- Extended `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/scheduler.py` with `STATIC_DONE` handling, `diversity_bonus`, `legality_factor`, `power_gain`, and `inner_value_score`, and exposed these values through ranking, mutation planning, and result recording.
-- Extended `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/driver/genetic.py` with profile-aware fallback instruction recovery, diversity-aware partner selection, profile filtering of offspring instructions, and richer lineage/evolution feedback metadata.
-- Updated `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/agent.py` and `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_lane.py` to consume the new ranking signals in summaries and hardware promotion scoring.
-- Added regression coverage for scheduler scoring, genetic-driver lineage metadata, agent summary output, and direct pytest collection behavior.
-- Added `/Users/wangxu/1-project/sdc-fuzzing/microprobe/src/microprobe/utils/arm64_isa_catalog.py`, which parses the official Arm A64 XML snapshot plus `docs/armv8-isa` into a normalized catalog with 790 instruction pages, 1576 encodings, execution classification, Kunpeng920 hotness tags, sample assembly, and clang-based sequence validation.
-- Added `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tools/a64_isa_catalog.py` and generated `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/isa/armv8-common/arm_a64_catalog.json` as the local full-A64 source of truth.
-- Extended `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation.py` and `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/generic/tools/mp_sdc_offline_gen.py` with `ALL_GENERATABLE`, `EXECUTABLE_SAFE`, and `KUNPENG920_STRESS` profiles; catalog-driven runs now auto-expand batch count to cover the full catalog.
-- Extended `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/tools/a64_isa_audit.py` to report both the legacy `instruction.yaml` gap and the new catalog coverage against official XML.
-- Updated `/Users/wangxu/1-project/sdc-fuzzing/microprobe/targets/arm64/isa/armv8-common/isa.py` to expose catalog-backed profile enumeration directly from the ARM64 ISA object.
+1. `Phase 0` 已完成。
+2. `Phase 1` 已完成。
+3. `Phase 2` 主链已具备真实开发口径验证。
+4. `Phase 4` 已经具备 planner / aggregation / promotion-readiness 信号，但 fault coverage 仍需扩展。
+5. `Phase 5` 已具备多种 scripted fault model，但真实系统依赖和更深 injector 覆盖仍是后续工作。
+6. `Phase 6` 已具备 promotion / run / ingest 主链，但仍属于 bootstrap 阶段。
 
-## ARM64 Catalog Findings
-- The official A64 XML snapshot used in this implementation contains 790 instruction documents and 1576 encoding variants across the `general`, `system`, `float`, and `advsimd` classes.
-- The legacy ARM64 `instruction.yaml` still contains only 57 entries and 28 unique mnemonics, so it remains an executable subset rather than the full ISA definition.
-- The generated local catalog covers all official mnemonics in the selected classes: `general 248/248`, `system 74/74`, `float 48/48`, `advsimd 284/284`.
-- `docs/armv8-isa` currently maps cleanly to 279 of 387 pages by normalized title; the remaining pages are naming/heading mismatches, not XML catalog gaps.
-- Full-catalog validation is intentionally split from execution: many encodings are feature-gated, privileged, or trap-like, so the catalog records `executable`, `privileged`, `trap_like`, and `execution_block_reason` instead of pretending everything belongs in the same runtime wrapper.
+## 2. Source-Backed Baseline
 
-## Additional Outcomes
-- Added a real scripted `memory_bit_flip` path through `/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_fault_request.py`, `/Users/wangxu/1-project/sdc-fuzzing/gem5/configs/example/arm/sdc_kunpeng920_se.py`, and `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/differential.py`.
-- Upgraded `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/hardware_results.py` so hardware ingest now normalizes detectors, derives detector summaries, and preserves richer machine/build/runtime context.
-- Added `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/generation_strategies.py` plus `/Users/wangxu/1-project/sdc-fuzzing/sdc_agent/mutation_advisor.py`, wiring template/PCFG generation and heuristic mutation advice into the existing generation/scheduler/agent path.
-- Verified these additions with targeted and broad regressions, including root `tests`, ARM64 target tests, and gem5 helper tests.
-- PR-check follow-up confirmed that the first `memory_bit_flip` implementation was semantically wrong in SE mode because it wrote via physical memory instead of the guest virtual translation path.
-- The fix was to move memory fault injection onto an SE-translating path anchored on `ThreadContext`, and to make malformed CPU prefixes or incompatible target kinds fail fast instead of degrading into no-op simulations.
+下表只记录仓库中的真实实现，不把规划项混入“已完成”：
 
----
-*Update this file after every 2 view/browser/search operations*
-*This prevents visual information from being lost*
+| Area | Current Anchor | Current Fact |
+| --- | --- | --- |
+| Control plane | `sdc_agent/agent.py`, `tools/sdc_agent.py` | 提供 `status / generate / evolve / cycle / e2e-*` 入口 |
+| Generation | `sdc_agent/generation.py`, `microprobe/targets/arm64/policies/sdc_fuzzing_policy.py` | 可生成 ARM64 指令流并写回 Vault |
+| Static analysis | `microprobe/src/microprobe/passes/sdc_analysis/offline_coverage.py` | 已有 ACE / IBR / Memory Pressure / Capstone pass |
+| Persistence | `sdc_agent/vault.py` | 兼容 summary + multi-table persistent model |
+| Materialization | `sdc_agent/materialize.py`, `microprobe/targets/arm64/wrappers/baremetaldiff.py` | 可生成 digest-style source artifacts |
+| QEMU validation | `sdc_agent/differential.py` | 负责 golden digest 与 paired compare |
+| gem5 execution | `gem5/configs/example/arm/sdc_kunpeng920_se.py` | 具备 SE runner 和 scripted fault request 路径 |
+| Power labeling | `sdc_agent/power_backends/mcpat_backend.py` | McPAT 主链已接入控制面 |
+| Scheduling / evolution | `sdc_agent/scheduler.py`, `microprobe/src/microprobe/driver/genetic.py` | 具备 ranking、lineage、offspring feedback |
+| Hardware lane | `sdc_agent/hardware_lane.py`, `sdc_agent/hardware_results.py` | 具备 promotion / run / ingest 主链 |
+
+## 3. Key Findings
+
+### 3.1 Documentation
+
+1. 根目录文档与 `docs/` 文档曾长期重复。
+2. 当前 root `plan.md`、`findings.md`、`progress.md` 已成为权威文档。
+3. `docs/spec.md`、`docs/plan.md`、`docs/state.md` 现在仅保留兼容入口。
+
+### 3.2 Control Plane And Tooling
+
+1. `tools/sdc_agent.py` 之前在 CLI 解析前强依赖 Microprobe runtime，导致缺少 Python 包时连 `--help` 都无法使用。
+2. `preflight` CLI 之前错误地把 `--skip-build-deps` / `--skip-hardware-tools` 当成默认强制启用，导致 `dev` profile 被误报缺少 sim/hw build deps。
+3. 根目录之前缺少统一的 Python 依赖清单，导致默认 `python3` 环境下无法稳定运行 `pytest` 与 Microprobe。
+
+### 3.3 ARM64 Generation
+
+1. ARM64 operand 定义中三条 relative immediate 使用了错误字段，真实离线生成会直接失败。
+2. A64 catalog 的 assembler 校验之前对缺少本地 toolchain fail closed，不符合 best-effort validation 目标。
+3. `e2e-dev` 之前在 generation 没有产出 testcase 时仍可能返回伪成功，需要 fail closed。
+
+## 4. Decisions
+
+1. 根目录文档成为唯一权威来源：
+   - `plan.md` 承担 architecture + roadmap
+   - `findings.md` 承担 current state + decisions + risks
+   - `progress.md` 承担 implementation log + verification
+2. CLI 入口改成 lazy import，轻量命令不再被 Microprobe 依赖阻塞。
+3. preflight 必须显式检查 Python runtime modules，而不是只看二进制工具。
+4. catalog asm validation 改成 best effort：
+   缺少 clang 或其他 assembler 时记录 `toolchain_limited`，不让 catalog profile 直接失效。
+5. `e2e-dev` 必须 fail closed：
+   如果 generation 没有插入 testcase 或 materialize 失败，则整条开发 smoke 直接报错。
+
+## 5. Verified Current State
+
+当前主机已经可以用默认 `python3` 跑通：
+
+- `python3 tools/sdc_agent.py --help`
+- `python3 -m sdc_agent.preflight --profile dev --verbose`
+- `python3 -m pytest -q tests`
+- `python3 tools/sdc_agent.py e2e-dev --output-root ...`
+
+当前主机还不能跑通 `e2e-sim`。真实阻塞是系统级 build deps，而不是控制面逻辑本身：
+
+- 缺少 `pkg-config`
+- 缺少 `python3-config`
+- 缺少 `swig`
+- 缺少 `protoc`
+- 缺少 repo-local `qemu-aarch64`
+- 缺少 repo-local `gem5.opt`
+
+## 6. Current Risks
+
+1. 本机是 `Ubuntu 25.10`，不是 README 认可的 `Ubuntu 24.04 ARM` sim baseline，因此 `sim` lane 只能做 best-effort 验证。
+2. 当前会话没有 `sudo`，无法补齐系统级构建依赖，因此 `e2e-sim` 无法在本会话中真正闭环。
+3. 工作区本身存在与当前任务无关的既有脏变更；本轮文档收敛不应干扰那些路径。

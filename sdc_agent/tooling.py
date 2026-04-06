@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_REQUIREMENTS = REPO_ROOT / "requirements.txt"
+DEFAULT_DEV_REQUIREMENTS = REPO_ROOT / "requirements-dev.txt"
 DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
 DEFAULT_GEM5_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_kunpeng920_se.py"
 DEFAULT_GEM5_BAREMETAL_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "baremetal.py"
@@ -127,13 +129,23 @@ def _is_executable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
+def _resolve_command_name(name: str) -> Optional[str]:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    user_local = Path.home() / ".local" / "bin" / name
+    if _is_executable(user_local):
+        return str(user_local.resolve())
+    return None
+
+
 def _resolve_single_command_or_executable(value: str) -> Optional[str]:
     if _looks_like_path(value):
         path = Path(value).expanduser()
         if _is_executable(path):
             return str(path.resolve())
         return None
-    resolved = shutil.which(value)
+    resolved = _resolve_command_name(value)
     return resolved or None
 
 
@@ -165,7 +177,7 @@ def _resolve_command_or_executable(
             return str(candidate.resolve())
 
     for candidate in command_candidates:
-        resolved = shutil.which(candidate)
+        resolved = _resolve_command_name(candidate)
         if resolved:
             return resolved
 
@@ -290,6 +302,8 @@ def build_missing_steps(
     require_gem5_config: bool = True,
     require_mcpat: bool = True,
     require_hardware_tools: bool = False,
+    missing_python_modules: Sequence[str] = (),
+    missing_build_dependencies: Sequence[str] = (),
 ) -> List[MissingStep]:
     steps: List[MissingStep] = []
     host = host or get_host_context()
@@ -310,6 +324,38 @@ def build_missing_steps(
                 ),
                 command=None,
                 cwd=None,
+                auto_build=False,
+            )
+        )
+
+    if missing_python_modules:
+        missing_modules_csv = ", ".join(sorted(set(missing_python_modules)))
+        setup_script = REPO_ROOT / "scripts" / "setup_environment.sh"
+        add_step(
+            MissingStep(
+                step_id="install_python_runtime_deps",
+                detail=(
+                    "Install the Python runtime dependencies required by the control plane "
+                    f"and Microprobe. Missing modules: {missing_modules_csv}."
+                ),
+                command=[str(setup_script.resolve())],
+                cwd=str(REPO_ROOT),
+                auto_build=False,
+            )
+        )
+
+    if missing_build_dependencies:
+        missing_deps_csv = ", ".join(sorted(set(missing_build_dependencies)))
+        bootstrap_script = REPO_ROOT / "scripts" / "bootstrap_ubuntu_24_04_arm.sh"
+        add_step(
+            MissingStep(
+                step_id="install_build_dependencies",
+                detail=(
+                    "Install the Ubuntu 24.04 ARM build dependencies required for repo-local "
+                    f"QEMU/gem5 builds. Missing checks: {missing_deps_csv}."
+                ),
+                command=[str(bootstrap_script.resolve())],
+                cwd=str(REPO_ROOT),
                 auto_build=False,
             )
         )

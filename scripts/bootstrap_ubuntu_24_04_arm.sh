@@ -16,6 +16,10 @@ if ! command -v apt-get >/dev/null 2>&1; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON_REQUIREMENTS="$REPO_ROOT/requirements-dev.txt"
+
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
@@ -35,10 +39,13 @@ APT_PACKAGES=(
     python3-dev
     python3-venv
     python3-pip
+    python3-pytest
     pkg-config
     git
     qemu-user
     qemu-system-arm
+    libglib2.0-dev
+    libpixman-1-dev
     meson
     ninja-build
     scons
@@ -58,8 +65,12 @@ $SUDO apt-get update
 $SUDO apt-get install -y "${APT_PACKAGES[@]}"
 
 echo ""
+echo "Installing repo Python dependencies from $PYTHON_REQUIREMENTS ..."
+python3 -m pip install --break-system-packages -r "$PYTHON_REQUIREMENTS"
+
+echo ""
 echo "Verifying critical tools..."
-for tool in python3 gcc g++ qemu-aarch64 qemu-system-aarch64 meson ninja scons swig protoc; do
+for tool in python3 python3-config gcc g++ pkg-config qemu-aarch64 qemu-system-aarch64 meson ninja scons swig protoc; do
     if command -v "$tool" >/dev/null 2>&1; then
         echo "  ✓ $tool -> $(command -v "$tool")"
     else
@@ -67,6 +78,22 @@ for tool in python3 gcc g++ qemu-aarch64 qemu-system-aarch64 meson ninja scons s
         exit 1
     fi
 done
+
+echo ""
+echo "Verifying Python modules..."
+python3 - <<'PY'
+mods = ["yaml", "six", "fasteners", "cachetools", "rxjson", "pytest"]
+missing = []
+for module_name in mods:
+    try:
+        __import__(module_name)
+        print(f"  ✓ {module_name}")
+    except Exception as exc:
+        missing.append(module_name)
+        print(f"  ✗ {module_name}: {exc}")
+if missing:
+    raise SystemExit(f"Missing Python modules after bootstrap: {', '.join(missing)}")
+PY
 
 echo ""
 echo "Bootstrap complete."

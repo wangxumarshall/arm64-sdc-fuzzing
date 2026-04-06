@@ -7,31 +7,16 @@ import argparse
 import datetime as dt
 import json
 import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .generation import (
-    DEFAULT_POLICY,
-    PROFILE_SIM_SAFE,
-    DEFAULT_TARGET,
-    DEFAULT_WRAPPER,
-    GENERATION_STRATEGY_BASELINE,
-    bootstrap_microprobe_paths,
-    generate_batch,
-)
-bootstrap_microprobe_paths()
-
-from microprobe.driver.genetic import EvolutionConfig, SDCFuzzingGeneticDriver
-
-from .differential import DEFAULT_GEM5_CONFIG
 from .campaign import execute_campaign
 from .hardware_lane import run_hardware_promotion
 from .hardware_results import execute_hardware_promotions, ingest_hardware_result
 from .managed_domains import collect_domain_statuses, diff_for_domain, summarize_managed_domains
 from .materialize import materialize_testcase
-from .phase2_validation import run_phase2_validation
-from .phase4_validation import run_phase4_validation
 from .preflight import (
     DEFAULT_GEM5_BINARY,
     DEFAULT_MCPAT_BINARY,
@@ -43,18 +28,25 @@ from .preflight import (
 )
 from .scheduler import FeedbackScheduler
 from .tooling import (
+    DEFAULT_GEM5_CONFIG,
     resolve_local_tools,
 )
 from .vault import SDCVault
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MICROPROBE_SRC = REPO_ROOT / "microprobe" / "src"
 DEFAULT_VAULT = REPO_ROOT / "artifacts" / "sdc_vault.sqlite3"
 DEFAULT_AGENT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "sdc-agent"
 DEFAULT_E2E_DEV_ROOT = REPO_ROOT / "artifacts" / "e2e-dev"
 DEFAULT_E2E_SIM_ROOT = REPO_ROOT / "artifacts" / "e2e-sim"
 DEFAULT_E2E_HW_ROOT = REPO_ROOT / "artifacts" / "e2e-hw"
 DEFAULT_E2E_LOCAL_ROOT = REPO_ROOT / "artifacts" / "e2e-local"
+DEFAULT_TARGET = "armv8_common-armv8_common-aarch64_linux_gcc"
+DEFAULT_POLICY = "sdc_fuzzing"
+DEFAULT_WRAPPER = "Arm64AsmWrapper"
+PROFILE_SIM_SAFE = "SIM_SAFE"
+GENERATION_STRATEGY_BASELINE = "baseline"
 
 
 class AgentCommandError(RuntimeError):
@@ -63,6 +55,60 @@ class AgentCommandError(RuntimeError):
     def __init__(self, message: str, *, payload: Optional[Dict[str, Any]] = None) -> None:
         super().__init__(message)
         self.payload = payload or {"ok": False, "error": message}
+
+
+def _bootstrap_repo_python_paths() -> None:
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    if str(MICROPROBE_SRC) not in sys.path:
+        sys.path.insert(0, str(MICROPROBE_SRC))
+
+
+def _missing_dependency_runtime_error(exc: ModuleNotFoundError, *, context: str) -> RuntimeError:
+    missing = exc.name or str(exc)
+    return RuntimeError(
+        f"{context} requires Python runtime dependencies for {Path(sys.executable).resolve()}. "
+        f"Missing module: {missing}. "
+        "On Ubuntu 24.04 ARM, run ./scripts/bootstrap_ubuntu_24_04_arm.sh. "
+        "Otherwise install the repo requirements with "
+        "`python3 -m pip install --break-system-packages -r requirements-dev.txt`."
+    )
+
+
+def _load_generation_module():
+    _bootstrap_repo_python_paths()
+    try:
+        from . import generation as generation_module
+    except ModuleNotFoundError as exc:
+        raise _missing_dependency_runtime_error(exc, context="Generation commands") from exc
+
+    try:
+        generation_module.bootstrap_microprobe_paths()
+    except ModuleNotFoundError as exc:
+        raise _missing_dependency_runtime_error(exc, context="Generation commands") from exc
+    return generation_module
+
+
+def generate_batch(**kwargs):
+    return _load_generation_module().generate_batch(**kwargs)
+
+
+def run_phase2_validation(**kwargs):
+    _load_generation_module()
+    try:
+        from .phase2_validation import run_phase2_validation as impl
+    except ModuleNotFoundError as exc:
+        raise _missing_dependency_runtime_error(exc, context="Phase 2 validation") from exc
+    return impl(**kwargs)
+
+
+def run_phase4_validation(**kwargs):
+    _load_generation_module()
+    try:
+        from .phase4_validation import run_phase4_validation as impl
+    except ModuleNotFoundError as exc:
+        raise _missing_dependency_runtime_error(exc, context="Phase 4 validation") from exc
+    return impl(**kwargs)
 
 
 def summarize_vault(db_path: Path, *, limit: int = 5) -> Dict[str, Any]:
@@ -123,6 +169,12 @@ def run_evolution(
     base_seed: int,
     wrapper_name: str,
 ) -> Dict[str, Any]:
+    _load_generation_module()
+    try:
+        from microprobe.driver.genetic import EvolutionConfig, SDCFuzzingGeneticDriver
+    except ModuleNotFoundError as exc:
+        raise _missing_dependency_runtime_error(exc, context="Evolution commands") from exc
+
     config = EvolutionConfig(
         parent_limit=parent_limit,
         offspring_per_parent=offspring_per_parent,
@@ -408,6 +460,11 @@ def run_e2e_dev(
         strict_validation=False,
         output_dir=output_root / "generated",
     )
+    if int(generation_payload.get("inserted", 0)) <= 0:
+        raise RuntimeError(
+            "Developer E2E generation emitted no valid testcases. "
+            f"Failures: {generation_payload.get('failed', [])}"
+        )
 
     materialized_source: Optional[Path] = None
     testcase_keys = list(generation_payload.get("testcase_keys") or [])
@@ -418,6 +475,8 @@ def run_e2e_dev(
                 testcase_keys[0],
                 output_root=output_root / "materialized",
             )
+    if materialized_source is None:
+        raise RuntimeError("Developer E2E failed to materialize a generated testcase.")
 
     report = {
         "ok": True,

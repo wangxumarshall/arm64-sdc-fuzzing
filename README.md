@@ -39,8 +39,8 @@
 2. 低频外循环：gem5 fault campaign + QEMU 差分 + SDC 能力评分
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
-完整目标架构、数据库模型和实施路线见 [spec.md](./docs/spec.md) 与 [plan.md](./docs/plan.md)。
-当前阶段状态、最新发现、验证结果与下一步统一见 [state.md](./docs/state.md)。
+完整目标架构、阶段路线图与验收口径见 [plan.md](./plan.md)。
+当前源码事实、关键发现与验证结果见 [findings.md](./findings.md) 与 [progress.md](./progress.md)。
 
 ### 1.3 SDC-Agent 的定义
 
@@ -307,6 +307,11 @@ PENDING ──▶ GOLDEN_READY ──▶ MATCHED
 ```text
 sdc-fuzzing/
 ├── README.md
+├── plan.md
+├── findings.md
+├── progress.md
+├── requirements.txt
+├── requirements-dev.txt
 ├── sdc_agent/
 │   ├── __init__.py
 │   ├── agent.py
@@ -357,9 +362,10 @@ sdc-fuzzing/
 │       └── sdc_fault_request.py
 ├── mcpat/
 └── docs/
-    ├── spec.md
-    ├── plan.md
-    ├── state.md
+    ├── guides/
+    ├── spec.md    # compatibility stub
+    ├── plan.md    # compatibility stub
+    └── state.md   # compatibility stub
 ```
 
 ---
@@ -374,9 +380,12 @@ sdc-fuzzing/
 ./scripts/bootstrap_ubuntu_24_04_arm.sh
 ./scripts/build_gem5_linux_arm.sh
 ./scripts/build_mcpat.sh
+python3 -m sdc_agent.preflight --profile sim --verbose
 python3 tools/sdc_agent.py e2e-sim \
   --output-root artifacts/e2e-sim/smoke
 ```
+
+`bootstrap_ubuntu_24_04_arm.sh` 会同时安装根目录 `requirements-dev.txt` 中声明的 Python 依赖，以及 QEMU/gem5 常见系统依赖。
 
 执行成功后，统一报告位于：
 
@@ -505,5 +514,6 @@ python3 tools/sdc_agent.py evolve \
 注意：
 
 - 仓库中的 `gem5/ext/pybind11/tests` 属于第三方测试目录，直接运行 `pytest -q` 会因该目录缺少外部构建产物而失败。
+- 当前推荐的 repo-root 验证入口是 `python3 -m pytest -q tests`。
 - `tests/test_e2e_sim_integration_smoke.py` 是手动或 nightly 运行的真实 sim smoke，不进入默认快速单测集。
 - `gem5` 真实 fault injection 目前仍是后续工程项；当前已验证的是控制面、manifest 和差分流程，不是最终版 fault injector。

@@ -9,6 +9,8 @@ echo ""
 PLATFORM=$(uname -s)
 MACHINE=$(uname -m)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON_REQUIREMENTS="$REPO_ROOT/requirements-dev.txt"
 
 if [ "$PLATFORM" = "Linux" ] && { [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; }; then
     echo "Detected Linux ARM host. Delegating to bootstrap_ubuntu_24_04_arm.sh..."
@@ -72,8 +74,8 @@ fi
 
 echo ""
 echo "=== Step 5: Install Python dependencies ==="
-echo "Installing Python packages..."
-pip3 install --user six protobuf numpy || {
+echo "Installing Python packages from $PYTHON_REQUIREMENTS ..."
+pip3 install --user -r "$PYTHON_REQUIREMENTS" protobuf numpy || {
     echo "Warning: Some packages may already be installed."
 }
 
@@ -102,7 +104,7 @@ check_tool "python3" "python@3"
 
 echo ""
 echo "Python packages:"
-pip3 list 2>/dev/null | grep -iE "six|protobuf|numpy" || echo "  (none found)"
+pip3 list 2>/dev/null | grep -iE "pytest|six|cachetools|fasteners|rxjson|protobuf|numpy" || echo "  (none found)"
 
 echo ""
 echo "=========================================="
@@ -111,6 +113,6 @@ echo "=========================================="
 echo ""
 echo "Next steps:"
 echo "  1. Build gem5: ./scripts/build_gem5.sh ARM opt"
-echo "  2. Run preflight check: python3 tools/sdc_preflight.py --verbose"
-echo "  3. Test gem5 build: python3 dev/debug/test_gem5_build.py"
+echo "  2. Run preflight check: python3 -m sdc_agent.preflight --profile dev --verbose"
+echo "  3. Run tests: python3 -m pytest -q tests"
 echo ""

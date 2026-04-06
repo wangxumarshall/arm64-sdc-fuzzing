@@ -1,5 +1,9 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from sdc_agent.agent import (
     run_cycle,
@@ -62,6 +66,20 @@ def test_sdc_agent_summarizes_vault(tmp_path):
     assert payload["top_promotion_candidates"][0]["testcase_key"] == "sdc-seed"
     assert payload["managed_domains_summary"]["domain_count"] == 6
     assert set(payload["runtime_capabilities"]["profiles"].keys()) == {"dev", "sim", "hw"}
+
+
+def test_sdc_agent_cli_help_runs_without_microprobe_runtime_bootstrap():
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, str((repo_root / "tools" / "sdc_agent.py").resolve()), "--help"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
+    assert "e2e-sim" in completed.stdout
 
 
 def test_sdc_agent_run_cycle_composes_generate_campaign_and_evolve(monkeypatch, tmp_path):
@@ -269,6 +287,53 @@ def test_sdc_agent_run_e2e_dev_generates_materialized_smoke(monkeypatch, tmp_pat
     assert payload["materialized_source"].endswith("dev-seed.c")
     report_payload = json.loads(Path(payload["report_json"]).read_text(encoding="utf-8"))
     assert report_payload["invoked_as"] == "e2e-dev"
+
+
+def test_sdc_agent_run_e2e_dev_fails_when_generation_emits_no_valid_testcases(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-dev-fail"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "profile": "dev",
+            "checks": [],
+            "resolved_paths": {
+                "compiler": "cc",
+                "qemu_user_binary": None,
+                "qemu_system_binary": None,
+                "gem5_binary": None,
+                "gem5_config": None,
+                "mcpat_binary": None,
+                "meson_binary": None,
+                "ninja_binary": None,
+                "opendcdiag_root": None,
+            },
+            "missing_steps": [],
+            "qemu_user_binary": None,
+            "qemu_system_binary": None,
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.generate_batch",
+        lambda **kwargs: {
+            "requested": 1,
+            "planned": 1,
+            "inserted": 0,
+            "testcase_keys": [],
+            "failed": [{"index": 0, "error": "schema mismatch"}],
+            "db": str(kwargs["db_path"]),
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="generation emitted no valid testcases"):
+        run_e2e_dev(
+            output_root=output_root,
+            db_path=db_path,
+            build_missing=False,
+            timeout=5,
+        )
 
 
 def test_sdc_agent_run_e2e_local_maps_to_dev_alias(monkeypatch, tmp_path):

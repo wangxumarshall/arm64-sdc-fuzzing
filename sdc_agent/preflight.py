@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import platform
 import shutil
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .tooling import (
+    DEFAULT_DEV_REQUIREMENTS,
     DEFAULT_GEM5_BINARY,
     DEFAULT_GEM5_CONFIG,
     DEFAULT_MCPAT_BINARY,
@@ -30,6 +32,13 @@ PROFILE_DEV = "dev"
 PROFILE_SIM = "sim"
 PROFILE_HW = "hw"
 SUPPORTED_PROFILES = (PROFILE_DEV, PROFILE_SIM, PROFILE_HW)
+RUNTIME_PYTHON_MODULES = (
+    "yaml",
+    "six",
+    "fasteners",
+    "cachetools",
+    "rxjson",
+)
 
 
 @dataclass(frozen=True)
@@ -75,8 +84,6 @@ PROFILE_SPECS: Dict[str, PreflightProfileSpec] = {
         require_mcpat=True,
         require_hardware_tools=False,
         check_build_deps=True,
-        default_qemu_user_binary="qemu-aarch64",
-        default_qemu_system_binary="qemu-system-aarch64",
         default_gem5_binary=DEFAULT_GEM5_BINARY,
         default_mcpat_binary=DEFAULT_MCPAT_BINARY,
         default_gem5_config=DEFAULT_GEM5_CONFIG,
@@ -169,6 +176,33 @@ def check_python_version() -> PreflightCheck:
     )
 
 
+def check_python_modules(
+    modules: List[str] | tuple[str, ...],
+    *,
+    required: bool,
+    install_hint: Optional[str] = None,
+) -> PreflightCheck:
+    missing: List[str] = []
+    for module_name in modules:
+        try:
+            importlib.import_module(module_name)
+        except Exception:
+            missing.append(module_name)
+
+    detail = (
+        f"available: {', '.join(modules)}"
+        if not missing
+        else f"missing modules: {', '.join(sorted(missing))}"
+    )
+    return PreflightCheck(
+        name="python_runtime_modules",
+        ok=not missing,
+        required=required,
+        detail=detail,
+        install_hint=install_hint,
+    )
+
+
 def _install_hint_for_package(host: HostContext, package: str, *, mac_package: Optional[str] = None) -> str:
     if host.is_linux:
         return f"sudo apt-get install -y {package}"
@@ -176,10 +210,44 @@ def _install_hint_for_package(host: HostContext, package: str, *, mac_package: O
     return f"brew install {package_name}"
 
 
+def _resolve_command(name: str) -> Optional[str]:
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    user_local = Path.home() / ".local" / "bin" / name
+    if user_local.is_file():
+        return str(user_local.resolve())
+    return None
+
+
 def check_build_dependencies(host: HostContext) -> List[PreflightCheck]:
     checks = []
 
-    scons = shutil.which("scons")
+    pkg_config = _resolve_command("pkg-config")
+    checks.append(
+        PreflightCheck(
+            name="pkg_config",
+            ok=pkg_config is not None,
+            required=True,
+            detail="found" if pkg_config else "missing",
+            path=pkg_config,
+            install_hint=_install_hint_for_package(host, "pkg-config"),
+        )
+    )
+
+    python_config = _resolve_command("python3-config") or _resolve_command("python-config")
+    checks.append(
+        PreflightCheck(
+            name="python_config",
+            ok=python_config is not None,
+            required=True,
+            detail="found" if python_config else "missing",
+            path=python_config,
+            install_hint=_install_hint_for_package(host, "python3-dev"),
+        )
+    )
+
+    scons = _resolve_command("scons")
     checks.append(
         PreflightCheck(
             name="scons",
@@ -191,7 +259,7 @@ def check_build_dependencies(host: HostContext) -> List[PreflightCheck]:
         )
     )
 
-    swig = shutil.which("swig")
+    swig = _resolve_command("swig")
     checks.append(
         PreflightCheck(
             name="swig",
@@ -337,9 +405,30 @@ def run_preflight(
         if normalized_profile == PROFILE_SIM
         else "Set SDC_QEMU_SYSTEM_BINARY or build repo-local QEMU."
     )
+    require_python_runtime = normalized_profile in {PROFILE_DEV, PROFILE_SIM}
+    python_runtime_hint = (
+        "Run ./scripts/setup_environment.sh or install the repo requirements with "
+        f"`python3 -m pip install --break-system-packages -r {DEFAULT_DEV_REQUIREMENTS.name}`."
+    )
+    python_runtime_check = check_python_modules(
+        RUNTIME_PYTHON_MODULES,
+        required=require_python_runtime,
+        install_hint=python_runtime_hint,
+    )
+    missing_python_modules: List[str] = []
+    if not python_runtime_check.ok:
+        detail = python_runtime_check.detail
+        if detail.startswith("missing modules:"):
+            detail = detail[len("missing modules:") :]
+        missing_python_modules = [
+            module.strip()
+            for module in detail.split(",")
+            if module.strip()
+        ]
 
     checks: List[PreflightCheck] = [
         check_python_version(),
+        python_runtime_check,
         _profile_compatibility_check(normalized_profile, host),
         _tool_check(
             "compiler",
@@ -404,6 +493,18 @@ def run_preflight(
     if effective_check_build_deps:
         checks.extend(check_build_dependencies(host))
 
+    missing_build_dependencies = [
+        check.name
+        for check in checks
+        if check.required and not check.ok and check.name in {
+            "pkg_config",
+            "python_config",
+            "scons",
+            "swig",
+            "protobuf",
+        }
+    ]
+
     ready = all(check.ok for check in checks if check.required)
     missing_steps = build_missing_steps(
         resolved,
@@ -415,6 +516,8 @@ def run_preflight(
         require_gem5_config=effective_require_gem5_config,
         require_mcpat=effective_require_mcpat,
         require_hardware_tools=effective_check_hardware_tools,
+        missing_python_modules=missing_python_modules,
+        missing_build_dependencies=missing_build_dependencies,
     )
     return {
         "ready": ready,
@@ -505,9 +608,9 @@ def main() -> int:
         meson_binary=args.meson_binary,
         ninja_binary=args.ninja_binary,
         opendcdiag_root=args.opendcdiag_root,
-        check_build_deps=not args.skip_build_deps,
-        check_hardware_tools=not args.skip_hardware_tools,
-        require_qemu_system=not args.skip_system_qemu,
+        check_build_deps=False if args.skip_build_deps else None,
+        check_hardware_tools=False if args.skip_hardware_tools else None,
+        require_qemu_system=False if args.skip_system_qemu else None,
     )
 
     if args.verbose:

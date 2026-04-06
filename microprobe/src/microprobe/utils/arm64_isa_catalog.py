@@ -716,13 +716,21 @@ def _run_assembler(
         cmd = [assembler, "-c", str(asm_path), "-o", str(obj_path)]
     else:
         cmd = [assembler, "-target", target, "-c", str(asm_path), "-o", str(obj_path)]
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return {
+            "command": cmd,
+            "returncode": -2,
+            "stdout": "",
+            "stderr": str(exc),
+        }
     return {
         "command": cmd,
         "returncode": result.returncode,
@@ -779,6 +787,27 @@ def validate_sequence_asm(
             )
             for assembler in _assembler_candidates(clang)
         ]
+
+        if attempts and all(attempt["returncode"] == -2 for attempt in attempts):
+            return {
+                "ok": True,
+                "returncode": attempts[0]["returncode"],
+                "stdout": attempts[0]["stdout"],
+                "stderr": attempts[0]["stderr"],
+                "command": attempts[0]["command"],
+                "asm_text": asm_text,
+                "arch_extensions": _feature_arch_extensions(
+                    [
+                        feature
+                        for encoding in encodings
+                        for feature in encoding.get("feature_tags", [])
+                    ]
+                ),
+                "validation_mode": "toolchain_limited",
+                "unsupported_feature_tags": unsupported_details["unsupported_feature_tags"],
+                "unsupported_arch_extensions": unsupported_details["unsupported_arch_extensions"],
+                "attempts": attempts,
+            }
 
         first_success = next(
             (attempt for attempt in attempts if attempt["returncode"] == 0),

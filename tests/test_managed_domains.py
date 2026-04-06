@@ -27,6 +27,7 @@ def test_classify_path_maps_core_domains():
     assert classify_path("opendcdiag/tests/cpu/arm64/sdc_test.cpp") == "opendcdiag"
     assert classify_path("sdc_agent/agent.py") == "root-control-plane"
     assert classify_path("docs/state.md") == "root-control-plane"
+    assert classify_path("plan.md") == "root-control-plane"
 
 
 def test_collect_domain_statuses_and_diff_for_domain(tmp_path):
