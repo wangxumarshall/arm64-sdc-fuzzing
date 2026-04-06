@@ -185,3 +185,50 @@ def test_phase4_validation_allows_none_fault_baseline(monkeypatch, tmp_path):
     assert payload["summary_status"] == "MATCHED"
     assert payload["total_runs"] == 1
     assert payload["fault_runs"][0]["result_status"] == "matched"
+
+
+def test_phase4_validation_can_skip_gem5(monkeypatch, tmp_path):
+    db_path = tmp_path / "phase4-skip.sqlite3"
+    output_root = tmp_path / "out-skip"
+    elf_path = tmp_path / "phase4-skip.elf"
+    source_path = tmp_path / "phase4-skip.c"
+    elf_path.write_text("elf", encoding="utf-8")
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sdc_agent.phase4_validation.build_semihost_validation_elf",
+        lambda **kwargs: {
+            "source_path": source_path.resolve(),
+            "boot_obj": tmp_path / "boot.o",
+            "linker_script": tmp_path / "kernel.ld",
+            "elf_path": elf_path.resolve(),
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.phase4_validation.run_qemu_system_golden",
+        lambda **kwargs: {
+            "command": ["qemu-system-aarch64"],
+            "returncode": 0,
+            "stdout": "SDC_DIGEST=beef\n",
+            "stderr": "",
+            "golden_digest": "beef",
+        },
+    )
+
+    payload = run_phase4_validation(
+        db_path=db_path,
+        output_root=output_root,
+        profile_name="SIM_SAFE",
+        compiler="cc",
+        qemu_binary=tmp_path / "qemu-system-aarch64",
+        gem5_binary=tmp_path / "gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        mcpat_binary=tmp_path / "mcpat",
+        skip_gem5=True,
+        skip_mcpat=True,
+        timeout=5,
+    )
+
+    assert payload["summary_status"] == "MATCHED"
+    assert payload["fault_execution_plane"] == "skipped_gem5"
+    assert payload["fault_runs"][0]["result_status"] == "matched"

@@ -174,7 +174,12 @@ def _aggregate_fault_results(
         )
     detection_rate = (sdc_hits / total_runs) if total_runs else 0.0
     repeatability_score = (successful_runs / total_runs) if total_runs else 0.0
-    outer_value_score = candidate.fitness * detection_rate * repeatability_score
+    base_inner_value = (
+        candidate.inner_value_score
+        if float(candidate.inner_value_score) > 0.0
+        else candidate.fitness
+    )
+    outer_value_score = base_inner_value * detection_rate * repeatability_score
     injector_confidence_score = (
         observed_injection_runs / active_fault_runs if active_fault_runs else 0.0
     )
@@ -228,6 +233,7 @@ def run_outer_loop(
     gem5_config: Path = DEFAULT_GEM5_CONFIG,
     gem5_args: Optional[List[str]] = None,
     gem5_cmd_flag: str = "auto",
+    skip_gem5: bool = False,
     skip_mcpat: bool = False,
     mcpat_template_profile: str = "arm64-kunpeng920",
     mcpat_binary: Optional[Path] = DEFAULT_MCPAT_BINARY,
@@ -250,17 +256,22 @@ def run_outer_loop(
             gem5_config=gem5_config,
             vault_path=db_path,
             check_build_deps=False,
+            require_gem5=False if skip_gem5 else None,
+            require_mcpat=False if skip_gem5 or skip_mcpat else None,
         )
         if not dry_run and not preflight["ready"]:
             raise RuntimeError("Outer-loop preflight failed; refusing to execute.")
 
     scheduler = FeedbackScheduler()
-    fault_specs = plan_fault_matrix(
-        fault_models=fault_models,
-        fault_targets=fault_targets,
-        fault_bits=fault_bits,
-        fault_ticks=fault_ticks,
-    )
+    if skip_gem5:
+        fault_specs = [FaultSpec("none", "", None, None)]
+    else:
+        fault_specs = plan_fault_matrix(
+            fault_models=fault_models,
+            fault_targets=fault_targets,
+            fault_bits=fault_bits,
+            fault_ticks=fault_ticks,
+        )
     matrix_hash, campaign_key = build_campaign_identity(fault_specs)
 
     counts = {
@@ -342,7 +353,7 @@ def run_outer_loop(
                     fault_target=spec.fault_target,
                     fault_bit=spec.fault_bit,
                     fault_tick=spec.fault_tick,
-                    skip_gem5=False,
+                    skip_gem5=skip_gem5,
                     skip_mcpat=skip_mcpat,
                     mcpat_template_profile=mcpat_template_profile,
                     mcpat_binary=mcpat_binary,
@@ -529,6 +540,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gem5-config", type=Path, default=DEFAULT_GEM5_CONFIG)
     parser.add_argument("--gem5-arg", action="append", default=[])
     parser.add_argument("--gem5-cmd-flag", default="auto")
+    parser.add_argument("--skip-gem5", action="store_true")
     parser.add_argument("--skip-mcpat", action="store_true")
     parser.add_argument("--mcpat-template-profile", default="arm64-kunpeng920")
     parser.add_argument("--mcpat-binary", type=Path, default=DEFAULT_MCPAT_BINARY)
@@ -558,6 +570,7 @@ def main() -> int:
         gem5_config=args.gem5_config,
         gem5_args=list(args.gem5_arg),
         gem5_cmd_flag=args.gem5_cmd_flag,
+        skip_gem5=args.skip_gem5,
         skip_mcpat=args.skip_mcpat,
         mcpat_template_profile=args.mcpat_template_profile,
         mcpat_binary=args.mcpat_binary,

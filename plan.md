@@ -232,10 +232,10 @@ inner_value_score = static_risk_score * legality_factor * power_gain * diversity
 | --- | --- | --- | --- |
 | Phase 0 | 文档合同与 monorepo 叙事收敛 | complete | root docs are canonical |
 | Phase 1 | Vault v2 / 兼容持久化模型 | complete | multi-table model is wired through `vault.py` |
-| Phase 2 | 高频内循环产品化 | complete | dev lane can reach generate + materialize |
-| Phase 3 | 功耗驱动的进化闭环 | in progress | scheduler/genetic hardening continues |
-| Phase 4 | 低频外循环产品化 | in progress | fault matrix and aggregation exist, coverage still grows |
-| Phase 5 | gem5 injector 扩展 | in progress | scripted models exist, real coverage still expands |
+| Phase 2 | 高频内循环产品化 | complete | compile-stable `SIM_SAFE`, materialize hardening, qemu-only sim smoke |
+| Phase 3 | 功耗驱动的进化闭环 | complete | scheduler/genetic feedback loop and fail-soft evolution are wired |
+| Phase 4 | 低频外循环产品化 | complete | fault matrix, aggregation, promotion signals, qemu-only fallback are wired |
+| Phase 5 | gem5 injector 扩展 | in progress | scripted models and control-plane plumbing exist, full host runtime still depends on gem5 capacity |
 | Phase 6 | promotion / hardware ingest | in progress | promotion/run/ingest path exists, hardware breadth still grows |
 | Phase 7 | template / PCFG / advisor 生成 | in progress | baseline strategy layer exists, sophistication can grow |
 

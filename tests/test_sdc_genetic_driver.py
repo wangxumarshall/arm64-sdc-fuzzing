@@ -3,6 +3,7 @@ from sdc_agent.vault import SDCVault
 
 bootstrap_microprobe_paths()
 
+import microprobe.driver.genetic as genetic_module
 from microprobe.driver.genetic import EvolutionConfig, SDCFuzzingGeneticDriver
 
 
@@ -97,3 +98,53 @@ def test_sdc_genetic_driver_cycles_padding_across_filtered_instruction_set(monke
     )
 
     assert filtered == ["OP_A", "OP_B", "OP_A", "OP_B"]
+
+
+def test_sdc_genetic_driver_skips_invalid_offspring_and_keeps_evolving(monkeypatch, tmp_path):
+    parent = generate_testcase(
+        {
+            "target": "armv8_common-armv8_common-aarch64_linux_gcc",
+            "policy": "sdc_fuzzing",
+            "wrapper": "Arm64AsmWrapper",
+            "profile_name": "SIM_SAFE",
+            "sequence_length": 4,
+            "benchmark_size": 32,
+            "dependency_distance": 1,
+            "memory_stream_stride": 8192,
+            "strict_validation": False,
+            "seed": 41,
+            "output_dir": str(tmp_path / "parents"),
+            "instruction_names": ["MOVZ_X_V0", "MOVZ_X_V0", "MOVZ_X_V0", "MOVZ_X_V0"],
+        }
+    )
+    original_generate_testcase = genetic_module.generate_testcase
+    calls = {"count": 0}
+
+    def flaky_generate_testcase(task):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("unsupported child")
+        return original_generate_testcase(task)
+
+    monkeypatch.setattr(genetic_module, "generate_testcase", flaky_generate_testcase)
+
+    db_path = tmp_path / "vault.sqlite3"
+    config = EvolutionConfig(
+        parent_limit=1,
+        offspring_per_parent=2,
+        max_offspring=2,
+        sequence_length=4,
+        benchmark_size=32,
+        wrapper_name="Arm64AsmWrapper",
+        base_seed=401,
+    )
+
+    with SDCVault(db_path) as vault:
+        vault.upsert_testcase(parent["entry"])
+        driver = SDCFuzzingGeneticDriver(config=config)
+        records = driver.evolve(vault, output_dir=tmp_path / "evolved")
+
+        assert len(records) == 1
+        assert calls["count"] == 2
+        row = vault.get_testcase(records[0].testcase_key)
+        assert row is not None

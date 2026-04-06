@@ -117,6 +117,8 @@ def execute_campaign(
             mcpat_binary=mcpat_binary or DEFAULT_MCPAT_BINARY,
             gem5_config=gem5_config,
             vault_path=db_path,
+            require_gem5=False if skip_gem5 else None,
+            require_mcpat=False if skip_gem5 or skip_mcpat else None,
         )
         if not dry_run and not preflight["ready"]:
             raise RuntimeError("Preflight checks failed; refusing to execute campaign.")
@@ -133,6 +135,10 @@ def execute_campaign(
     with SDCVault(db_path) as vault:
         candidates = scheduler.select_candidates(vault, limit)
         counts["selected"] = len(candidates)
+        effective_fault_model = "none" if skip_gem5 else fault_model
+        effective_fault_target = "" if skip_gem5 else fault_target
+        effective_fault_bit = None if skip_gem5 else fault_bit
+        effective_fault_tick = None if skip_gem5 else fault_tick
 
         for candidate in candidates:
             source_path = resolve_source_path(candidate, source_root)
@@ -189,10 +195,10 @@ def execute_campaign(
                 gem5_outdir=artifact_dir / "gem5",
                 gem5_args=gem5_args,
                 gem5_cmd_flag=gem5_cmd_flag,
-                fault_model=fault_model,
-                fault_target=fault_target,
-                fault_bit=fault_bit,
-                fault_tick=fault_tick,
+                fault_model=effective_fault_model,
+                fault_target=effective_fault_target,
+                fault_bit=effective_fault_bit,
+                fault_tick=effective_fault_tick,
                 skip_gem5=skip_gem5,
                 skip_mcpat=skip_mcpat,
                 mcpat_template_profile=mcpat_template_profile,
