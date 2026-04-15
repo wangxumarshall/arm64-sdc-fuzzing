@@ -239,6 +239,41 @@ static void check_missing_features(device_features_t features, device_features_t
 
 #undef cpuid_errmsg
 
+#elif defined(__aarch64__)
+
+#include "arm64/arm64_cpuid.h"
+
+#if SANDSTONE_NO_LOGGING
+#  define cpuid_errmsg(msg)             logging_restricted(LOG_LEVEL_QUIET, msg)
+#else
+#  define cpuid_errmsg(msg)             fputs(msg, stderr)
+#endif
+
+__attribute__((noinline))
+static device_features_t detect_cpu()
+{
+    return arm64_runtime_features();
+}
+
+__attribute__((unused))
+static void check_missing_features(device_features_t features, device_features_t minimum_cpu_features)
+{
+    device_features_t missing = minimum_cpu_features & ~features;
+    if (!missing)
+        return;
+
+    cpuid_errmsg("Cannot run on this CPU.\n"
+                 "This application requires certain features not found in your CPU:");
+    for (size_t i = 0; i < (sizeof(arm64_locators) / sizeof(arm64_locators[0])); ++i) {
+        if (missing & CPU_FEATURE_CONSTANT(i))
+            fputs(features_string + features_indices[i], stderr);
+    }
+    fputs("\nexit: invalid\n", stderr);
+    _exit(EX_CONFIG);
+}
+
+#undef cpuid_errmsg
+
 #else // ! x86-64
 static device_features_t detect_cpu()
 {

@@ -43,9 +43,11 @@ std::string detect_running_vm()
 #if SANDSTONE_DEVICE_CPU
     // failed to detect the vm with systemd-detect-virt
     // but hypervisor is present so we report it as 'unknown'?
+#  ifdef cpu_feature_hypervisor
     if (cpu_has_feature(cpu_feature_hypervisor)) {
         return "unknown";
     }
+#  endif
 #endif
 
     return {};
