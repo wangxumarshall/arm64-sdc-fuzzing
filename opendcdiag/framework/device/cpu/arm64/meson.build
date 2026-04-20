@@ -7,9 +7,9 @@ if host_machine.cpu_family() == 'aarch64'
     ]
 
     arm64_files = files(
-        'arm64/arm64_topology.cpp',
-        'arm64/kunpeng920_ecc.cpp',
-        'arm64/arm64_sdc_detect.cpp',
+        'arm64_topology.cpp',
+        'kunpeng920_ecc.cpp',
+        'arm64_sdc_detect.cpp',
     )
 
     arm64_lib = static_library(

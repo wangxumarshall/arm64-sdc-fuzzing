@@ -419,6 +419,8 @@ class BaseSimpleSystem(ArmSystem, ClusterSystem):
     cache_line_size = 64
 
     def __init__(self, mem_size, platform, **kwargs):
+        enable_vnc = kwargs.pop("enable_vnc", True)
+        enable_terminal = kwargs.pop("enable_terminal", True)
         ArmSystem.__init__(self, **kwargs)
         ClusterSystem.__init__(self, **kwargs)
 
@@ -435,8 +437,10 @@ class BaseSimpleSystem(ArmSystem, ClusterSystem):
         if hasattr(self.realview.gic, "cpu_addr"):
             self.gic_cpu_addr = self.realview.gic.cpu_addr
 
-        self.terminal = Terminal()
-        self.vncserver = VncServer()
+        if enable_terminal:
+            self.terminal = Terminal()
+        if enable_vnc:
+            self.vncserver = VncServer()
 
         self.iobus = IOXBar()
         # Device DMA -> MEM

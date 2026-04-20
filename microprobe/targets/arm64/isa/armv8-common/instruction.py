@@ -39,6 +39,9 @@ class Arm64Instruction(GenericInstructionType):
         "LOAD_STORE_PAIR",
         "LOAD_LITERAL",
         "LOAD_STORE_EXCLUSIVE",
+        "LS64_LOAD",
+        "LS64_STORE",
+        "LS64_STORE_STATUS",
         "ATOMIC",
         "CAS",
     }
@@ -115,6 +118,9 @@ class Arm64Instruction(GenericInstructionType):
         upper_name = self.name.upper()
         upper_mnemonic = self.mnemonic.upper()
 
+        if upper_mnemonic in {"LD64B", "ST64B", "ST64BV", "ST64BV0"}:
+            return 64
+
         if upper_name.endswith("_W_IMM_V0") or "_W_" in upper_name:
             return 4
 
@@ -148,6 +154,12 @@ class Arm64Instruction(GenericInstructionType):
     def _infer_memory_operands(self):
         if self.format.name not in self._MEMORY_FORMATS:
             return []
+
+        if self.format.name == "LS64_LOAD":
+            return [self._infer_memory_operand("I", [("Rn_sp", "base")])]
+
+        if self.format.name in {"LS64_STORE", "LS64_STORE_STATUS"}:
+            return [self._infer_memory_operand("O", [("Rn_sp", "base")])]
 
         if self.format.name in self._ATOMIC_MEMORY_FORMATS:
             return [self._infer_memory_operand("I", [("Rn", "base")])]

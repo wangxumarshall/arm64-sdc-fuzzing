@@ -30,6 +30,8 @@ DEFAULT_CATALOG_PATH = (
 PROFILE_ALL_GENERATABLE = "ALL_GENERATABLE"
 PROFILE_EXECUTABLE_SAFE = "EXECUTABLE_SAFE"
 PROFILE_KUNPENG920_STRESS = "KUNPENG920_STRESS"
+PROFILE_ARMV82_TO_ARMV92_GENERATABLE = "ARMV82_TO_ARMV92_GENERATABLE"
+PROFILE_ARMV82_TO_ARMV92_EXECUTABLE = "ARMV82_TO_ARMV92_EXECUTABLE"
 
 _DEFAULT_BRANCH_LABEL = ".Lmicroprobe_catalog_target"
 _TRAP_MNEMONICS = {
@@ -65,6 +67,7 @@ _SAFE_SYSTEM_MNEMONICS = {
     "TSB",
     "WFE",
     "WFI",
+    "WFET",
     "WFIT",
     "YIELD",
 }
@@ -121,6 +124,9 @@ _FEATURE_EXTENSION_MAP = {
     "FEAT_FlagM": ("flagm",),
     "FEAT_FlagM2": ("flagm",),
     "FEAT_I8MM": ("i8mm",),
+    "FEAT_LS64": ("ls64",),
+    "FEAT_LS64_ACCDATA": ("ls64",),
+    "FEAT_LS64_V": ("ls64",),
     "FEAT_LRCPC": ("rcpc",),
     "FEAT_LRCPC2": ("rcpc",),
     "FEAT_LRCPC3": ("rcpc3",),
@@ -137,6 +143,43 @@ _FEATURE_EXTENSION_MAP = {
     "FEAT_SHA3": ("sha3",),
     "FEAT_SHA512": ("sha3",),
     "FEAT_SM4": ("sm4",),
+}
+_FEATURE_MIN_ARCH_MAP = {
+    "FEAT_ASMv8p2": "armv8.2-a",
+    "FEAT_FHM": "armv8.2-a",
+    "FEAT_FP16": "armv8.2-a",
+    "FEAT_RAS": "armv8.2-a",
+    "FEAT_SPE": "armv8.2-a",
+    "FEAT_FCMA": "armv8.3-a",
+    "FEAT_JSCVT": "armv8.3-a",
+    "FEAT_LRCPC": "armv8.3-a",
+    "FEAT_PAuth": "armv8.3-a",
+    "FEAT_DotProd": "armv8.4-a",
+    "FEAT_FlagM": "armv8.4-a",
+    "FEAT_SHA3": "armv8.4-a",
+    "FEAT_SHA512": "armv8.4-a",
+    "FEAT_SM3": "armv8.4-a",
+    "FEAT_SM4": "armv8.4-a",
+    "FEAT_BTI": "armv8.5-a",
+    "FEAT_FlagM2": "armv8.5-a",
+    "FEAT_MTE": "armv8.5-a",
+    "FEAT_RNG": "armv8.5-a",
+    "FEAT_SB": "armv8.5-a",
+    "FEAT_SSBS": "armv8.5-a",
+    "FEAT_BF16": "armv8.6-a",
+    "FEAT_DGH": "armv8.6-a",
+    "FEAT_I8MM": "armv8.6-a",
+    "FEAT_WFxT": "armv8.7-a",
+    "FEAT_LS64": "armv8.7-a",
+    "FEAT_LS64_ACCDATA": "armv8.7-a",
+    "FEAT_LS64_V": "armv8.7-a",
+    "FEAT_MOPS": "armv8.8-a",
+    "FEAT_MTE2": "armv8.9-a",
+    "FEAT_SME": "armv9-a",
+}
+_PROFILE_ARCH_WINDOWS = {
+    PROFILE_ARMV82_TO_ARMV92_GENERATABLE: ("armv8.2-a", "armv9.2-a"),
+    PROFILE_ARMV82_TO_ARMV92_EXECUTABLE: ("armv8.2-a", "armv9.2-a"),
 }
 _BASE_FEATURE_TOKENS = {"FEAT_AdvSIMD", "FEAT_FP"}
 _AARCH64_ASSEMBLER_FALLBACKS = (
@@ -359,8 +402,7 @@ def _classify_execution(
     description: str,
 ) -> Dict[str, Any]:
     upper = mnemonic.upper()
-    lower_desc = f"{title} {description}".lower()
-    trap_like = upper in _TRAP_MNEMONICS or "exception" in lower_desc
+    trap_like = upper in _TRAP_MNEMONICS
     privileged = False
     if instr_class == "system" and upper not in _SAFE_SYSTEM_MNEMONICS:
         privileged = True
@@ -475,6 +517,40 @@ def _feature_arch_extensions(feature_tags: Sequence[str]) -> List[str]:
                 if extension not in extensions:
                     extensions.append(extension)
     return extensions
+
+
+def _arch_sort_key(arch: str) -> tuple[int, int]:
+    match = re.fullmatch(r"armv(\d+)(?:\.(\d+))?-a", arch)
+    if match is None:
+        return (0, 0)
+    major = int(match.group(1))
+    minor = int(match.group(2) or 0)
+    return (major, minor)
+
+
+def _feature_minimum_arch(feature_tags: Sequence[str]) -> str:
+    minimum_arch = "armv8-a"
+    minimum_key = _arch_sort_key(minimum_arch)
+    for tag in feature_tags:
+        for token in _FEATURE_TOKEN_RE.findall(str(tag)):
+            candidate = _FEATURE_MIN_ARCH_MAP.get(token)
+            if candidate is None:
+                continue
+            candidate_key = _arch_sort_key(candidate)
+            if candidate_key > minimum_key:
+                minimum_arch = candidate
+                minimum_key = candidate_key
+    return minimum_arch
+
+
+def _arch_in_window(
+    arch: str,
+    *,
+    minimum_arch: str,
+    maximum_arch: str,
+) -> bool:
+    current = _arch_sort_key(arch)
+    return _arch_sort_key(minimum_arch) <= current <= _arch_sort_key(maximum_arch)
 
 
 def _render_symbol_value(
@@ -594,6 +670,8 @@ def _render_symbol_value(
 def _finalize_asm(asm: str) -> str:
     asm = asm.replace("{", "").replace("}", "")
     asm = _ALT_RE.sub(r"\1", asm)
+    asm = re.sub(r"\[\s+", "[", asm)
+    asm = re.sub(r"\s+\]", "]", asm)
     asm = re.sub(r"\s+,", ",", asm)
     asm = re.sub(r"\(\s+", "(", asm)
     asm = re.sub(r"\s+\)", ")", asm)
@@ -631,11 +709,24 @@ def render_sample_asm(
         operand_index += 1
         rendered.append(value)
 
-    return _finalize_asm("".join(rendered))
+    result = _finalize_asm("".join(rendered))
+    if mnemonic.upper() in {"LD64B", "ST64B"}:
+        result = re.sub(r",\s*#0\]", "]", result)
+    return result
+
+
+def _sequence_arch(encodings: Sequence[Mapping[str, Any]]) -> str:
+    return _feature_minimum_arch(
+        [
+            feature
+            for encoding in encodings
+            for feature in encoding.get("feature_tags", [])
+        ]
+    )
 
 
 def _sequence_body(encodings: Sequence[Mapping[str, Any]], label_name: str) -> str:
-    lines: List[str] = [".arch armv8-a"]
+    lines: List[str] = [f".arch {_sequence_arch(encodings)}"]
     extensions = _feature_arch_extensions(
         [
             feature
@@ -667,7 +758,7 @@ def _sequence_body_without_feature_extensions(
     encodings: Sequence[Mapping[str, Any]],
     label_name: str,
 ) -> str:
-    lines = [".arch armv8-a", ".text"]
+    lines = [f".arch {_sequence_arch(encodings)}", ".text"]
     needs_label = False
     emitted_instruction = False
 
@@ -913,6 +1004,7 @@ def _encoding_payload(
         "instr_class": instr_class,
         "feature_tags": _extract_features(root, encoding),
         "arch_extensions": _feature_arch_extensions(_extract_features(root, encoding)),
+        "minimum_arch": _feature_minimum_arch(_extract_features(root, encoding)),
         "kunpeng_hotness": _kunpeng_score(mnemonic, instr_class),
     }
     entry.update(payload)
@@ -1044,8 +1136,66 @@ def save_catalog(catalog: Mapping[str, Any], path: Path | str = DEFAULT_CATALOG_
     return output
 
 
+def _normalize_loaded_catalog(catalog: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized_catalog: Dict[str, Any] = dict(catalog)
+    normalized_instructions: List[Dict[str, Any]] = []
+
+    for instruction in catalog.get("instructions", []):
+        normalized_instruction = dict(instruction)
+        title = str(instruction.get("title", ""))
+        description = str(instruction.get("description", ""))
+        instr_class = str(instruction.get("instr_class", ""))
+        instruction_mnemonic = str(instruction.get("mnemonic", ""))
+        normalized_encodings: List[Dict[str, Any]] = []
+
+        for encoding in instruction.get("encodings", []):
+            normalized_encoding = dict(encoding)
+            feature_tags = [
+                str(feature)
+                for feature in encoding.get("feature_tags", [])
+                if feature
+            ]
+            mnemonic = str(encoding.get("mnemonic") or instruction_mnemonic)
+            current_instr_class = str(encoding.get("instr_class") or instr_class)
+
+            normalized_encoding["mnemonic"] = mnemonic
+            normalized_encoding["instr_class"] = current_instr_class
+            normalized_encoding["feature_tags"] = feature_tags
+            normalized_encoding["arch_extensions"] = _feature_arch_extensions(feature_tags)
+            normalized_encoding["minimum_arch"] = _feature_minimum_arch(feature_tags)
+            normalized_encoding.update(
+                _classify_execution(
+                    mnemonic,
+                    current_instr_class,
+                    title,
+                    description,
+                )
+            )
+            if normalized_encoding.get("parts"):
+                normalized_encoding["sample_asm"] = render_sample_asm(normalized_encoding)
+            normalized_encodings.append(normalized_encoding)
+
+        normalized_instruction["encodings"] = normalized_encodings
+        normalized_instruction["feature_tags"] = sorted(
+            {
+                feature
+                for encoding in normalized_encodings
+                for feature in encoding.get("feature_tags", [])
+                if feature
+            }
+        )
+        normalized_instruction["minimum_arch"] = _feature_minimum_arch(
+            normalized_instruction["feature_tags"]
+        )
+        normalized_instructions.append(normalized_instruction)
+
+    normalized_catalog["instructions"] = normalized_instructions
+    return normalized_catalog
+
+
 def load_catalog(path: Path | str = DEFAULT_CATALOG_PATH) -> Dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    catalog = json.loads(Path(path).read_text(encoding="utf-8"))
+    return _normalize_loaded_catalog(catalog)
 
 
 def iter_catalog_encodings(
@@ -1061,10 +1211,26 @@ def iter_catalog_encodings(
             merged["doc_path"] = instruction.get("doc_path")
             merged["xml_file"] = instruction.get("xml_file")
             merged["xml_id"] = instruction.get("xml_id")
+            arch_window = _PROFILE_ARCH_WINDOWS.get(normalized)
+            if arch_window is not None and not _arch_in_window(
+                str(merged.get("minimum_arch", "armv8-a")),
+                minimum_arch=arch_window[0],
+                maximum_arch=arch_window[1],
+            ):
+                continue
             if normalized == PROFILE_ALL_GENERATABLE:
                 yield merged
                 continue
+            if normalized == PROFILE_ARMV82_TO_ARMV92_GENERATABLE:
+                yield merged
+                continue
             if normalized == PROFILE_EXECUTABLE_SAFE and merged.get("executable"):
+                yield merged
+                continue
+            if (
+                normalized == PROFILE_ARMV82_TO_ARMV92_EXECUTABLE
+                and merged.get("executable")
+            ):
                 yield merged
                 continue
             if normalized == PROFILE_KUNPENG920_STRESS:

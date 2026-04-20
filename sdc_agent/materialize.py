@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -16,6 +17,27 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "materialized"
 SDC_MEMORY_SIZE = 8192
 SDC_MEMORY_BASE_OFFSET = 1024
 SDC_REGISTER_STRIDE = 96
+_MOV_IMMEDIATE_RE = re.compile(
+    r"^(?P<mnemonic>mov[znk])\s+"
+    r"(?P<register>[A-Za-z0-9_]+)\s*,\s*"
+    r"#?(?P<immediate>\d+)"
+    r"(?:\s*,\s*(?P<shift>.+?))?\s*$",
+    re.IGNORECASE,
+)
+_VECTOR_REGISTER_RE = re.compile(r"\bv(\d+)\b", re.IGNORECASE)
+_FUSED_FP_REWRITES = {
+    "FMLA": "fmadd",
+    "FMLS": "fmsub",
+}
+_SCALARIZED_FP_MNEMONICS = {
+    "FADD",
+    "FMADD",
+    "FMSUB",
+    "FNMADD",
+    "FNMSUB",
+    "FMUL",
+    "FSUB",
+}
 
 
 def _escape_c_string(value: str) -> str:
@@ -26,13 +48,83 @@ def _asm_block(lines: Iterable[str]) -> str:
     return "\n".join(f'"{_escape_c_string(line)}\\n"' for line in lines if line.strip())
 
 
+def _normalize_mov_shift(shift: Optional[str]) -> int:
+    cleaned = str(shift or "").strip().replace("#", "")
+    if not cleaned:
+        return 0
+
+    explicit_match = re.fullmatch(r"(?:LSL|LSR|ASR)\s+(\d+)", cleaned, re.IGNORECASE)
+    if explicit_match is not None:
+        return int(explicit_match.group(1))
+
+    bare_match = re.fullmatch(r"(\d+)", cleaned)
+    if bare_match is None:
+        return 0
+
+    raw_amount = int(bare_match.group(1))
+    if raw_amount in {0, 1, 2, 3}:
+        return raw_amount * 16
+    return raw_amount
+
+
+def _scalarize_vector_fp_operands(text: str) -> str:
+    return _VECTOR_REGISTER_RE.sub(lambda match: f"d{match.group(1)}", text)
+
+
+def _normalize_materialized_asm_line(line: str) -> List[str]:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return []
+
+    if stripped.lower() == ".text":
+        return []
+
+    mov_match = _MOV_IMMEDIATE_RE.fullmatch(stripped)
+    if mov_match is not None:
+        return [
+            (
+                f"{mov_match.group('mnemonic').lower()} "
+                f"{mov_match.group('register').lower()}, "
+                f"#{mov_match.group('immediate')}, "
+                f"lsl #{_normalize_mov_shift(mov_match.group('shift'))}"
+            )
+        ]
+
+    mnemonic = stripped.split(None, 1)[0].upper()
+    if mnemonic in _FUSED_FP_REWRITES:
+        operands = [part.strip() for part in stripped.split(",")]
+        if len(operands) >= 3:
+            head = operands[0].split()
+            if head:
+                destination = head[-1]
+                rewritten = [destination] + operands[1:] + [destination]
+                return [
+                    (
+                        f"{_FUSED_FP_REWRITES[mnemonic]} "
+                        + ", ".join(
+                            _scalarize_vector_fp_operands(operand).lower()
+                            for operand in rewritten
+                        )
+                    )
+                ]
+
+    if mnemonic in _SCALARIZED_FP_MNEMONICS:
+        return [_scalarize_vector_fp_operands(stripped).lower()]
+
+    return [stripped]
+
+
 def _prepare_asm_lines(asm_content: str) -> List[str]:
-    lines = [line.rstrip() for line in asm_content.splitlines() if line.strip()]
+    lines: List[str] = []
+    for line in asm_content.splitlines():
+        lines.extend(_normalize_materialized_asm_line(line))
     return lines or ["nop"]
 
 
 def _register_initialization_lines() -> List[str]:
     lines = [
+        "sub sp, sp, #16",
+        "str x30, [sp]",
         "adrp x18, sdc_memory",
         "add x18, x18, :lo12:sdc_memory",
     ]
@@ -88,6 +180,8 @@ def _register_capture_lines() -> List[str]:
         lines.append(f"str q{reg_index}, [x16, #{reg_index * 16}]")
     lines.extend(
         [
+            "ldr x30, [sp]",
+            "add sp, sp, #16",
             "ret",
             ".size sdc_benchmark_body, .-sdc_benchmark_body",
         ]

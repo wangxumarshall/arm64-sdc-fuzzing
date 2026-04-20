@@ -2,6 +2,7 @@
 
 #ifdef __aarch64__
 #include <arm_neon.h>
+#include <cstdlib>
 #endif
 
 #define NEON_ADD_ELEMENTS (1u << 10)
@@ -29,11 +30,11 @@ static void prv_do_add(const uint32_t *a, const uint32_t *b, uint32_t *res)
 static int neon_add_init(struct test *test)
 {
 #ifdef __aarch64__
-        neon_add_t *na = malloc(sizeof(*na));
+        neon_add_t *na = static_cast<neon_add_t *>(malloc(sizeof(*na)));
 
-        na->a = aligned_alloc(64, NEON_ADD_BUF_SIZE);
-        na->b = aligned_alloc(64, NEON_ADD_BUF_SIZE);
-        na->golden = aligned_alloc_safe(64, NEON_ADD_BUF_SIZE);
+        na->a = static_cast<uint32_t *>(aligned_alloc(64, NEON_ADD_BUF_SIZE));
+        na->b = static_cast<uint32_t *>(aligned_alloc(64, NEON_ADD_BUF_SIZE));
+        na->golden = static_cast<uint32_t *>(aligned_alloc_safe(64, NEON_ADD_BUF_SIZE));
 
         memset_random(na->a, NEON_ADD_BUF_SIZE);
         memset_random(na->b, NEON_ADD_BUF_SIZE);
@@ -50,8 +51,8 @@ static int neon_add_init(struct test *test)
 static int neon_add_run(struct test *test, int cpu)
 {
 #ifdef __aarch64__
-        neon_add_t *na = test->data;
-        uint32_t *res = aligned_alloc(64, NEON_ADD_BUF_SIZE);
+        neon_add_t *na = static_cast<neon_add_t *>(test->data);
+        uint32_t *res = static_cast<uint32_t *>(aligned_alloc(64, NEON_ADD_BUF_SIZE));
 
         TEST_LOOP(test, 1 << 13) {
                 memset(res, 0, NEON_ADD_BUF_SIZE);
@@ -70,7 +71,7 @@ static int neon_add_run(struct test *test, int cpu)
 static int neon_add_cleanup(struct test *test)
 {
 #ifdef __aarch64__
-        neon_add_t *na = test->data;
+        neon_add_t *na = static_cast<neon_add_t *>(test->data);
 
         if (na) {
                 free(na->golden);

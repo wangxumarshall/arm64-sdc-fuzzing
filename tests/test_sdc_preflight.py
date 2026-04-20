@@ -56,7 +56,67 @@ def test_run_preflight_is_not_ready_when_required_binaries_are_missing(tmp_path)
     assert "resolved_paths" in result
     assert result["qemu_user_binary"] is None
     assert result["qemu_system_binary"] is None
-    assert any(step["step_id"] == "install_qemu_user" for step in result["missing_steps"])
+    assert any(step["step_id"] == "build_qemu" for step in result["missing_steps"])
+
+
+def test_run_preflight_sim_profile_reports_qemu_build_deps(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=True,
+            required=kwargs.get("required", True),
+            detail="available",
+            install_hint=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.preflight.resolve_local_tools",
+        lambda **kwargs: LocalToolResolution(
+            compiler="/usr/bin/cc",
+            qemu_user_binary=None,
+            qemu_system_binary=None,
+            gem5_binary=str((tmp_path / "gem5.opt").resolve()),
+            gem5_config=str((tmp_path / "cfg.py").resolve()),
+            mcpat_binary=str((tmp_path / "mcpat").resolve()),
+            meson_binary=None,
+            ninja_binary=None,
+            opendcdiag_root=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.preflight.get_host_context",
+        lambda: HostContext(system="Linux", machine="aarch64", python_version="3.12.2"),
+    )
+
+    def fake_resolve_command(name: str):
+        return {
+            "pkg-config": "/usr/bin/pkg-config",
+            "python3-config": "/usr/bin/python3-config",
+            "python-config": None,
+            "meson": None,
+            "ninja": None,
+            "scons": "/usr/bin/scons",
+            "swig": "/usr/bin/swig",
+        }.get(name)
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "libprotoc 3.21.12\n"
+
+    monkeypatch.setattr("sdc_agent.preflight._resolve_command", fake_resolve_command)
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FakeCompleted())
+
+    result = run_preflight(
+        profile=PROFILE_SIM,
+        vault_path=tmp_path / "artifacts" / "vault.sqlite3",
+        check_build_deps=True,
+    )
+
+    failed_required = {check["name"] for check in result["checks"] if check["required"] and not check["ok"]}
+    assert {"meson", "ninja", "qemu_user_binary", "qemu_system_binary"}.issubset(failed_required)
+    assert any(step["step_id"] == "install_build_dependencies" for step in result["missing_steps"])
+    assert any(step["step_id"] == "build_qemu" for step in result["missing_steps"])
 
 
 def test_run_preflight_dev_profile_only_requires_compiler(monkeypatch, tmp_path):
@@ -261,6 +321,67 @@ def test_resolve_local_tools_prefers_env_over_repo_and_path(monkeypatch, tmp_pat
     )
 
     assert resolved.compiler == str(env_compiler.resolve())
+
+
+def test_resolve_local_tools_falls_back_to_debug_gem5_binary(monkeypatch, tmp_path):
+    debug_binary = tmp_path / "gem5.debug"
+    debug_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    debug_binary.chmod(0o755)
+
+    monkeypatch.setattr(
+        "sdc_agent.tooling.DEFAULT_GEM5_BINARY_CANDIDATES",
+        (tmp_path / "missing-gem5.opt", tmp_path / "missing-gem5.fast", debug_binary),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.tooling.get_host_context",
+        lambda: HostContext(system="Linux", machine="aarch64", python_version="3.12.2"),
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    resolved = resolve_local_tools(
+        compiler="__missing__",
+        qemu_user_binary="__missing__",
+        qemu_system_binary="__missing__",
+        gem5_binary=None,
+        mcpat_binary="__missing__",
+        gem5_config="__missing__",
+        meson_binary="__missing__",
+        ninja_binary="__missing__",
+        opendcdiag_root="__missing__",
+    )
+
+    assert resolved.gem5_binary == str(debug_binary.resolve())
+
+
+def test_resolve_local_tools_falls_back_when_default_gem5_opt_is_missing(monkeypatch, tmp_path):
+    debug_binary = tmp_path / "gem5.debug"
+    debug_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    debug_binary.chmod(0o755)
+
+    default_opt = Path("/data/slim/arm64-sdc-fuzzing/gem5/build/ARM/gem5.opt")
+    monkeypatch.setattr(
+        "sdc_agent.tooling.DEFAULT_GEM5_BINARY_CANDIDATES",
+        (default_opt, tmp_path / "missing-gem5.fast", debug_binary),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.tooling.get_host_context",
+        lambda: HostContext(system="Linux", machine="aarch64", python_version="3.12.2"),
+    )
+    monkeypatch.setattr("shutil.which", lambda name: None)
+
+    resolved = resolve_local_tools(
+        compiler="__missing__",
+        qemu_user_binary="__missing__",
+        qemu_system_binary="__missing__",
+        gem5_binary=default_opt,
+        mcpat_binary="__missing__",
+        gem5_config="__missing__",
+        meson_binary="__missing__",
+        ninja_binary="__missing__",
+        opendcdiag_root="__missing__",
+    )
+
+    assert resolved.gem5_binary == str(debug_binary.resolve())
 
 
 def test_preflight_cli_only_overrides_profile_checks_when_skip_flags_are_set(monkeypatch, tmp_path, capsys):

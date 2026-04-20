@@ -250,13 +250,23 @@ def run_phase4_validation(
             run_key = _spec_run_key(spec)
             run_dir = build_dir / run_key
             gem5_outdir = run_dir / "gem5"
-            gem5_result = run_gem5_semihost_validation(
-                gem5_binary=gem5_binary,
-                gem5_config=gem5_config,
-                elf_path=build_artifacts["elf_path"],
-                output_root=gem5_outdir,
-                timeout=timeout,
-            )
+            gem5_kwargs = {
+                "gem5_binary": gem5_binary,
+                "gem5_config": gem5_config,
+                "elf_path": build_artifacts["elf_path"],
+                "output_root": gem5_outdir,
+                "timeout": timeout,
+            }
+            if gem5_config.name == "sdc_kunpeng920_se.py":
+                gem5_kwargs.update(
+                    {
+                        "fault_model": spec.fault_model,
+                        "fault_target": spec.fault_target,
+                        "fault_bit": spec.fault_bit,
+                        "fault_tick": spec.fault_tick,
+                    }
+                )
+            gem5_result = run_gem5_semihost_validation(**gem5_kwargs)
             fault_request = _build_phase4_fault_request(spec, gem5_result)
             result_status = _classify_phase4_fault_run(
                 qemu_result=qemu_result,

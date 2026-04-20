@@ -78,9 +78,19 @@ def _download_official_xml(xml_dir: Path) -> Path:
 
 
 def _load_current_mnemonics(instruction_file: Path) -> Counter:
-    with instruction_file.open("r", encoding="utf-8") as stream:
-        instructions = yaml.safe_load(stream) or []
-    return Counter(item["Mnemonic"] for item in instructions)
+    files = [instruction_file]
+    props_dir = instruction_file.parent / "instruction_props"
+    if props_dir.is_dir():
+        files.extend(sorted(props_dir.glob("*.yaml")))
+
+    mnemonics: Counter = Counter()
+    for path in files:
+        with path.open("r", encoding="utf-8") as stream:
+            instructions = yaml.safe_load(stream) or []
+        for item in instructions:
+            if isinstance(item, dict) and "Mnemonic" in item:
+                mnemonics[item["Mnemonic"]] += 1
+    return mnemonics
 
 
 def _parse_official_xml(

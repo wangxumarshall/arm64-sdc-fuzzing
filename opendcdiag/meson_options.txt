@@ -33,6 +33,8 @@ option('afl_inc', type : 'string', value : '',
     description : '(Optional) Directory with AFL header files (absolute path).')
 option('coverage', type : 'boolean', value : false,
     description : 'Enable code coverage (default false)')
+option('eigen3_root', type : 'string', value : '',
+    description : 'Optional Eigen install prefix to use instead of system eigen3 (e.g. ../third_party/eigen-5.0.0-install).')
 option('device_type', type: 'combo', choices : ['cpu', 'gpu'], value: 'cpu',
     description : 'Device type for the build (default cpu).')
 option('target_device', type : 'string', value: 'bmg',
