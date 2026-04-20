@@ -168,3 +168,61 @@ def test_build_report_counts_encoding_level_mnemonics_from_official_xml(tmp_path
     assert report["classes"]["general"]["present_unique_mnemonics"] == 1
     assert report["classes"]["general"]["missing_unique_mnemonics"] == 1
     assert report["classes"]["general"]["missing"][0]["mnemonic"] == "CASA"
+
+
+def test_build_report_counts_instruction_extensions_from_instruction_props(tmp_path):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    _write_xml(xml_dir / "add.xml", "ADD", "general")
+    _write_xml(xml_dir / "wfit.xml", "WFIT", "system")
+
+    instruction_file = tmp_path / "instruction.yaml"
+    instruction_file.write_text(
+        yaml.safe_dump(
+            [
+                {"Name": "ADD_X_IMM_V0", "Mnemonic": "ADD", "Format": "F"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    props_dir = tmp_path / "instruction_props"
+    props_dir.mkdir()
+    (props_dir / "armv9_2.yaml").write_text(
+        yaml.safe_dump(
+            [
+                {"Name": "WFIT_V0", "Mnemonic": "WFIT", "Format": "F"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_report(instruction_file, xml_dir, ["general", "system"])
+
+    assert report["current_unique_mnemonics"] == 2
+    assert report["classes"]["general"]["present_unique_mnemonics"] == 1
+    assert report["classes"]["system"]["present_unique_mnemonics"] == 1
+    assert report["classes"]["system"]["missing_unique_mnemonics"] == 0
+
+
+def test_current_repo_includes_armv92_instruction_definitions(tmp_path):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    for mnemonic, instr_class in [
+        ("LD64B", "general"),
+        ("ST64B", "general"),
+        ("ST64BV", "general"),
+        ("ST64BV0", "general"),
+        ("WFET", "system"),
+        ("WFIT", "system"),
+    ]:
+        _write_xml(xml_dir / f"{mnemonic.lower()}.xml", mnemonic, instr_class)
+
+    report = build_report(
+        PROJECT_MICROPROBE_ROOT / "targets/arm64/isa/armv8-common/instruction.yaml",
+        xml_dir,
+        ["general", "system"],
+    )
+
+    assert report["classes"]["general"]["missing_unique_mnemonics"] == 0
+    assert report["classes"]["system"]["missing_unique_mnemonics"] == 0

@@ -196,6 +196,29 @@
   - "Rt"
   Assembly: "OPC Rt, [Rn]"
 
+- Name: "LS64_LOAD"
+  Description: "Single-copy Atomic 64-byte Load"
+  Fields:
+  - "Rn_sp"
+  - "Rt_ls64_out"
+  Assembly: "OPC Rt_ls64_out, [Rn_sp]"
+
+- Name: "LS64_STORE"
+  Description: "Single-copy Atomic 64-byte Store"
+  Fields:
+  - "Rn_sp"
+  - "Rt_ls64_in"
+  Assembly: "OPC Rt_ls64_in, [Rn_sp]"
+
+- Name: "LS64_STORE_STATUS"
+  Description: "Single-copy Atomic 64-byte Store with Status Return"
+  Fields:
+  - "Rs_ls64_status"
+  - "ls64_op"
+  - "Rn_sp"
+  - "Rt_ls64_in"
+  Assembly: "OPC Rs_ls64_status, Rt_ls64_in, [Rn_sp]"
+
 # Branch
 
 - Name: "UNCOND_BRANCH_IMM"
@@ -432,3 +455,9 @@
   - "opc"
   - "Rn"
   Assembly: "OPC [Rn]"
+
+- Name: "WFXT"
+  Description: "Wait For Event/Interrupt with Timeout"
+  Fields:
+  - "Rd_wfxt"
+  Assembly: "OPC Rd_wfxt"

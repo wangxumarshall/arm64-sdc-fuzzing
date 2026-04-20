@@ -3,6 +3,7 @@
 
 dep_static = get_option('dependency_link') == 'static'
 
+fs = import('fs')
 setmod = import('sourceset')
 
 tests_config = configuration_data()
@@ -63,7 +64,27 @@ elif target_machine.system() == 'windows'
     )
 endif
 
-eigen3_dep = dependency('eigen3', include_type : 'system', static : dep_static)
+eigen3_root = get_option('eigen3_root')
+if eigen3_root == ''
+    local_eigen3_root = join_paths(meson.project_source_root(), '..', 'third_party', 'eigen-5.0.0-install')
+    if fs.exists(join_paths(local_eigen3_root, 'include', 'eigen3', 'Eigen', 'Core'))
+        eigen3_root = local_eigen3_root
+    endif
+endif
+
+if eigen3_root != ''
+    eigen3_include_dir = join_paths(eigen3_root, 'include', 'eigen3')
+    if not fs.exists(join_paths(eigen3_include_dir, 'Eigen', 'Core'))
+        error('Configured eigen3_root does not contain include/eigen3/Eigen/Core: ' + eigen3_root)
+    endif
+    message('Using repo-local Eigen from ' + eigen3_root)
+    eigen3_dep = declare_dependency(
+        compile_args : ['-isystem', eigen3_include_dir],
+    )
+else
+    eigen3_dep = dependency('eigen3', include_type : 'system', static : dep_static)
+endif
+
 tests_set_base.add(
     when : eigen3_dep,
     if_true : files(

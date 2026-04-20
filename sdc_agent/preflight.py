@@ -38,6 +38,8 @@ RUNTIME_PYTHON_MODULES = (
     "fasteners",
     "cachetools",
     "rxjson",
+    "numpy",
+    "h5py",
 )
 
 
@@ -223,6 +225,30 @@ def _resolve_command(name: str) -> Optional[str]:
 def check_build_dependencies(host: HostContext) -> List[PreflightCheck]:
     checks = []
 
+    meson = _resolve_command("meson")
+    checks.append(
+        PreflightCheck(
+            name="meson",
+            ok=meson is not None,
+            required=True,
+            detail="found" if meson else "missing",
+            path=meson,
+            install_hint=_install_hint_for_package(host, "meson"),
+        )
+    )
+
+    ninja = _resolve_command("ninja")
+    checks.append(
+        PreflightCheck(
+            name="ninja",
+            ok=ninja is not None,
+            required=True,
+            detail="found" if ninja else "missing",
+            path=ninja,
+            install_hint=_install_hint_for_package(host, "ninja-build", mac_package="ninja"),
+        )
+    )
+
     pkg_config = _resolve_command("pkg-config")
     checks.append(
         PreflightCheck(
@@ -396,14 +422,12 @@ def run_preflight(
         else "Install an ARM64 compiler or set SDC_COMPILER."
     )
     qemu_user_hint = (
-        "Install `qemu-user` on Ubuntu 24.04 ARM or set SDC_QEMU_USER_BINARY."
-        if normalized_profile == PROFILE_SIM
-        else "Set SDC_QEMU_USER_BINARY or build repo-local QEMU."
+        "Build repo-local QEMU with ./scripts/build_qemu_headless.sh "
+        "or set SDC_QEMU_USER_BINARY."
     )
     qemu_system_hint = (
-        "Install `qemu-system-arm` on Ubuntu 24.04 ARM or set SDC_QEMU_SYSTEM_BINARY."
-        if normalized_profile == PROFILE_SIM
-        else "Set SDC_QEMU_SYSTEM_BINARY or build repo-local QEMU."
+        "Build repo-local QEMU with ./scripts/build_qemu_headless.sh "
+        "or set SDC_QEMU_SYSTEM_BINARY."
     )
     require_python_runtime = normalized_profile in {PROFILE_DEV, PROFILE_SIM}
     python_runtime_hint = (
@@ -497,6 +521,8 @@ def run_preflight(
         check.name
         for check in checks
         if check.required and not check.ok and check.name in {
+            "meson",
+            "ninja",
             "pkg_config",
             "python_config",
             "scons",

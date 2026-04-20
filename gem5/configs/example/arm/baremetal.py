@@ -120,7 +120,16 @@ def create(args):
         platform=platform(),
         mem_mode=mem_mode,
         readfile=args.readfile,
+        enable_terminal=False,
+        enable_vnc=False,
     )
+    if hasattr(system.realview, "kmi0") and hasattr(system.realview.kmi0, "ps2"):
+        system.realview.kmi0.ps2.vnc = NULL
+    if hasattr(system.realview, "kmi1") and hasattr(system.realview.kmi1, "ps2"):
+        system.realview.kmi1.ps2.vnc = NULL
+    for uart in getattr(system.realview, "uart", []):
+        if hasattr(uart, "device"):
+            uart.device = SerialNullDevice()
 
     MemConfig.config_mem(args, system)
 
@@ -174,6 +183,8 @@ def create(args):
 
     workload_class = workloads.workload_list.get(args.workload)
     system.workload = workload_class(object_file, system)
+    system.workload.remote_gdb_port = 0
+    system.workload.wait_for_remote_gdb = False
 
     if args.with_pmu:
         enabled_pmu_events = {

@@ -24,6 +24,17 @@ static constexpr const char *native_device_type(const cpu_info_t *info)
 
 #if !SANDSTONE_NO_LOGGING
 
+namespace {
+bool cpu_is_virtualized()
+{
+#ifdef cpu_feature_hypervisor
+    return cpu_has_feature(cpu_feature_hypervisor);
+#else
+    return false;
+#endif
+}
+}
+
 void KeyValuePairLogger::prepare_line_prefix()
 {
     timestamp_prefix = log_timestamp();
@@ -63,7 +74,7 @@ void KeyValuePairLogger::print(int tc)
     logging_printf(LOG_LEVEL_VERBOSE(1), "%s_description = %s\n", test->id, test->description);
     logging_printf(LOG_LEVEL_VERBOSE(1), "%s_pass_count = %d\n", test->id, pc);
     logging_printf(LOG_LEVEL_VERBOSE(2), "%s_virtualized = %s\n", test->id,
-                   cpu_has_feature(cpu_feature_hypervisor) ? "yes" : "no");
+                   cpu_is_virtualized() ? "yes" : "no");
     if (should_print_fail_info()) {
         logging_printf(LOG_LEVEL_VERBOSE(1), "%s_fail_percent = %.1f\n", test->id,
                        100. * (thread_count() - pc) / thread_count());
@@ -266,7 +277,7 @@ void TapFormatLogger::maybe_print_yaml_marker(int fd)
     writeln(fd, yamlseparator,
             "\n  info: {version: ", program_version,
             ", timestamp: ", iso8601_time_now(Iso8601Format::WithoutMs),
-            cpu_has_feature(cpu_feature_hypervisor) ? ", virtualized: true" : nothing,
+            cpu_is_virtualized() ? ", virtualized: true" : nothing,
             "}");
     if (std::string fail_info = fail_info_details(); !fail_info.empty())
         IGNORE_RETVAL(write(fd, fail_info.c_str(), fail_info.size()));

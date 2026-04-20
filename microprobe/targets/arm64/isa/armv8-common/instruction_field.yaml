@@ -20,6 +20,13 @@
   Size: 5
   IO: "I"
 
+- Name: Rn_sp
+  Description: Base Register or Stack Pointer (64-bit)
+  Operand: GPR64_or_SP_regs
+  Show: True
+  Size: 5
+  IO: "I"
+
 - Name: Rm
   Description: Second Source Register (64-bit)
   Operand: GPR64_regs
@@ -33,6 +40,20 @@
   Show: True
   Size: 5
   IO: "IO"
+
+- Name: Rt_ls64_in
+  Description: First LS64 transfer register
+  Operand: LS64_start_regs
+  Show: True
+  Size: 5
+  IO: "I"
+
+- Name: Rt_ls64_out
+  Description: First LS64 destination register
+  Operand: LS64_start_regs
+  Show: True
+  Size: 5
+  IO: "O"
 
 - Name: Rt2
   Description: Second Transfer Register (for load/store pair, 64-bit)
@@ -102,6 +123,20 @@
 - Name: Rs
   Description: Status/source register
   Operand: GPR64_regs
+  Show: True
+  Size: 5
+  IO: "I"
+
+- Name: Rs_ls64_status
+  Description: LS64 status register
+  Operand: GPR64_or_ZR_regs
+  Show: True
+  Size: 5
+  IO: "O"
+
+- Name: Rd_wfxt
+  Description: Timeout source register for WFxT instructions
+  Operand: GPR64_or_ZR_regs
   Show: True
   Size: 5
   IO: "I"
@@ -379,6 +414,12 @@
   Description: System register field op2
   Show: False
   Size: 3
+  IO: "?"
+
+- Name: ls64_op
+  Description: LS64 secondary opcode selector
+  Show: False
+  Size: 6
   IO: "?"
 
 # Zero fields

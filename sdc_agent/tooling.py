@@ -15,6 +15,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REQUIREMENTS = REPO_ROOT / "requirements.txt"
 DEFAULT_DEV_REQUIREMENTS = REPO_ROOT / "requirements-dev.txt"
 DEFAULT_GEM5_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.opt"
+DEFAULT_GEM5_FAST_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.fast"
+DEFAULT_GEM5_DEBUG_BINARY = REPO_ROOT / "gem5" / "build" / "ARM" / "gem5.debug"
+DEFAULT_GEM5_BINARY_CANDIDATES = (
+    DEFAULT_GEM5_BINARY,
+    DEFAULT_GEM5_FAST_BINARY,
+    DEFAULT_GEM5_DEBUG_BINARY,
+)
 DEFAULT_GEM5_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "sdc_kunpeng920_se.py"
 DEFAULT_GEM5_BAREMETAL_CONFIG = REPO_ROOT / "gem5" / "configs" / "example" / "arm" / "baremetal.py"
 DEFAULT_MCPAT_BINARY = REPO_ROOT / "mcpat" / "mcpat"
@@ -162,10 +169,24 @@ def _resolve_command_or_executable(
     env_var: Optional[str] = None,
     repo_candidates: Sequence[Path] = (),
     command_candidates: Sequence[str] = (),
+    fallback_missing_explicit_paths: Sequence[Path] = (),
 ) -> Optional[str]:
     requested = _normalize_requested_value(explicit)
     if requested is not None:
-        return _resolve_single_command_or_executable(requested)
+        resolved = _resolve_single_command_or_executable(requested)
+        if resolved is not None:
+            return resolved
+
+        if _looks_like_path(requested):
+            normalized_requested = str(Path(requested).expanduser().resolve())
+            fallback_requested = {
+                str(Path(candidate).expanduser().resolve())
+                for candidate in fallback_missing_explicit_paths
+            }
+            if normalized_requested not in fallback_requested:
+                return None
+        else:
+            return None
 
     if env_var:
         env_value = _normalize_requested_value(os.environ.get(env_var))
@@ -248,8 +269,9 @@ def resolve_local_tools(
     resolved_gem5 = _resolve_command_or_executable(
         gem5_binary,
         env_var=ENV_GEM5_BINARY,
-        repo_candidates=(DEFAULT_GEM5_BINARY,),
-        command_candidates=("gem5.opt",),
+        repo_candidates=DEFAULT_GEM5_BINARY_CANDIDATES,
+        command_candidates=("gem5.opt", "gem5.fast", "gem5.debug"),
+        fallback_missing_explicit_paths=(DEFAULT_GEM5_BINARY,),
     )
     resolved_mcpat = _resolve_command_or_executable(
         mcpat_binary,
@@ -375,48 +397,32 @@ def build_missing_steps(
         )
 
     if require_qemu_user and resolved.qemu_user_binary is None:
-        if normalized_profile == "sim":
-            add_step(
-                MissingStep(
-                    step_id="install_qemu_user",
-                    detail="Install `qemu-user` so `qemu-aarch64` is available on PATH.",
-                    command=[str((REPO_ROOT / "scripts" / "bootstrap_ubuntu_24_04_arm.sh").resolve())],
-                    cwd=str(REPO_ROOT),
-                    auto_build=False,
-                )
+        add_step(
+            MissingStep(
+                step_id="build_qemu",
+                detail=(
+                    "Build the repo-local QEMU binaries for both user and system mode "
+                    "with ./scripts/build_qemu_headless.sh."
+                ),
+                command=[str((REPO_ROOT / "scripts" / "build_qemu_headless.sh").resolve())],
+                cwd=str(REPO_ROOT),
+                auto_build=normalized_profile != "sim" or host.is_linux_arm64,
             )
-        else:
-            add_step(
-                MissingStep(
-                    step_id="build_qemu",
-                    detail="Build the repo-local QEMU binaries for both user and system mode.",
-                    command=[str((REPO_ROOT / "scripts" / "build_qemu_headless.sh").resolve())],
-                    cwd=str(REPO_ROOT),
-                    auto_build=True,
-                )
-            )
+        )
 
     if require_qemu_system and resolved.qemu_system_binary is None:
-        if normalized_profile == "sim":
-            add_step(
-                MissingStep(
-                    step_id="install_qemu_system",
-                    detail="Install `qemu-system-arm` so `qemu-system-aarch64` is available on PATH.",
-                    command=[str((REPO_ROOT / "scripts" / "bootstrap_ubuntu_24_04_arm.sh").resolve())],
-                    cwd=str(REPO_ROOT),
-                    auto_build=False,
-                )
+        add_step(
+            MissingStep(
+                step_id="build_qemu",
+                detail=(
+                    "Build the repo-local QEMU binaries for both user and system mode "
+                    "with ./scripts/build_qemu_headless.sh."
+                ),
+                command=[str((REPO_ROOT / "scripts" / "build_qemu_headless.sh").resolve())],
+                cwd=str(REPO_ROOT),
+                auto_build=normalized_profile != "sim" or host.is_linux_arm64,
             )
-        else:
-            add_step(
-                MissingStep(
-                    step_id="build_qemu",
-                    detail="Build the repo-local QEMU binaries for both user and system mode.",
-                    command=[str((REPO_ROOT / "scripts" / "build_qemu_headless.sh").resolve())],
-                    cwd=str(REPO_ROOT),
-                    auto_build=True,
-                )
-            )
+        )
 
     if require_gem5 and resolved.gem5_binary is None:
         add_step(

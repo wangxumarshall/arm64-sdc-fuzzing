@@ -1,3 +1,4 @@
+from microprobe.utils.arm64_isa_catalog import PROFILE_ARMV82_TO_ARMV92_EXECUTABLE
 from microprobe.utils.policy import find_policy
 
 
@@ -43,6 +44,36 @@ def test_arm64_target_exposes_catalog_profiles(arm64_target):
     encodings = arm64_target.isa.instruction_catalog(profile_name="EXECUTABLE_SAFE")
     assert len(encodings) > 0
     assert all("sample_asm" in encoding for encoding in encodings[:4])
+
+
+def test_arm64_target_exposes_armv92_ls64_and_wfxt_extensions(arm64_target):
+    mnemonics = {
+        instruction.mnemonic.upper()
+        for instruction in arm64_target.isa.instructions.values()
+    }
+    assert {
+        "LD64B",
+        "ST64B",
+        "ST64BV",
+        "ST64BV0",
+        "WFET",
+        "WFIT",
+    }.issubset(mnemonics)
+
+    encodings = arm64_target.isa.instruction_catalog(
+        profile_name=PROFILE_ARMV82_TO_ARMV92_EXECUTABLE
+    )
+    windowed_mnemonics = {encoding["mnemonic"] for encoding in encodings}
+
+    assert {
+        "LD64B",
+        "ST64B",
+        "ST64BV",
+        "ST64BV0",
+        "WFET",
+        "WFIT",
+    }.issubset(windowed_mnemonics)
+    assert "ADD" not in windowed_mnemonics
 
 
 def test_sdc_fuzzing_policy_synthesizes_static_scores(arm64_target, arm64asm_wrapper_cls):

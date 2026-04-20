@@ -365,6 +365,11 @@ def build_fault_args(
     fault_bit: Optional[int] = None,
     fault_tick: Optional[int] = None,
 ) -> List[str]:
+    normalized_fault_model = str(fault_model or "").strip().lower()
+    normalized_fault_target = str(fault_target or "").strip()
+    if normalized_fault_model in {"", "none"} and not normalized_fault_target:
+        return []
+
     arguments = [
         "--fault-model",
         fault_model,

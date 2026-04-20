@@ -32,11 +32,21 @@ def test_phase4_validation_records_real_campaign_shape(monkeypatch, tmp_path):
         },
     )
 
+    seen_fault_specs = []
+
     def fake_gem5(**kwargs):
         target = kwargs["output_root"]
         target.mkdir(parents=True, exist_ok=True)
         (target / "stats.txt").write_text("", encoding="utf-8")
         (target / "config.json").write_text("{}", encoding="utf-8")
+        seen_fault_specs.append(
+            (
+                kwargs["fault_model"],
+                kwargs["fault_target"],
+                kwargs["fault_bit"],
+                kwargs["fault_tick"],
+            )
+        )
         return {
             "command": ["gem5"],
             "returncode": 0,
@@ -80,7 +90,7 @@ def test_phase4_validation_records_real_campaign_shape(monkeypatch, tmp_path):
         compiler="cc",
         qemu_binary=tmp_path / "qemu-system-aarch64",
         gem5_binary=tmp_path / "gem5.opt",
-        gem5_config=tmp_path / "cfg.py",
+        gem5_config=tmp_path / "sdc_kunpeng920_se.py",
         mcpat_binary=tmp_path / "mcpat",
         fault_models=("register_bit_flip",),
         fault_targets=("x0", "x1"),
@@ -92,6 +102,10 @@ def test_phase4_validation_records_real_campaign_shape(monkeypatch, tmp_path):
     assert payload["summary_status"] == "INVALID"
     assert payload["total_runs"] == 2
     assert len(payload["fault_runs"]) == 2
+    assert seen_fault_specs == [
+        ("register_bit_flip", "x0", 0, 100),
+        ("register_bit_flip", "x1", 0, 100),
+    ]
     assert payload["qemu_golden_digest"] == "1111"
     assert {run["result_status"] for run in payload["fault_runs"]} == {"no_injection"}
     assert payload["fault_execution_plane"] == "phase4_no_injector"

@@ -18,6 +18,7 @@ from .generation import (
     generate_batch,
     generate_testcase,
 )
+from .differential import build_fault_args
 from .materialize import SDC_MEMORY_SIZE, _asm_block, _benchmark_body_lines
 from .power_backends.mcpat_backend import McPATBackend
 from .tooling import (
@@ -369,6 +370,10 @@ def run_gem5_semihost_validation(
     gem5_config: Path,
     elf_path: Path,
     output_root: Path,
+    fault_model: str = "none",
+    fault_target: str = "",
+    fault_bit: Optional[int] = None,
+    fault_tick: Optional[int] = None,
     timeout: int,
 ) -> Dict[str, Any]:
     output_root.mkdir(parents=True, exist_ok=True)
@@ -379,16 +384,42 @@ def run_gem5_semihost_validation(
         "-d",
         str(output_root.resolve()),
         str(gem5_config.resolve()),
-        "--kernel",
-        str(elf_path.resolve()),
-        "--semi-enable",
-        "--semi-stdout",
-        str(semi_stdout.resolve()),
-        "--semi-stderr",
-        str(semi_stderr.resolve()),
-        "--cpu",
-        "atomic",
     ]
+    if gem5_config.name == "sdc_kunpeng920_se.py":
+        cmd.extend(
+            [
+                str(elf_path.resolve()),
+                "--stdout-file",
+                str(semi_stdout.resolve()),
+                "--stderr-file",
+                str(semi_stderr.resolve()),
+                "--cpu-type",
+                "atomic",
+            ]
+        )
+    else:
+        cmd.extend(
+            [
+                "--kernel",
+                str(elf_path.resolve()),
+                "--semi-enable",
+                "--semi-stdout",
+                str(semi_stdout.resolve()),
+                "--semi-stderr",
+                str(semi_stderr.resolve()),
+                "--cpu",
+                "atomic",
+            ]
+        )
+
+    cmd.extend(
+        build_fault_args(
+            fault_model=fault_model,
+            fault_target=fault_target,
+            fault_bit=fault_bit,
+            fault_tick=fault_tick,
+        )
+    )
     result = subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),

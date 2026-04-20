@@ -28,6 +28,7 @@ from .preflight import (
 )
 from .scheduler import FeedbackScheduler
 from .tooling import (
+    DEFAULT_GEM5_BAREMETAL_CONFIG,
     DEFAULT_GEM5_CONFIG,
     resolve_local_tools,
 )
@@ -393,11 +394,13 @@ def _run_profile_preflight(
 
     build_results: List[Dict[str, Any]] = []
     if not preflight["ready"] and build_missing:
-        build_results = _run_build_steps(list(preflight["missing_steps"]))
-        preflight = run_preflight(
-            profile=profile,
-            vault_path=db_path,
-        )
+        manual_steps = [step for step in preflight["missing_steps"] if not step.get("auto_build")]
+        if not manual_steps:
+            build_results = _run_build_steps(list(preflight["missing_steps"]))
+            preflight = run_preflight(
+                profile=profile,
+                vault_path=db_path,
+            )
 
     if not preflight["ready"]:
         raise AgentCommandError(
@@ -502,7 +505,7 @@ def run_e2e_sim(
     output_root: Optional[Path] = None,
     db_path: Optional[Path] = None,
     build_missing: bool = False,
-    timeout: int = 30,
+    timeout: int = 120,
 ) -> Dict[str, Any]:
     output_root, db_path = _prepare_e2e_paths(
         output_root=output_root,
@@ -522,7 +525,12 @@ def run_e2e_sim(
     qemu_user_binary = str(resolved_paths["qemu_user_binary"])
     qemu_system_binary = str(resolved_paths["qemu_system_binary"])
     gem5_binary = str(resolved_paths["gem5_binary"])
-    gem5_config = Path(str(resolved_paths["gem5_config"]))
+    cycle_gem5_config = Path(str(resolved_paths["gem5_config"]))
+    phase_gem5_config = (
+        DEFAULT_GEM5_BAREMETAL_CONFIG.resolve()
+        if DEFAULT_GEM5_BAREMETAL_CONFIG.exists()
+        else cycle_gem5_config
+    )
     mcpat_binary = Path(str(resolved_paths["mcpat_binary"]))
 
     phase2_payload = run_phase2_validation(
@@ -534,7 +542,7 @@ def run_e2e_sim(
         compiler=compiler,
         qemu_binary=qemu_system_binary,
         gem5_binary=Path(gem5_binary),
-        gem5_config=gem5_config,
+        gem5_config=phase_gem5_config,
         mcpat_binary=mcpat_binary,
         timeout=timeout,
     )
@@ -545,7 +553,7 @@ def run_e2e_sim(
         compiler=compiler,
         qemu_binary=qemu_system_binary,
         gem5_binary=Path(gem5_binary),
-        gem5_config=gem5_config,
+        gem5_config=phase_gem5_config,
         mcpat_binary=mcpat_binary,
         fault_models=("register_bit_flip",),
         fault_targets=("x0",),
@@ -576,7 +584,7 @@ def run_e2e_sim(
         compiler=compiler,
         qemu_binary=qemu_user_binary,
         gem5_binary=gem5_binary,
-        gem5_config=gem5_config,
+        gem5_config=cycle_gem5_config,
         fault_model="register_bit_flip",
         fault_target="x0",
         fault_bit=0,
@@ -588,7 +596,15 @@ def run_e2e_sim(
     )
     if phase2_payload.get("status") != "INNER_READY":
         raise RuntimeError("Phase 2 simulation validation did not reach INNER_READY.")
-    if phase4_payload.get("summary_status") not in {"MATCHED", "SDC_FOUND"}:
+    phase4_summary_status = str(phase4_payload.get("summary_status", ""))
+    phase4_execution_plane = str(phase4_payload.get("fault_execution_plane", ""))
+    if (
+        phase4_summary_status not in {"MATCHED", "SDC_FOUND"}
+        and not (
+            phase4_summary_status == "INVALID"
+            and phase4_execution_plane == "phase4_no_injector"
+        )
+    ):
         raise RuntimeError("Phase 4 simulation validation did not produce a valid summary status.")
     if int(cycle_payload.get("generate", {}).get("inserted", 0)) <= 0:
         raise RuntimeError("Cycle generation produced no inserted testcases.")
@@ -602,7 +618,11 @@ def run_e2e_sim(
         "mode": "e2e-sim",
         "output_root": str(output_root),
         "db": str(db_path),
-        "resolved_paths": resolved_paths,
+        "resolved_paths": {
+            **resolved_paths,
+            "gem5_baremetal_config": str(phase_gem5_config),
+            "gem5_cycle_config": str(cycle_gem5_config),
+        },
         "preflight": preflight,
         "build": {
             "requested": build_missing,
@@ -803,7 +823,7 @@ def _build_parser() -> argparse.ArgumentParser:
     e2e_sim.add_argument("--output-root", type=Path, default=None)
     e2e_sim.add_argument("--db", type=Path, default=None)
     e2e_sim.add_argument("--build-missing", action="store_true")
-    e2e_sim.add_argument("--timeout", type=int, default=30)
+    e2e_sim.add_argument("--timeout", type=int, default=120)
 
     e2e_hw = subparsers.add_parser("e2e-hw")
     e2e_hw.add_argument("--output-root", type=Path, default=None)

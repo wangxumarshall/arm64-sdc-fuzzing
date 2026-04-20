@@ -1,0 +1,54 @@
+# Copyright 2026
+# Licensed under the Apache License, Version 2.0
+
+# ARMv9.2 / Armv8.7-A instruction coverage extensions
+
+# ==================== LS64 ====================
+
+# LD64B (Single-copy Atomic 64-byte Load)
+- Name: "LD64B_V0"
+  Mnemonic: "LD64B"
+  Description: "Single-copy Atomic 64-byte Load"
+  Opcode: "1111100000111111110100"
+  Format: "LS64_LOAD"
+
+# ST64B (Single-copy Atomic 64-byte Store without Return)
+- Name: "ST64B_V0"
+  Mnemonic: "ST64B"
+  Description: "Single-copy Atomic 64-byte Store without Return"
+  Opcode: "1111100000111111100100"
+  Format: "LS64_STORE"
+
+# ST64BV (Single-copy Atomic 64-byte Store with Return)
+- Name: "ST64BV_V0"
+  Mnemonic: "ST64BV"
+  Description: "Single-copy Atomic 64-byte Store with Return"
+  Opcode: "11111000001"
+  Format: "LS64_STORE_STATUS"
+  Operands:
+    ls64_op: ["44", "ls64_op", "?"]
+
+# ST64BV0 (Single-copy Atomic 64-byte EL0 Store with Return)
+- Name: "ST64BV0_V0"
+  Mnemonic: "ST64BV0"
+  Description: "Single-copy Atomic 64-byte EL0 Store with Return"
+  Opcode: "11111000001"
+  Format: "LS64_STORE_STATUS"
+  Operands:
+    ls64_op: ["40", "ls64_op", "?"]
+
+# ==================== WFxT ====================
+
+# WFIT (Wait For Interrupt with Timeout)
+- Name: "WFIT_V0"
+  Mnemonic: "WFIT"
+  Description: "Wait For Interrupt with Timeout"
+  Opcode: "110101010000001100010000001"
+  Format: "WFXT"
+
+# WFET (Wait For Event with Timeout)
+- Name: "WFET_V0"
+  Mnemonic: "WFET"
+  Description: "Wait For Event with Timeout"
+  Opcode: "110101010000001100010000000"
+  Format: "WFXT"

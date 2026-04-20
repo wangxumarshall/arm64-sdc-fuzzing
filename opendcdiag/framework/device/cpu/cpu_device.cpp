@@ -14,7 +14,11 @@ std::string device_features_to_string(device_features_t f)
 {
     std::string result;
     const char *comma = "";
-    for (size_t i = 0; i < std::size(x86_locators); ++i) {
+#if defined(__aarch64__)
+    for (size_t i = 0; i < (sizeof(arm64_locators) / sizeof(arm64_locators[0])); ++i) {
+#else
+    for (size_t i = 0; i < (sizeof(x86_locators) / sizeof(x86_locators[0])); ++i) {
+#endif
         if (f & CPU_FEATURE_CONSTANT(i)) {
             result += comma;
             result += features_string + features_indices[i] + 1;
@@ -30,7 +34,11 @@ void dump_device_info()
 
     // find the best matching CPU
     const char *detected = "<unknown>";
+#if defined(__aarch64__)
+    for (const auto &arch : arm64_architectures) {
+#else
     for (const auto &arch : x86_architectures) {
+#endif
         if ((arch.features & device_features) == arch.features) {
             detected = arch.name;
             break;

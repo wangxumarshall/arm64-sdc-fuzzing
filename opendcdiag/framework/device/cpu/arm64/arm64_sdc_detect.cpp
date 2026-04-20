@@ -15,6 +15,21 @@
 #include <arm_acle.h>
 #endif
 
+extern "C" {
+int kunpeng920_ecc_init(void);
+int kunpeng920_ecc_read_errors(memory_error_stats *stats, int cpu);
+}
+
+static uint64_t crc64_update_byte(uint64_t crc, uint8_t byte)
+{
+    constexpr uint64_t polynomial = 0x42F0E1EBA9EA3693ULL;
+    crc ^= static_cast<uint64_t>(byte) << 56;
+    for (int bit = 0; bit < 8; ++bit) {
+        crc = (crc & (1ULL << 63)) ? ((crc << 1) ^ polynomial) : (crc << 1);
+    }
+    return crc;
+}
+
 enum sdc_detection_method
 {
     SDC_METHOD_HW_ECC,
@@ -161,10 +176,10 @@ int SdcDetector::detect_via_crc32(const void *data, size_t len, uint32_t *crc_ou
     size_t num_words = len / 8;
     size_t remaining = len % 8;
 
-    uint64_t crc = 0xFFFFFFFFFFFFFFFFULL;
+    uint32_t crc = 0xFFFFFFFFU;
 
     for (size_t i = 0; i < num_words; ++i) {
-        crc = __crc32cx(crc, ptr[i]);
+        crc = __crc32cd(crc, ptr[i]);
     }
 
     if (remaining > 0) {
@@ -199,13 +214,16 @@ int SdcDetector::detect_via_crc64(const void *data, size_t len, uint64_t *crc_ou
     uint64_t crc = 0xFFFFFFFFFFFFFFFFULL;
 
     for (size_t i = 0; i < num_words; ++i) {
-        crc = __crc64cx(crc, ptr[i]);
+        const uint8_t *word_bytes = reinterpret_cast<const uint8_t *>(&ptr[i]);
+        for (size_t j = 0; j < sizeof(uint64_t); ++j) {
+            crc = crc64_update_byte(crc, word_bytes[j]);
+        }
     }
 
     if (remaining > 0) {
         const uint8_t *byte_ptr = reinterpret_cast<const uint8_t *>(ptr + num_words);
         for (size_t i = 0; i < remaining; ++i) {
-            crc = __crc64cb(crc, byte_ptr[i]);
+            crc = crc64_update_byte(crc, byte_ptr[i]);
         }
     }
 

@@ -7,6 +7,11 @@ QEMU_DIR="$REPO_ROOT/qemu"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
 NUM_JOBS="${NUM_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)}"
 COMMON_PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+USER_LOCAL_BIN="${HOME}/.local/bin"
+
+if [ -d "$USER_LOCAL_BIN" ]; then
+    COMMON_PATH="$USER_LOCAL_BIN:$COMMON_PATH"
+fi
 
 if [ -z "$PYTHON_BIN" ]; then
     echo "ERROR: python3 is required to configure QEMU."
@@ -20,6 +25,7 @@ echo "QEMU Headless ARM64 System Build"
 echo "=========================================="
 echo "Source: $QEMU_DIR"
 echo "Python: $PYTHON_BIN"
+echo "PATH: $COMMON_PATH"
 echo ""
 
 rm -rf build GNUmakefile
@@ -28,7 +34,6 @@ env \
     -u CC -u CXX -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS \
     CC=cc \
     CXX=c++ \
-    OBJC=/usr/bin/clang \
     AR=ar \
     NM=nm \
     RANLIB=ranlib \

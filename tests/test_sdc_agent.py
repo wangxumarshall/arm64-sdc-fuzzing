@@ -289,6 +289,82 @@ def test_sdc_agent_run_e2e_dev_generates_materialized_smoke(monkeypatch, tmp_pat
     assert report_payload["invoked_as"] == "e2e-dev"
 
 
+def test_sdc_agent_run_e2e_dev_normalizes_materialized_asm(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-dev-normalized"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "profile": "dev",
+            "checks": [],
+            "resolved_paths": {
+                "compiler": "cc",
+                "qemu_user_binary": None,
+                "qemu_system_binary": None,
+                "gem5_binary": None,
+                "gem5_config": None,
+                "mcpat_binary": None,
+                "meson_binary": None,
+                "ninja_binary": None,
+                "opendcdiag_root": None,
+            },
+            "missing_steps": [],
+            "qemu_user_binary": None,
+            "qemu_system_binary": None,
+        },
+    )
+
+    def fake_generate_batch(**kwargs):
+        with SDCVault(kwargs["db_path"]) as vault:
+            vault.upsert_testcase(
+                VaultEntry(
+                    testcase_key="dev-normalized",
+                    asm_content="\n".join(
+                        [
+                            "MOVZ x29, 6189, 0",
+                            "MOVK x29, 55662, 1",
+                            "FMLA v11, v6, v4",
+                            "FMSUB v8, v2, v11, v5",
+                        ]
+                    ),
+                    target_name="arm64",
+                    status="PENDING",
+                )
+            )
+        return {
+            "requested": 1,
+            "planned": 1,
+            "inserted": 1,
+            "testcase_keys": ["dev-normalized"],
+            "failed": [],
+            "db": str(kwargs["db_path"]),
+        }
+
+    monkeypatch.setattr("sdc_agent.agent.generate_batch", fake_generate_batch)
+    monkeypatch.setattr(
+        "sdc_agent.agent.summarize_vault",
+        lambda db_path, limit=5: {"counts": {"ALL": 1}, "db": str(db_path)},
+    )
+
+    payload = run_e2e_dev(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=False,
+        timeout=5,
+    )
+
+    materialized = Path(payload["materialized_source"]).read_text(encoding="utf-8")
+
+    assert "movz x29, #6189, lsl #0" in materialized
+    assert "movk x29, #55662, lsl #16" in materialized
+    assert "fmadd d11, d6, d4, d11" in materialized
+    assert "fmsub d8, d2, d11, d5" in materialized
+    assert "MOVK x29, 55662, 1" not in materialized
+    assert "FMLA v11, v6, v4" not in materialized
+
+
 def test_sdc_agent_run_e2e_dev_fails_when_generation_emits_no_valid_testcases(monkeypatch, tmp_path):
     output_root = tmp_path / "e2e-dev-fail"
     db_path = output_root / "vault.sqlite3"

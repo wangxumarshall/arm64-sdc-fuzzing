@@ -2,7 +2,7 @@
 
 #ifdef __aarch64__
 #include <arm_neon.h>
-#include <arm_crypto_neon.h>
+#include <cstdlib>
 #endif
 
 #define CRYPTO_ELEMENTS (1u << 10)
@@ -102,13 +102,13 @@ static void prv_sha256_hash(const uint8_t *input, uint8_t *output, size_t len)
 static int crypto_test_init(struct test *test)
 {
 #ifdef __aarch64__
-    crypto_test_data *data = malloc(sizeof(*data));
+    crypto_test_data *data = static_cast<crypto_test_data *>(malloc(sizeof(*data)));
 
-    data->aes_key = aligned_alloc(64, 32);
-    data->aes_plaintext = aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
-    data->aes_ciphertext = aligned_alloc_safe(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
-    data->sha256_input = aligned_alloc(64, CRYPTO_ELEMENTS * 4);
-    data->sha256_hash = aligned_alloc_safe(64, 32);
+    data->aes_key = static_cast<uint8_t *>(aligned_alloc(64, 32));
+    data->aes_plaintext = static_cast<uint8_t *>(aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE));
+    data->aes_ciphertext = static_cast<uint8_t *>(aligned_alloc_safe(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE));
+    data->sha256_input = static_cast<uint8_t *>(aligned_alloc(64, CRYPTO_ELEMENTS * 4));
+    data->sha256_hash = static_cast<uint8_t *>(aligned_alloc_safe(64, 32));
 
     memset_random(data->aes_key, 32);
     memset_random(data->aes_plaintext, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
@@ -128,12 +128,12 @@ static int crypto_test_init(struct test *test)
 static int crypto_test_run(struct test *test, int cpu)
 {
 #ifdef __aarch64__
-    crypto_test_data *data = test->data;
+    crypto_test_data *data = static_cast<crypto_test_data *>(test->data);
 
-    uint8_t *test_aes_plaintext = aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
-    uint8_t *test_aes_ciphertext = aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
-    uint8_t *test_sha256_input = aligned_alloc(64, CRYPTO_ELEMENTS * 4);
-    uint8_t *test_sha256_hash = aligned_alloc(64, 32);
+    uint8_t *test_aes_plaintext = static_cast<uint8_t *>(aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE));
+    uint8_t *test_aes_ciphertext = static_cast<uint8_t *>(aligned_alloc(64, CRYPTO_ELEMENTS * AES_BLOCK_SIZE));
+    uint8_t *test_sha256_input = static_cast<uint8_t *>(aligned_alloc(64, CRYPTO_ELEMENTS * 4));
+    uint8_t *test_sha256_hash = static_cast<uint8_t *>(aligned_alloc(64, 32));
 
     TEST_LOOP(test, 1 << 10) {
         memcpy(test_aes_plaintext, data->aes_plaintext, CRYPTO_ELEMENTS * AES_BLOCK_SIZE);
@@ -164,7 +164,7 @@ static int crypto_test_run(struct test *test, int cpu)
 static int crypto_test_cleanup(struct test *test)
 {
 #ifdef __aarch64__
-    crypto_test_data *data = test->data;
+    crypto_test_data *data = static_cast<crypto_test_data *>(test->data);
 
     if (data) {
         free(data->aes_key);
