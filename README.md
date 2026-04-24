@@ -40,7 +40,7 @@
 3. 硬件验证环：将高价值样本推广到 `opendcdiag-arm` 并把结果回灌数据库
 
 完整目标架构、阶段路线图与验收口径见 [plan.md](./plan.md)。
-当前源码事实、关键发现与验证结果见 [findings.md](./findings.md) 与 [progress.md](./progress.md)。
+当前实现状态、结构说明与验证结果见 [progress.md](./progress.md) 与 [docs/code-structure.md](./docs/code-structure.md)。
 
 ### 1.3 SDC-Agent 的定义
 
@@ -362,10 +362,10 @@ sdc-fuzzing/
 │       └── sdc_fault_request.py
 ├── mcpat/
 └── docs/
+    ├── code-structure.md
     ├── guides/
-    ├── spec.md    # compatibility stub
-    ├── plan.md    # compatibility stub
-    └── state.md   # compatibility stub
+    ├── kunpeng920.md
+    └── monorepo.md
 ```
 
 ---

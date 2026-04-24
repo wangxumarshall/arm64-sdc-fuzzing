@@ -5,7 +5,6 @@
 规范与当前状态请优先查看根目录：
 
 - `plan.md`
-- `findings.md`
 - `progress.md`
 
 ## 1. 执行面约定

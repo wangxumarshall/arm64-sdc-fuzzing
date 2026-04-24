@@ -1,6 +1,6 @@
 # Findings And Current State
 
-本文件是仓库根目录下的当前状态、源码事实、关键发现与技术决策主文档，吸收了此前 `docs/state.md` 中的当前阶段、最新发现与源码基线内容。
+本文件是 `2026-04-06` 的历史状态快照，不再作为当前状态主文档。当前实现状态与验证结果以 `progress.md` 为准；结构说明见 `docs/code-structure.md`。
 
 ## 1. Current Phase
 
@@ -45,8 +45,8 @@
 ### 3.1 Documentation
 
 1. 根目录文档与 `docs/` 文档曾长期重复。
-2. 当前 root `plan.md`、`findings.md`、`progress.md` 已成为权威文档。
-3. `docs/spec.md`、`docs/plan.md`、`docs/state.md` 现在仅保留兼容入口。
+2. `2026-04-06` 时，根级文档体系完成了一次集中收敛。
+3. `docs/` 下的结构与专题文档现在只承担补充说明，不再与根级权威文档并行承载状态主线。
 
 ### 3.2 Control Plane And Tooling
 
@@ -64,8 +64,8 @@
 
 1. 根目录文档成为唯一权威来源：
    - `plan.md` 承担 architecture + roadmap
-   - `findings.md` 承担 current state + decisions + risks
    - `progress.md` 承担 implementation log + verification
+   - 本文件保留为当时的状态快照
 2. CLI 入口改成 lazy import，轻量命令不再被 Microprobe 依赖阻塞。
 3. preflight 必须显式检查 Python runtime modules，而不是只看二进制工具。
 4. catalog asm validation 改成 best effort：

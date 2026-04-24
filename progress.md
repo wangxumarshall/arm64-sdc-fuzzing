@@ -86,9 +86,9 @@
 
 ### Documentation Consolidation
 
-- 新增根级 `plan.md`，合并旧 `docs/spec.md` 与 `docs/plan.md` 的长期架构合同和阶段路线图。
-- 将根级 `findings.md` 和 `progress.md` 收敛为新的权威状态文档。
-- `docs/spec.md`、`docs/plan.md`、`docs/state.md` 已改为兼容入口。
+- 新增根级 `plan.md`，集中承载长期架构合同和阶段路线图。
+- 将根级状态与验证说明收敛到 `progress.md` 持续维护。
+- 旧的分散式文档入口已退出当前文档主线。
 - README 与构建指南已改为引用根级文档。
 
 ### Control Plane Fixes

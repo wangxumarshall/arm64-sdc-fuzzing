@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | `README.md` | 项目总览 | 描述目标、A/B 架构、主要模块映射 |
 | `plan.md` | 长期架构合同 | 完成态架构、phase 路线图、验收口径 |
-| `findings.md` | 当前源码事实 | 记录“已经实现了什么”与当前风险 |
+| `findings.md` | 历史状态快照 | 保留 `2026-04-06` 的状态与决策快照 |
 | `progress.md` | 实施日志 | 记录最近修复、验证结果和环境限制 |
 | `docs/` | 补充文档 | 包含 monorepo 约束、构建说明、ISA 文档等 |
 | `sdc_agent/` | 控制面核心代码 | 项目真正的业务逻辑主目录 |
@@ -484,14 +484,12 @@ OpenDCDiag 只在硬件验证环出现，不进入高频内循环。
 
 1. `plan.md`
    - 长期架构和阶段路线图
-2. `findings.md`
-   - 当前实现事实和决策
-3. `progress.md`
+2. `progress.md`
    - 最近一次实施与验证
-4. `docs/monorepo.md`
+3. `docs/monorepo.md`
    - domain 边界和管理方式
 
-其中 `docs/spec.md`、`docs/plan.md`、`docs/state.md` 现在是兼容入口，不应再视为权威正文。
+根级 `plan.md` 与 `progress.md` 是当前主文档；`findings.md` 保留为历史快照；`docs/` 下内容用于结构和专题补充。
 
 ## 16. 测试结构如何映射源码
 

@@ -193,7 +193,7 @@ aarch64-linux-gnu-gcc --version
 
 **现象**：`compile_static_elf` 返回非零 `returncode`，`stderr` 包含 `Error: operand ...` 或 `Error: unknown mnemonic`。
 
-**原因**：Microprobe 生成器产出的汇编序列包含非法指令或 operand 格式错误。已知案例包括 ARM64 operand 定义中三条 relative immediate 使用了错误字段（见 `findings.md` §3.3）。
+**原因**：Microprobe 生成器产出的汇编序列包含非法指令或 operand 格式错误。已知案例包括 ARM64 operand 定义中三条 relative immediate 使用了错误字段。
 
 **排查**：
 1. 检查 `stderr` 中的具体汇编报错行号和指令
@@ -280,6 +280,6 @@ sudo apt-get install gcc-aarch64-linux-gnu
 5. 如果仍然无法解决
    - 确认主机架构：uname -m（预期 aarch64）
    - 确认发行版：cat /etc/os-release（基线为 Ubuntu 24.04）
-   - 检查 findings.md 中是否有相关记录
+   - 检查 progress.md 中是否有相关记录
    - 非基线发行版（如 Ubuntu 25.10）只能做 best-effort 验证
 ```
