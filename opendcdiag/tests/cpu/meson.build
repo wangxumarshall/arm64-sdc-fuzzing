@@ -63,7 +63,23 @@ elif target_machine.system() == 'windows'
     )
 endif
 
-eigen3_dep = dependency('eigen3', include_type : 'system', static : dep_static)
+# OpenDCDiag depends on Eigen 5.0. Prefer a system eigen3 >= 5.0 when one is
+# available; otherwise fall back to the bundled source tree under third-part/
+# (currently Eigen 5.0.1). This mirrors the boost fallback above and lets the
+# build proceed on hosts without an eigen3-devel package.
+eigen3_dep = dependency('eigen3', version : '>=5.0', include_type : 'system', static : dep_static, required : false)
+if not eigen3_dep.found()
+    # Fall back to the bundled Eigen 5.0 source tree under third-part/
+    # (relative to this meson.build, which lives in tests/cpu/).
+    assert(fs.is_dir('../../third-part/Eigen'),
+        'Bundled Eigen 5.0 source not found under third-part/. ' +
+        'Run: git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part')
+    eigen3_dep = declare_dependency(
+        include_directories : include_directories('../../third-part'),
+        version : '5.0.1',
+    )
+    message('Using bundled Eigen 5.0 source from third-part/')
+endif
 tests_set_base.add(
     when : eigen3_dep,
     if_true : files(

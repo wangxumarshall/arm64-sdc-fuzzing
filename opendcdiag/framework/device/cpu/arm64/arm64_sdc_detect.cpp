@@ -161,10 +161,12 @@ int SdcDetector::detect_via_crc32(const void *data, size_t len, uint32_t *crc_ou
     size_t num_words = len / 8;
     size_t remaining = len % 8;
 
-    uint64_t crc = 0xFFFFFFFFFFFFFFFFULL;
+    // ARMv8 CRC32 instructions accumulate into a 32-bit CRC. __crc32cd
+    // processes a 64-bit word (__crc32cx does not exist in GCC's <arm_acle.h>).
+    uint32_t crc = 0xFFFFFFFFu;
 
     for (size_t i = 0; i < num_words; ++i) {
-        crc = __crc32cx(crc, ptr[i]);
+        crc = __crc32cd(crc, ptr[i]);
     }
 
     if (remaining > 0) {
@@ -174,7 +176,7 @@ int SdcDetector::detect_via_crc32(const void *data, size_t len, uint32_t *crc_ou
         }
     }
 
-    *crc_out = static_cast<uint32_t>(crc);
+    *crc_out = ~crc;
     return 0;
 #else
     return -1;
@@ -191,29 +193,20 @@ int SdcDetector::detect_via_crc64(const void *data, size_t len, uint64_t *crc_ou
         return -1;
     }
 
-#ifdef __aarch64__
-    const uint64_t *ptr = static_cast<const uint64_t *>(data);
-    size_t num_words = len / 8;
-    size_t remaining = len % 8;
-
+    // ARMv8 provides no native CRC64 instruction. Fall back to a portable
+    // byte-driven CRC-64 (ISO 3309, polynomial 0xD800000000000000, reflected)
+    // so the SDC checksum path still works on aarch64 without HW support.
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
     uint64_t crc = 0xFFFFFFFFFFFFFFFFULL;
-
-    for (size_t i = 0; i < num_words; ++i) {
-        crc = __crc64cx(crc, ptr[i]);
-    }
-
-    if (remaining > 0) {
-        const uint8_t *byte_ptr = reinterpret_cast<const uint8_t *>(ptr + num_words);
-        for (size_t i = 0; i < remaining; ++i) {
-            crc = __crc64cb(crc, byte_ptr[i]);
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= bytes[i];
+        for (int b = 0; b < 8; ++b) {
+            uint64_t mask = -(crc & 1ULL);
+            crc = (crc >> 1) ^ (0xD800000000000000ULL & mask);
         }
     }
-
-    *crc_out = crc;
+    *crc_out = ~crc;
     return 0;
-#else
-    return -1;
-#endif
 }
 
 int SdcDetector::detect_via_checksum(const void *data, size_t len, uint32_t *checksum_out)

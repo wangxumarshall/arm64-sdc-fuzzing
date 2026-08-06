@@ -7,3 +7,6 @@
 # ctags
 tags
 /.vscode/
+# bundled Eigen 5.0 source tree (fetched, not committed).
+# To set up: git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
+/third-part/
