@@ -37,12 +37,88 @@ sudo dnf install -y boost-devel eigen3-devel gcc gcc-c++ git gtest-devel meson z
 ### Building
 
 OpenDCDiag is built with the [Meson Build
-System](https://mesonbuild.com/). For example, a release build can be
-easily created as follows.
+System](https://mesonbuild.com/) and the [Ninja](https://ninja-build.org/)
+backend. Meson >= 1.3 and a C++23-capable compiler (GCC >= 12) are required.
+
+#### Prerequisites recap
+
+The packages listed under the platform sections above are sufficient, but note
+two specifics that commonly trip up fresh checkouts:
+
+- **Eigen**: OpenDCDiag depends on **Eigen >= 5.0**. Most distros still ship
+  Eigen 3.x (e.g. `libeigen3-dev`/`eigen3-devel` provides 3.3.x). When the
+  system Eigen is too old, the build falls back to the **bundled Eigen 5.0.1
+  source tree under `third-part/`** (see `tests/cpu/meson.build`). That tree is
+  a git submodule, so it must be fetched before the first build — see the next
+  section.
+- **No `.gitmodules` in this repo**: `opendcdiag/` is itself checked out as a
+  git submodule of a parent repository, and its `third-part` (Eigen) entry is a
+  nested submodule whose config lives in the parent. As a result, a plain
+  `git submodule update --init` run *inside* `opendcdiag/` does **not** discover
+  `third-part/`. You must either init it from the parent repo, or init it by
+  path from here.
+
+#### Initialize the bundled Eigen source (third-part/)
+
+Run one of the following before the first build. `third-part/` is in
+`.gitignore` (fetched, not committed), so a fresh clone leaves it empty and the
+build will `assert`-fail without it (unless a system Eigen >= 5.0 is present).
 
 ```console
-meson builddir --buildtype=release
+# Option A: from the parent repository (init all nested submodules)
+cd .. && git submodule update --init --recursive opendcdiag/third-part
+
+# Option B: from inside opendcdiag/, init by path
+git submodule update --init third-part
+
+# Option C: no git history — clone Eigen 5.0.1 directly
+git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
+```
+
+If the build complains `Bundled Eigen 5.0 source not found under third-part/`,
+you skipped this step.
+
+#### Native build (x86_64 or ARM64)
+
+```console
+meson setup builddir --buildtype=release
 ninja -C builddir
+```
+
+On AArch64 hosts, Meson auto-applies `-march=armv8.1-a -mtune=generic`
+(see `meson.build`), matching e.g. the Kunpeng 920 (ARMv8.1-A). No extra flags
+are needed.
+
+#### Cross-compile for ARM64 from x86
+
+```console
+sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu   # Ubuntu
+meson setup builddir --cross-file meson-cross-arm64.ini --buildtype=release
+ninja -C builddir
+```
+
+#### Verify the build
+
+```console
+./builddir/opendcdiag --version
+./builddir/opendcdiag --list
+```
+
+A clean release build compiles all targets with no errors. A handful of
+warnings are expected and harmless on ARM64:
+`sysv_abi attribute ignored` (x86-only calling convention in
+`framework/sandstone.cpp`), `[[assume(...)]] attribute ignored` (GCC 12
+limitation), and any remaining `-Wunused` notes in
+`framework/device/cpu/arm64/`.
+
+#### Full-load, continuous run
+
+The `-T forever` option loops indefinitely; `-n 0` uses one thread per logical
+CPU for full load; `--ignore-os-error --ignore-timeout` keep it running past
+errors. See `framework/sandstone_opts.cpp` for the full option set.
+
+```console
+./builddir/opendcdiag -T forever -n 0 --ignore-os-error --ignore-timeout -o /dev/null -q
 ```
 
 ## Contributions

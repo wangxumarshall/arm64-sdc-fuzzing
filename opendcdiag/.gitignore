@@ -8,5 +8,11 @@
 tags
 /.vscode/
 # bundled Eigen 5.0 source tree (fetched, not committed).
-# To set up: git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
+# This is a NESTED git submodule, but its .gitmodules entry lives in the
+# parent repo (there is no .gitmodules here), so `git submodule update --init`
+# run from inside opendcdiag/ will NOT pick it up. Init by path, or from the
+# parent repo, before the first build — otherwise meson setup will assert-fail
+# (see tests/cpu/meson.build and CLAUDE.md "Pitfall").
+#   git submodule update --init third-part
+#   git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
 /third-part/

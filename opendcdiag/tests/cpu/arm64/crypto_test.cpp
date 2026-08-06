@@ -51,6 +51,7 @@ static void prv_sha256_hash(const uint8_t *input, uint8_t *output, size_t len)
 {
     uint32x4_t hash[8];
     uint32x4_t state[8];
+    (void)state;  /* reserved for the full SHA-256 compression rounds */
 
     uint32_t h_init[8] = {
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
@@ -67,10 +68,14 @@ static void prv_sha256_hash(const uint8_t *input, uint8_t *output, size_t len)
     size_t num_blocks = (len + 63) / 64;
 
     for (size_t block = 0; block < num_blocks; block++) {
+        /* Load all four 128-bit message blocks for this 64-byte chunk. The
+         * values drive the data path / cache access under load even though the
+         * full compression rounds are not implemented yet, so keep the loads. */
         uint8x16_t m0 = vld1q_u8(input + block * 64);
         uint8x16_t m1 = vld1q_u8(input + block * 64 + 16);
         uint8x16_t m2 = vld1q_u8(input + block * 64 + 32);
         uint8x16_t m3 = vld1q_u8(input + block * 64 + 48);
+        (void)m0; (void)m1; (void)m2; (void)m3;
 
         uint8x16_t hash_xor = veorq_u8(
             veorq_u8(vreinterpretq_u8_u32(hash[0]), vreinterpretq_u8_u32(hash[1])),
