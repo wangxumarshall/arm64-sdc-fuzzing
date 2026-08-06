@@ -10,10 +10,10 @@ tags
 # bundled Eigen 5.0 source tree (fetched, not committed).
 # To set up: git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
 /third-part/
-# SDC diagnostic probe binaries (sources in docs/core179-diagnostics/, build separately)
-/docs/core179-diagnostics/esdiag3
-/docs/core179-diagnostics/fpprobe
-/docs/core179-diagnostics/loadgen
-/docs/core179-diagnostics/probe
+# SDC diagnostic probe binaries (sources in docs/sdc1-01-02-core179-diagnostics/, build separately)
+/docs/sdc1-01-02-core179-diagnostics/esdiag3
+/docs/sdc1-01-02-core179-diagnostics/fpprobe
+/docs/sdc1-01-02-core179-diagnostics/loadgen
+/docs/sdc1-01-02-core179-diagnostics/probe
 # run artifacts
 /run-forever.out
