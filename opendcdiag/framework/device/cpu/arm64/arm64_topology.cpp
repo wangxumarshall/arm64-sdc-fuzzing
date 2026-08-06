@@ -55,7 +55,6 @@ private:
     int detect_sysfs_cpu_count();
     bool read_sysfs_file(int dirfd, const char *filename, char *buf, size_t bufsize);
     bool read_sysfs_int(int dirfd, const char *filename, int *value);
-    bool read_sysfs_int64(int dirfd, const char *filename, int64_t *value);
 
     TopologySource detect_package_info();
     int detect_core_type_from_midr(uint64_t midr);
@@ -110,21 +109,6 @@ bool Arm64TopologyDetector::read_sysfs_int(int dirfd, const char *filename, int 
         return false;
 
     *value = static_cast<int>(val);
-    return true;
-}
-
-bool Arm64TopologyDetector::read_sysfs_int64(int dirfd, const char *filename, int64_t *value)
-{
-    char buf[64];
-    if (!read_sysfs_file(dirfd, filename, buf, sizeof(buf)))
-        return false;
-
-    char *endptr;
-    long long val = strtoll(buf, &endptr, 10);
-    if (endptr == buf || *endptr != '\0')
-        return false;
-
-    *value = static_cast<int64_t>(val);
     return true;
 }
 
@@ -256,7 +240,6 @@ bool Arm64TopologyDetector::parse_cpu_topology_sysfs(int cpu, Topology::Thread *
     int thread_siblings = 0;
     if (read_sysfs_int(cpufd, "topology/thread_siblings_list", &thread_siblings)) {
         info->thread_id = 0;
-        int current_cpu = 0;
         char buf[256];
         if (read_sysfs_file(cpufd, "topology/thread_siblings_list", buf, sizeof(buf))) {
             const char *ptr = buf;
