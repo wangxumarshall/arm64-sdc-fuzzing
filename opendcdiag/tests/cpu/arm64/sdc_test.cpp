@@ -98,21 +98,21 @@ static int sdc_test_run(struct test *test, int cpu)
     int detect_result = arm64_sdc_detect(SDC_METHOD_CRC32);
     if (detect_result == 0) {
         arm64_sdc_detect_via_crc32(test_buffer, SDC_TEST_BUFFER_SIZE, &crc32_result);
-        memcmp_or_fail(&crc32_result, &data->golden_crc32, sizeof(crc32_result),
+        memcmp_or_fail(&crc32_result, &data->golden_crc32, 1,
                 "CRC32 checksum mismatch - data corruption detected");
     }
 
     detect_result = arm64_sdc_detect(SDC_METHOD_CRC64);
     if (detect_result == 0) {
         arm64_sdc_detect_via_crc64(test_buffer, SDC_TEST_BUFFER_SIZE, &crc64_result);
-        memcmp_or_fail(&crc64_result, &data->golden_crc64, sizeof(crc64_result),
+        memcmp_or_fail(&crc64_result, &data->golden_crc64, 1,
                 "CRC64 checksum mismatch - data corruption detected");
     }
 
     detect_result = arm64_sdc_detect(SDC_METHOD_CHECKSUM);
     if (detect_result == 0) {
         arm64_sdc_detect_via_checksum(test_buffer, SDC_TEST_BUFFER_SIZE, &checksum_result);
-        memcmp_or_fail(&checksum_result, &data->golden_checksum, sizeof(checksum_result),
+        memcmp_or_fail(&checksum_result, &data->golden_checksum, 1,
                 "Checksum mismatch - data corruption detected");
     }
 

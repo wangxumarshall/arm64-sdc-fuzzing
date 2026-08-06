@@ -42,4 +42,16 @@ struct hw_access_ops
 struct hw_access_ops *arm64_get_hw_access_ops(void);
 int arm64_hw_init(void);
 
+// Kunpeng920 ECC backend (defined in kunpeng920_ecc.cpp). Declared here so
+// that arm64_sdc_detect.cpp (and other consumers) can call them without each
+// translation unit needing its own forward declaration.
+#ifdef __cplusplus
+extern "C" {
+#endif
+int kunpeng920_ecc_init(void);
+int kunpeng920_ecc_read_errors(struct memory_error_stats *stats, int cpu);
+#ifdef __cplusplus
+}
+#endif
+
 #endif // ARM64_PRIVILEGE_H

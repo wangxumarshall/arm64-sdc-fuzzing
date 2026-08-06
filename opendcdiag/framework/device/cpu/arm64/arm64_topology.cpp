@@ -236,13 +236,20 @@ bool Arm64TopologyDetector::parse_cpu_topology_sysfs(int cpu, Topology::Thread *
 
     bool success = true;
 
-    if (!read_sysfs_int(cpufd, "topology/physical_package_id", &info->package_id))
+    int value = -1;
+    if (read_sysfs_int(cpufd, "topology/physical_package_id", &value))
+        info->package_id = static_cast<decltype(info->package_id)>(value);
+    else
         success = false;
 
-    if (!read_sysfs_int(cpufd, "topology/core_id", &info->core_id))
+    if (read_sysfs_int(cpufd, "topology/core_id", &value))
+        info->core_id = static_cast<decltype(info->core_id)>(value);
+    else
         success = false;
 
-    if (!read_sysfs_int(cpufd, "topology/cluster_id", &info->module_id)) {
+    if (read_sysfs_int(cpufd, "topology/cluster_id", &value)) {
+        info->module_id = static_cast<decltype(info->module_id)>(value);
+    } else {
         info->module_id = info->core_id;
     }
 
@@ -531,12 +538,11 @@ void Arm64TopologyDetector::detect(const LogicalProcessorSet &enabled_cpus)
     }
     assert(i == sApp->thread_count);
 
-    if (SandstoneConfig::Debug) {
-        if (char *mock_topo = getenv("SANDSTONE_MOCK_TOPOLOGY")) {
-            if (create_mock_topology(mock_topo))
-                return;
-        }
-    }
+    // Note: the x86 topology path honors SANDSTONE_MOCK_TOPOLOGY via
+    // TopologyDetector::create_mock_topology(), which is a private member of
+    // the TopologyDetector class in framework/device/cpu/topology.cpp. That
+    // member is not accessible from Arm64TopologyDetector, so the mock
+    // override is not supported on the aarch64 topology path.
 
     bool detected = detect_via_acpi_pptt();
     if (!detected) {
