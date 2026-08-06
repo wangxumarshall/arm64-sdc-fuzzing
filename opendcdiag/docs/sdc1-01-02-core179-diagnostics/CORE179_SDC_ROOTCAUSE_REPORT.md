@@ -3,7 +3,7 @@
 **报告日期:** 2026-08-06
 **目标系统:** 4-socket Kunpeng 920 (TaiShan v110) 服务器,192 核心
 **受测软件:** OpenDCDiag(自研 ARM64 构建,Eigen 5.0.1)
-**结论摘要:** 核 179 存在一个微架构层面的、负载敏感的计算路径写回缺陷,在同 socket 满载下静默损坏 Eigen Cholesky 稀疏求解结果的 `elem[0]`,损坏为多位数据混叠(非单粒子翻转)。已排除软件 bug、内存 ECC、中断干扰、EINJ 注入等全部非硬件假设。
+**结论摘要:** 核 179 存在一个微架构层面的、负载敏感的计算路径写回缺陷,在同 socket 满载下静默损坏 Eigen Cholesky 稀疏求解结果的 `elem[0]`,损坏为多位数据混叠。已排除软件 bug、内存 ECC、中断干扰、EINJ 注入等全部非硬件假设。
 
 ---
 
@@ -11,7 +11,7 @@
 
 OpenDCDiag 在 ARM64 (aarch64) 上完成构建并通过自测后,启动无限循环全量用例运行(~23 个测试)。运行约 100 秒后首次出现测试失败,失败集中在 `eigen_sparse` 测试(double 精度稀疏 Cholesky 求解)。且运行期间系统两次卡死,需强制掉电重启。
 
-本研究的目标是:
+本文目标是:
 1. 区分"Eigen 5.0 软件稳定性问题"与"真实硬件 SDC";
 2. 在芯片微架构层面定位根因(哪个功能单元、什么机理);
 3. 给出可复现的实验证据链与可交付的诊断探针。
@@ -28,7 +28,7 @@ OpenDCDiag 在 ARM64 (aarch64) 上完成构建并通过自测后,启动无限循
 | L1 | D/I 各 64KB,4 路;L2 512KB;L3 24MB / package(24 核共享) |
 | OS | openEuler 24.03 SP3,kernel 6.6.0-145.3.23.154.aarch64 |
 | EDAC | ghes_edac,32 DIMM,APEI firmware-first |
-| OpenDCDiag | 自研构建,`--buildtype=debugoptimized -Dssl_link_type=dynamic`,bundled Eigen 5.0.1(`third-part/` submodule) |
+| OpenDCDiag-arm | 自研构建,`--buildtype=debugoptimized -Dssl_link_type=dynamic`,bundled Eigen 5.0.1(`third-part/` submodule) |
 
 诊断期间 `kernel.perf_event_paranoid` 调为 -1 以启用非特权系统级 per-core PMU 采样。
 
@@ -124,9 +124,9 @@ OpenDCDiag 在 ARM64 (aarch64) 上完成构建并通过自测后,启动无限循
 ### 6.1 第三层推理
 核 179 与健康核 176 在**所有微架构事件上差异 < 2%**,IPC/cache/TLB/分支/stall 全部正常。**`memory_error` PMU = 0**、EDAC 计数 = 0。
 
-**第三层结论:排除核 179 的 cache/LSU/TLB/分支/浮点 pipe/内存子系统损坏**(PMU 必会反映任一损坏);也排除内存 ECC 损坏。
+**第三层结论:排除核 179 的 cache/LSU/TLB/分支/浮点 pipe/内存子系统损坏**(PMU 会反映任一损坏);也排除内存 ECC 损坏。
 
-此时出现悖论:核 179 在微架构层完全正常,却在满载下静默算错。这指向**计算执行路径中一个不被 PMU/EDAC 捕获的静默缺陷**。
+此时出现悖论:核 179 在微架构层完全正常,却在满载下静默算错。这指向**计算执行路径中不被 PMU/EDAC 捕获的静默缺陷**。
 
 ## 7. 实时内核错误监控(挂死根因排查)
 
