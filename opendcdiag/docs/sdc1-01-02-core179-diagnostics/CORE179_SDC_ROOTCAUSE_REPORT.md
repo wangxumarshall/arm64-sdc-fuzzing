@@ -295,14 +295,16 @@ for (int k = 0; k < 1500; k++) {
 | `mru_sparse.c -O3 -ffast-math` | + 强制向量化 | ~500 | **0/1500** | ❌ 不触发 |
 | `mru_sparse.c -ffp-contract=fast` | + FMA contraction(fmadd/fmsub) | ~500 | **0/1500** | ❌ 不触发 |
 | `mru_neon.c` | 密集 LDL^T + NEON intrinsics(vfmaq_f64) | ~460 | **0/1500** | ❌ 不触发 |
+| `mru_full_sparse.c` | **完整稀疏 Cholesky(union-find etree + DFS postorder + symbolic + numeric,Eigen 算法忠实重建)** | ~675(-O2)/~1084(-O0) | **0/1500 (N=256), 0/200 (N=512), 0/100 (N=1024)** | ❌ 不触发 |
 | **`esdiag3.cpp`(Eigen compute)** | **完整稀疏 Cholesky** | **~6477** | **13/1500** | ✅ 触发 |
 | **`esdiag_phase2.cpp`(Eigen numeric-only)** | **numeric factorize** | **~7165** | **5-12/1500** | ✅ 触发 |
 
 **关键发现(给芯片设计的重要负反馈):**
-- **所有纯 C 变体(标量/稀疏/NEON intrinsics)都不触发,只有 Eigen 版触发** → 触发不是单一指令类型(NEON FMA)的问题,而是**指令足迹/执行窗口规模**的问题。
-- **强相关**:纯 C 变体 ~450-500 条指令,**0 失败**;Eigen 变体 ~6477-7165 条指令,**触发**。指令足迹差 **~13-15×**。
-- **机理**:Eigen 的 numeric factorize_preordered 是大型代码(elimination tree 符号分析 + 稀疏三角求解 + rank-1 update + 多分支),填满 OoO 引擎的 ROB/物理寄存器堆到临界状态,在该状态下偶发跨迭代状态泄漏;纯 C 的简化实现(无论标量/稀疏/NEON)代码足迹太小,**无法填满执行窗口**,故不触发。
-- **给设计的负反馈**:**故障不可用简化/标量测试复现** —— 需要足够大的代码足迹(填满 OoO 执行窗口)才触发。这本身说明缺陷与**ROB/PRF 容量压力**强相关,而非特定指令。DFT 向量需保留完整 numeric factorize 的代码足迹,不能用简化版替代。
+- **所有纯 C 变体(标量/稀疏/NEON intrinsics/完整稀疏重建)都不触发,只有 Eigen 版触发** → 触发不是单一指令类型(NEON FMA)的问题,也不是单纯代码足迹规模的问题。
+- **足迹假设被证伪**:最初观察纯 C ~450-500 指令 vs Eigen ~6500-7200,推测是足迹规模;但构建完整纯 C 稀疏 Cholesky(`mru_full_sparse.c`,忠实重建 Eigen 的 union-find etree + DFS postorder + symbolic + numeric,-O2=675/-O0=1084 指令)并扩大到 N=512/1024,**动态指令数从 35M 升至更大,仍 0 触发**。而 Eigen 在 N=256 即触发。
+- **perf 对比(800 迭代)**:Eigen 执行 **91.3 亿指令**,纯 C full-sparse 仅 **3480 万指令**(差 **262×**)——Eigen 的模板展开产生大量动态指令,纯 C 编译器即使同算法也无法产生等量。
+- **真正的触发因子**:Eigen 编译产物的**特定指令序列交织**(模板展开 + 固定大小块操作 + NEON 标量 FMA + 大量分支),是 GCC 在不同源码结构下无法复现的。触发需要这**具体序列**,而非算法或规模。
+- **给设计的负反馈**:**故障不可用纯 C/标量/简化测试复现**,必须用 Eigen 编译产物(或等价模板展开序列)作为 DFT 向量。这本身说明缺陷与**特定指令序列下的 OoO 状态泄漏**强相关,而非通用执行压力。
 
 **MRU 约束与可行性**:
 - 完全纯 C(不 #include Eigen)的 MRU **不可行**:需要在纯 C 中重写 Eigen 的完整 factorize_preordered(符号分析 + elimination tree + 稀疏求解 + rank-1 update),等价于重写 Eigen,失去"最小"意义。
