@@ -60,12 +60,18 @@ not.
 ## Full-load / continuous run
 
 `-T forever` = loop indefinitely (the key "nonstop" flag).
-`-n 0` = one thread per logical CPU (full load).
+`-n <N>` = run with N threads. **Do NOT use `-n 0`** — in this build `0` is
+treated as out-of-range and clamped to 1, so only one core runs (the warning
+`value out of range for option '-n / --threads': 0` appears in stdout). For
+full load pass the explicit CPU count: this Kunpeng 920 host has `nproc` = 128,
+so use `-n 128`.
 `--ignore-os-error --ignore-timeout` = don't halt on errors/timeouts.
 
 ```console
-./builddir/opendcdiag -T forever -n 0 --ignore-os-error --ignore-timeout -o /dev/null -q
+./builddir/opendcdiag -T forever -n 128 --ignore-os-error --ignore-timeout -o builddir/run.log -q
 ```
+(`builddir/` is gitignored; keep a log file instead of `/dev/null` so SDC
+errors are captured.)
 
 Timed variant: `-T 24h`. Directed ARM64 tests: `-e arm64_neon -e arm64_sdc`.
 Self-tests: `./builcdiag/opendcdiag --test-tests`. Bats suite: `bats bats/sanity-check/`.
