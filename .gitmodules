@@ -43,6 +43,3 @@
 [submodule "qemu/tests/lcitool/libvirt-ci"]
 	path = qemu/tests/lcitool/libvirt-ci
 	url = https://gitlab.com/libvirt/libvirt-ci.git
-[submodule "opendcdiag/third-part"]
-	path = opendcdiag/third-part
-	url = https://gitlab.com/libeigen/eigen.git
