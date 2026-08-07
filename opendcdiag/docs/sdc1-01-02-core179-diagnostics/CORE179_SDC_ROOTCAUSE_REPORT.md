@@ -296,6 +296,9 @@ for (int k = 0; k < 1500; k++) {
 | `mru_sparse.c -ffp-contract=fast` | + FMA contraction(fmadd/fmsub) | ~500 | **0/1500** | ❌ 不触发 |
 | `mru_neon.c` | 密集 LDL^T + NEON intrinsics(vfmaq_f64) | ~460 | **0/1500** | ❌ 不触发 |
 | `mru_full_sparse.c` | **完整稀疏 Cholesky(union-find etree + DFS postorder + symbolic + numeric,Eigen 算法忠实重建)** | ~675(-O2)/~1084(-O0) | **0/1500 (N=256), 0/200 (N=512), 0/100 (N=1024)** | ❌ 不触发 |
+| `mru_ace.c` | 8×128-bit FMA 累加器(高 ACE+IBR)+paired load | ~500 | **0/1500** | ❌ 不触发 |
+| `mru_branch.c` | + 数据相关不可预测分支(高 branch-miss) | ~600 | **0/1500** | ❌ 不触发 |
+| `mru_asm.c` | **内联汇编精确复现 Eigen 热循环(fmsub+indirect ldr/str)** | ~500 | **0/1500** | ❌ 不触发 |
 | **`esdiag3.cpp`(Eigen compute)** | **完整稀疏 Cholesky** | **~6477** | **13/1500** | ✅ 触发 |
 | **`esdiag_phase2.cpp`(Eigen numeric-only)** | **numeric factorize** | **~7165** | **5-12/1500** | ✅ 触发 |
 
