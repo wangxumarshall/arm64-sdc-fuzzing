@@ -73,14 +73,41 @@ so use `-n 128`.
 (`builddir/` is gitignored; keep a log file instead of `/dev/null` so SDC
 errors are captured.)
 
-Timed variant: `-T 24h`. Directed ARM64 tests: `-e arm64_neon -e arm64_sdc`.
-Self-tests: `./builcdiag/opendcdiag --test-tests`. Bats suite: `bats bats/sanity-check/`.
+Timed variant: `-T 24h`. Directed ARM64 tests: `-e arm64_sdc -e neon_add -e arm_crypto`
+(note: `--list` does not print the arm64 tests, but `-e <name>` runs them).
+Self-tests: `./builddir/opendcdiag --selftests --max-test-loop-count 1`
+(exits `invalid` by design — the selftests deliberately fail/crash to verify
+the framework's failure detection; count `result: pass` for the positive cases).
+Bats suite: `bats bats/sanity-check/` (bats is not installed on this host; the
+directed-test + full-load runs are the authoritative ARM64 gate).
 Full option reference: `framework/sandstone_opts.cpp` (`usage()`).
+
+## ARM64 port vs upstream sync notes
+
+The `opendcdiag/` subtree is synced from `github.com/opendcdiag/opendcdiag`
+main. Upstream is x86-only; the local ARM64 additions are the 27 files under
+`framework/device/cpu/arm64/`, `tests/cpu/arm64/`, `docs/ARM64_*`,
+`docs/sdc1-01-02-core179-diagnostics/`, `CLAUDE.md`, `meson-cross-arm64.ini`,
+plus local edits in 5 shared files (`meson.build` aarch64 flags,
+`framework/device/cpu/meson.build` arm64 subdir, `tests/cpu/meson.build`
+bundled-Eigen fallback, `.gitignore`, `README.md` ARM64 docs).
+
+Known ARM64/x86 divergences that surface on each upstream sync:
+- `cpu_info_t` gained `die_id` (upstream renamed `tile_id`→`die_id`,
+  commit 4094e185). `arm64_topology.cpp` must use `device_info[i].die_id`,
+  not `tile_id`.
+- `framework/mmap_region.c` was deleted upstream (logging refactor merged it
+  into `LogMessagesFile`); it is dead code locally and removed on sync.
+- `unittests` binary (`meson.build` `executable('unittests', ..., native: true)`)
+  hard-codes `-march=haswell` and is x86-only — it does NOT build on aarch64
+  and is `build_by_default: false`, so it's not part of the default build.
+  `--test-tests` needs it; use `--selftests` instead on ARM64.
 
 ## Expected ARM64 warnings (harmless)
 
-- `sysv_abi attribute ignored` — `framework/sandstone.cpp:868`, x86-only ABI
-  on an ARM64 build. Ignored by design.
+- `sysv_abi attribute ignored` — `framework/sandstone_run.cpp:664`, x86-only ABI
+  on an ARM64 build. Ignored by design. (Upstream moved `test_end` from
+  `sandstone.cpp` to `sandstone_run.cpp`; the line number moves with it.)
 - `attributes at the beginning of statement are ignored` — `[[assume(...)]]`
   in `framework/device/cpu/topology.cpp`. GCC 12 limitation, semantics fine.
 - `-Wrestrict` note in `framework/logging.cpp` — libstdc++ memcpy folding noise.
