@@ -16,20 +16,32 @@
 
 void SandstoneTestSet::load_all_tests()
 {
-    std::span<struct test> known_tests = cfg.is_selftest ? selftests : regular_tests;
+    std::span<struct test> known_tests = test_source();
+
+    auto add_to_all_group_map = [&](struct test &t) {
+        if (SandstoneConfig::RestrictedCommandLine)
+            return;
+        // only populate all_group_map if we're parsing command-line
+        for (auto ptr = t.groups; ptr && *ptr; ++ptr) {
+            all_group_map[(*ptr)->id].push_back(&t);
+        }
+    };
+
     for (struct test &t : known_tests) {
         all_tests.push_back(&t);
-        if (!SandstoneConfig::RestrictedCommandLine) {
-            // only populate all_group_map if we're parsing command-line
-            for (auto ptr = t.groups; ptr && *ptr; ++ptr) {
-                all_group_map[(*ptr)->id].push_back(&t);
-            }
+        if (is_selftest()) {
+            // self tests don't have hardcoded test IDs, so add them now
+            t.shortid = std::hash<std::string_view>()(t.id) & 0xffffff;
         }
+        add_to_all_group_map(t);
     }
 
     /* add "special" tests */
     special_tests = special_tests_for_device();
-    special_tests.push_back(&mce_test); // mce always added last
+    special_tests.push_back(&_test_mce_check); // mce always added last
+    for (struct test *t : special_tests) {
+        add_to_all_group_map(*t);
+    }
 }
 
 /* Looks up a name or a pattern among all "known" tests. Returns all the
@@ -68,11 +80,13 @@ std::vector<struct test *> SandstoneTestSet::lookup(const char *name)
     return res;
 }
 
-SandstoneTestSet::SandstoneTestSet(struct test_set_cfg cfg, unsigned int flags) : cfg(cfg), flags(flags) {
+SandstoneTestSet::SandstoneTestSet(struct test_set_cfg cfg, unsigned int flags)
+    : cfg(cfg), flags(flags)
+{
     load_all_tests(); /* initialize the catalog */
     if (!(flags & enable_all_tests)) return;
-    std::span<struct test> source = !cfg.is_selftest ? regular_tests : selftests;
-    for (struct test &test : source) {
+
+    for (struct test &test : test_source()) {
         if ((test.flags & test_is_optional) && !sApp->include_optional)
             continue;
         if (test.quality_level < sApp->requested_quality)

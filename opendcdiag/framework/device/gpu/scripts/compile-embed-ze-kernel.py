@@ -31,15 +31,20 @@ def compile_spirv(source_file):
 
 def compile_bin(source_file, device, language):
     # TODO what does -gen_file option actually do? What is .gen file? Could it be useful in our code?
-    ocloc_args = ['ocloc', '-file', source_file, '-device', device, '-output_no_suffix']
+    filename, _ = os.path.splitext(os.path.basename(source_file))
+    out_filename = f"{filename}.bin"
+    ocloc_args = ['ocloc', '-file', source_file, '-device', device, '-o', out_filename]
     if language == 'CMC':
         ocloc_args += ['-options', '-cmc']
+    else:
+        # Use OpenCL C 3.0
+        ocloc_args += ['-options', '-cl-std=CL3.0']
     ocloc_proc = subprocess.Popen(ocloc_args, stdout=subprocess.PIPE)
     stdout = ocloc_proc.communicate()[0]
     if ocloc_proc.returncode != 0:
         return ocloc_proc.returncode, stdout
 
-    binary_contents = open(os.path.splitext(os.path.basename(source_file))[0] + '.bin', mode='rb').read()
+    binary_contents = open(out_filename, mode='rb').read()
     return 0, binary_contents
 
 

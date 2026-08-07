@@ -30,6 +30,7 @@
 #include <sandstone_chrono.h>
 #include <sandstone_iovec.h>
 #include <sandstone_utils.h>
+#include <sandstone_yaml.h>
 
 #include "gettid.h"
 #include "test_data.h"
@@ -75,12 +76,6 @@ extern char *program_invocation_name;       // also in glibc's <errno.h>
 
 struct test;
 
-struct mmap_region
-{
-    void *base;
-    size_t size;        /* actual size, not rounded up to page */
-};
-
 /*
  * Called from sandstone_main(). A function for framework to check for system or device criteria.
  */
@@ -88,10 +83,6 @@ void device_specific_init(void);
 
 /* splitlock_detect.c */
 bool splitlock_enforcement_enabled(void);
-
-/* mmap_region.c */
-struct mmap_region mmap_file(int fd);
-void munmap_file(struct mmap_region r);
 
 /* memfpt.c / cpp */
 size_t memfpt_current_high_water_mark(void);
@@ -105,6 +96,11 @@ int open_memfd(enum MemfdCloexecFlag);
 */
 void dump_device_info();
 
+static inline __attribute__((always_inline, noreturn)) void ud2()
+{
+    __builtin_trap();
+    __builtin_unreachable();
+}
 #ifdef __cplusplus
 }
 
@@ -201,6 +197,8 @@ template <> struct test_the_test_data<true>
     };
 
     std::vector<PerThread> per_thread;
+    // different from sApp->current_test_starttime that it does not include test preparation overhead
+    MonotonicTimePoint time_at_test_start;
     MonotonicTimePoint time_at_run_threads_start;
     size_t hwm_at_start;
     bool test_tests = false;
@@ -251,7 +249,7 @@ struct TestConfig
     bool selftest = false;
     bool ud_on_failure = false;
     bool use_strict_runtime = false;
-    RescheduleMode reschedule_mode = RescheduleMode::queue;
+    RescheduleMode reschedule_mode = RescheduleMode::unset;
 
     // logging parameters
     LogLevelVerbosity verbosity = LogLevelVerbosity::Error;
@@ -320,25 +318,14 @@ struct SandstoneApplicationConfig {
     int thermal_throttle_temp = DefaultTemperatureThreshold;
 
     int thread_count;
+    int device_count;
 };
 
 struct SandstoneApplication : SandstoneApplicationConfig, public test_the_test_data<SandstoneConfig::Debug>
 {
     static constexpr int MaxRetestCount = sizeof(PerThreadFailures::value_type) * 8;
+    static constexpr int UlogCount = 3;
     using OutputFormat = TestConfig::OutputFormat;
-
-    struct SlicePlans {
-        static constexpr int MinimumCpusPerSocket = 8;
-        static constexpr int DefaultMaxCoresPerSlice = 32;
-        enum Type : int8_t {
-            FullSystem = -1,
-            IsolateSockets,
-            IsolateNuma,
-            Heuristic,
-        };
-        using Slices = std::vector<DeviceRange>;
-        std::array<Slices, 3> plans;
-    };
 
     struct SharedMemory;
 
@@ -358,11 +345,15 @@ struct SandstoneApplication : SandstoneApplicationConfig, public test_the_test_d
     int threshold_time_remaining = 30000;
 
     struct {
-        void (*cb)(void *);
+        void (*call)(void *);
+        void (*cleanup)(void *);
         void *token;
-    } current_test_failure_callback;
+    } current_test_failure_callback = {};
 
     std::unique_ptr<RandomEngineWrapper, RandomEngineDeleter> random_engine;
+#if SANDSTONE_ULOG
+    std::array<volatile uint32_t *, UlogCount> ulog_addresses = {};
+#endif
 #if SANDSTONE_FREQUENCY_MANAGER
     std::unique_ptr<FrequencyManager> frequency_manager;
 #endif
@@ -428,6 +419,7 @@ struct SandstoneApplication::SharedMemory
     // per-thread & variable length
     int main_thread_count = 0;
     int total_thread_count = 0;
+    int total_device_count = 0;
     alignas(64) device_info_t device_info[];         // C99 Flexible Array Member
 
 #if 0
@@ -476,7 +468,7 @@ inline void SandstoneApplication::select_main_thread(int slice)
 {
     assert(current_fork_mode() != ForkMode::no_fork || slice == 0);
     main_thread_data_ptr += slice;
-    test_thread_data_ptr += main_thread_data_ptr->device_range.starting_device;
+    test_thread_data_ptr += main_thread_data_ptr->thread_range.starting_thread;
 }
 
 template <typename Lambda> static void for_each_main_thread(Lambda &&l, int max_slices = INT_MAX)
@@ -486,10 +478,26 @@ template <typename Lambda> static void for_each_main_thread(Lambda &&l, int max_
         l(sApp->main_thread_data(i), -1 - i);
 }
 
-template <typename Lambda> static void for_each_test_thread(Lambda &&l)
+template <typename Lambda> static void for_each_test_thread(Lambda &&l, int max_slices = INT_MAX)
 {
-    for (int i = 0; i < thread_count(); i++)
-        l(sApp->test_thread_data(i), i);
+    bool is_main_process = sApp->is_main_process();
+    int slices = is_main_process ? std::min(sApp->shmem->main_thread_count, max_slices) : 1;
+    for (int s = 0; s < slices; s++) {
+        auto main_thread = sApp->main_thread_data(s);
+
+        for (int i = 0; i < main_thread->thread_range.thread_count; i++) {
+            int thread = is_main_process ? main_thread->thread_range.starting_thread + i : i;
+            assert(thread < sApp->thread_count);
+
+            if constexpr (requires { l(sApp->test_thread_data(0), 0, 0); }) {
+                int device = is_main_process ? main_thread->device_range.starting_device + i : i;
+                assert(device < sApp->device_count);
+
+                l(sApp->test_thread_data(thread), thread, device);
+            } else
+                l(sApp->test_thread_data(thread), thread);
+        }
+    }
 }
 
 struct Pipe
@@ -581,6 +589,27 @@ template <typename F> inline auto scopeExit(F &&f)
 static_assert(std::is_trivially_copyable_v<SandstoneApplication::SharedMemory>);
 static_assert(std::is_trivially_destructible_v<SandstoneApplication::SharedMemory>);
 
+inline int test_result_to_exit_code(TestResult result)
+{
+    switch (result) {
+    case TestResult::Passed:
+        break;
+    case TestResult::Skipped:
+        return -1;
+    case TestResult::Failed:
+        return EXIT_FAILURE;
+    case TestResult::OperatingSystemError:
+    case TestResult::Killed:
+    case TestResult::CoreDumped:
+    case TestResult::OutOfMemory:
+    case TestResult::TimedOut:
+    case TestResult::Interrupted:
+        assert(false && "Tests don't produce these conditions themselves");
+        __builtin_unreachable();
+    }
+    return EXIT_SUCCESS;
+}
+
 /* child_debug.cpp */
 void debug_init_child(void);
 void debug_init_global(const char *on_hang_arg, const char *on_crash_arg);
@@ -593,6 +622,9 @@ extern "C" initfunc group_kvm_init(void) noexcept;
 #endif
 
 /* logging.cpp */
+extern bool logging_in_test;
+
+void log_message_yaml(int thread_num, char levelchar, const char *yaml);
 void log_message_preformatted(int thread_num, LogLevelVerbosity level, std::string_view msg);
 int logging_stdout_fd(void);
 void logging_init_global(void);
@@ -603,9 +635,13 @@ void logging_restricted(LogLevelVerbosity level, const char *fmt, ...);
 void logging_printf(LogLevelVerbosity level, const char *msg, ...) ATTRIBUTE_PRINTF(2, 3);
 void logging_mark_thread_failed(int thread_num) noexcept;
 void logging_mark_thread_skipped(int thread_num) noexcept;
+void logging_mark_knob_used(std::string_view key, YamlFormatter::SimpleValue value, KnobOrigin origin);
+void logging_cleanup_failure_callback() noexcept;
 void logging_run_callback();
 void logging_report_mismatched_data(enum DataType type, const uint8_t *actual, const uint8_t *expected,
-                                    size_t size, ptrdiff_t offset, const char *fmt, va_list);
+                                    size_t size, ptrdiff_t offset,
+                                    SandstoneMemcmpOrFail::FormatterCallback formatter,
+                                    const void *token1, void *token2);
 void logging_print_header(int argc, char **argv, ShortDuration test_duration, ShortDuration test_timeout);
 void logging_print_iteration_start();
 void logging_print_footer();
@@ -615,17 +651,36 @@ void logging_init(const struct test *test);
 void logging_init_child_preexec();
 void logging_finish();
 TestResult logging_print_results(std::span<const ChildExitStatus> status, const struct test *test);
+int log_skip_or_print(SkipCategory cat, const char *fmt, ...) ATTRIBUTE_PRINTF(2, 3);
 
 /* random.cpp */
 void random_init_global(const char *argument);
 void random_advance_seed();
 std::string random_format_seed();
 void random_init_thread(int thread_num);
+uint32_t random_seed_low32();
 
 /* sandstone.cpp */
 TestResult run_one_test(int *tc, const struct test *test, PerThreadFailures &per_thread_fails);
 TestResult prepare_test_for_device(struct test* test);
 void finish_test_for_device(struct test* test);
+int cleanup_global(int exit_code, PerThreadFailures per_thread_failures);
+bool wallclock_deadline_has_expired(MonotonicTimePoint deadline);
+ShortDuration test_timeout(ShortDuration regular_duration);
+
+/* sandstone_run.cpp */
+TestResult child_run(/*nonconst*/ struct test *test, int child_number);
+struct test_cfg_info;
+TestResult run_one_test(const test_cfg_info &test_cfg, PerThreadFailures &per_thread_failures);
+const struct test *current_test() noexcept __attribute__((pure));
+
+/* sandstone_ulog.cpp */
+void ulog_init(std::span<const char * const> args);
+void ulog_update(const struct test *test);
+
+/* test_knobs.cpp */
+void load_test_knob_args(std::span<const char *const> args);
+void save_test_knob_args(std::vector<const char *> &argv, std::string_view test_id);
 
 /*
  * Called from sandstone_main() before logging_global_init() and before

@@ -292,7 +292,7 @@ template struct EngineWrapper<std::minstd_rand>;
 static bool haveAes()
 {
 #if !defined(__x86_64__)
-    return cpu_has_feature(cpu_feature_aes);
+    return device_has_feature(cpu_feature_aes);
 #else
     uint32_t eax, ebx, ecx, edx;
     __cpuid(1, eax, ebx, ecx, edx);
@@ -554,6 +554,11 @@ void random_advance_seed()
     rand();
 }
 
+uint32_t random_seed_low32()
+{
+    return rng_for_thread(-1)->u32[0];
+}
+
 void random_init_thread(int thread_num)
 {
     // nothing should be modifying the global engine now
@@ -685,10 +690,13 @@ extern "C" {
 #pragma GCC diagnostic ignored "-Wunreachable-code-return"
 #endif
 
+// allow for GPU builds - oneAPI can call it internally
+#if !SANDSTONE_DEVICE_GPU
 void srand(unsigned)
 {
     abort();
 }
+#endif
 void srandom(unsigned)
 {
     abort();

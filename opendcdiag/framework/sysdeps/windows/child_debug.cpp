@@ -44,6 +44,7 @@ struct CrashContext
             CONTEXT_FULL;
 
     Header header;
+    CodeDump code_dump;
     EXCEPTION_RECORD exceptionRecord;
     alignas(64) CONTEXT fixedContext;
     char xsave_area[];      // C99 Flexible Array Member
@@ -102,6 +103,40 @@ close_hslot:
     return false;
 }
 
+static CodeDump dump_code_around_pc(const void *pc)
+{
+    // ReadProcessMemory on the current process handles unmapped pages
+    // gracefully (returns FALSE); read each page independently so that
+    // an unmapped page on one side doesn't suppress the other.
+    CodeDump dump;
+    if (!pc)
+        return dump;
+
+    static constexpr uintptr_t PageMask = 4096 - 1;
+    uintptr_t base = uintptr_t(pc) - CodeDump::BytesBefore;
+    uintptr_t last = base + CodeDump::TotalBytes - 1;
+    if ((base & ~PageMask) == (last & ~PageMask)) {
+        SIZE_T n = 0;
+        if (ReadProcessMemory(GetCurrentProcess(), LPCVOID(base), dump.bytes, CodeDump::TotalBytes, &n)) {
+            dump.valid_start = 0;
+            dump.valid_end   = n;
+        }
+    } else {
+        size_t first_len  = (base | PageMask) + 1 - base;
+        size_t second_len = CodeDump::TotalBytes - first_len;
+        SIZE_T n1 = 0, n2 = 0;
+        bool ok1 = ReadProcessMemory(GetCurrentProcess(), LPCVOID(base),
+                                     dump.bytes, first_len, &n1);
+        bool ok2 = ReadProcessMemory(GetCurrentProcess(), LPCVOID(base + first_len),
+                                     dump.bytes + first_len, second_len, &n2);
+        if (ok1 || ok2) {
+            dump.valid_start = ok1 ? 0          : first_len;
+            dump.valid_end   = ok2 ? first_len + n2 : n1;
+        }
+    }
+    return dump;
+}
+
 static LONG WINAPI handler(EXCEPTION_POINTERS *info)
 {
     // Ignore non-error or user-defined exceptions. See
@@ -115,6 +150,9 @@ static LONG WINAPI handler(EXCEPTION_POINTERS *info)
     if ((code >> 16) != 0xC000)
         return EXCEPTION_CONTINUE_SEARCH;
 
+    // mark thread as failed
+    logging_mark_thread_failed(thread_num);
+
     static std::atomic_flag in_crash_handler = {};
     if (in_crash_handler.test_and_set()) {
         // wait forever
@@ -123,7 +161,7 @@ static LONG WINAPI handler(EXCEPTION_POINTERS *info)
 
     // copy the context's fixed portions
     CrashContext *ctx = preallocatedContext;
-    ctx->header.thread_num = thread_num + sApp->main_thread_data()->device_range.starting_device;
+    ctx->header.thread_num = thread_num + sApp->main_thread_data()->thread_range.starting_thread;
     ctx->exceptionRecord = *info->ExceptionRecord;
     ptrdiff_t context_size = sizeof(*ctx);
     if (CopyContext(&ctx->fixedContext, CrashContext::DesiredContextFlags, info->ContextRecord))
@@ -136,6 +174,13 @@ static LONG WINAPI handler(EXCEPTION_POINTERS *info)
             && uintptr_t(info->ExceptionRecord->ExceptionAddress) < executableImageEnd)
         ctx->header.baseAddress = executableImageStart;
 
+    // Read code bytes around the PC before the process exits.
+    void *pc = nullptr;
+#ifdef __x86_64__
+    pc = reinterpret_cast<void *>(ctx->fixedContext.Rip);
+#endif
+    ctx->code_dump = dump_code_around_pc(pc);
+
     if (!WriteFile(HANDLE(sApp->shmem->child_debug_socket), ctx, context_size, nullptr, nullptr))
         win32_perror("WriteFile for mailslot");
     if (!SetEvent(HANDLE(sApp->shmem->debug_event)))
@@ -147,7 +192,7 @@ static LONG WINAPI handler(EXCEPTION_POINTERS *info)
 }
 
 #ifdef __x86_64__
-static void print_non_gprs(std::string &log, PCONTEXT ctx)
+static void print_context(std::string &log, PCONTEXT ctx)
 {
     // Windows doesn't store the XSAVE state in a contiguous block, so
     // we have to put it back together.
@@ -184,7 +229,7 @@ static void print_non_gprs(std::string &log, PCONTEXT ctx)
         }
     }
 
-    dump_xsave(log, xsave_area, xsave_size, -1);
+    dump_context(log, ctx, xsave_area, xsave_size);
 }
 #endif
 
@@ -323,14 +368,21 @@ void debug_crashed_child(std::span<const pid_t> children)
 
         std::string log;
 #ifdef __x86_64__
-        dump_gprs(log, &ctx->fixedContext);
-        print_non_gprs(log, &ctx->fixedContext);
+        print_context(log, &ctx->fixedContext);
 #endif
 
         if (log.size()) {
             log.insert(0, "Registers:\n");
             log_message_preformatted(thread, LOG_LEVEL_VERBOSE(2), log);
         }
+
+        void *pc = nullptr;
+#ifdef __x86_64__
+        pc = reinterpret_cast<void *>(ctx->fixedContext.Rip);
+#endif
+        if (std::string code_log = format_code_dump(pc, ctx->code_dump);
+                !code_log.empty())
+            log_message_preformatted(thread, LOG_LEVEL_VERBOSE(2), code_log);
     }
 
     // got here on failure

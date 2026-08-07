@@ -5,7 +5,9 @@ project(
     'OpenDCDiag',
     ['c', 'cpp'],
     default_options: [
+        'b_pie=true',
         'b_ndebug=if-release',
+        'b_staticpic=true',
         'c_std=gnu17',
         'cpp_std=gnu++23',
     ],
@@ -31,6 +33,15 @@ if cpp.get_linker_id() != 'ld.bfd' or cc.get_linker_id() != 'ld.bfd'
         'We recommend linking OpenDCDiag with the binutils linker (ld). Your build may fail or your executable may not behave as expected.',
     )
 endif
+
+generated_short_ids = configure_file(
+    input: 'scripts/generate-short-ids.pl',
+    output: 'sandstone_short_ids.h',
+    command: [
+        perl, files('scripts/generate-short-ids.pl'),
+        '@OUTPUT@', 'tests',
+    ]
+)
 
 device_type = get_option('device_type')
 
@@ -131,7 +142,6 @@ endforeach
 foreach lflag : [
     '-Wl,-z,relro',
     '-Wl,-z,noexecstack',
-    '-pie',
 ]
     if cc.links('int main() { return 0; }', args: [lflag], name: lflag)
         add_project_link_arguments(lflag, language: ['c', 'cpp'])

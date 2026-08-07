@@ -4,7 +4,7 @@
 
 sandstone_selftest() {
     VALIDATION=dump
-    run_sandstone_yaml ${MAX_PROC:+-n$MAX_PROC} --ignore-mce-errors --selftests --timeout=20s --retest-on-failure=0 -Y2 "$@"
+    run_sandstone_yaml ${MAX_PROC:+-n$MAX_PROC} --ignore-mce-errors --disable "@special" --selftests --timeout=20s --retest-on-failure=0 -Y2 "$@"
 }
 
 extract_from_yaml() {
@@ -65,7 +65,9 @@ test_yaml_expr() {
 test_yaml_regexp() {
     local value
     extract_from_yaml "$1"
-    if printf "%s" "$value" | grep --line-regexp -Eq -e "$2"; then
+    if [[ "$2" = "" ]] && [[ "$value" == "" ]]; then
+        return 0
+    elif printf "%s" "$value" | grep --line-regexp -Eq -e "$2"; then
         return 0
     fi
     printf "Regexp match failed:\n"
@@ -121,11 +123,20 @@ selftest_crash_context_common() {
         test_yaml_regexp "/tests/0/threads/$threadidx/messages/0/text" ".*Received signal $signum \((Segmentation fault|Access violation)\) code=[0-9]+.* RIP = 0x.*"
     fi
 
-    if [[ `uname -m` = x86_64 ]]; then
-        # OpenDCDiag's built-in register dumper is only implemented for x86-64
-        msgidx=$((yamldump[/tests/0/threads/$threadidx/messages@len] - 1))
-        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$msgidx/level" "info"
-        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$msgidx/text" "Registers:"
-        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$msgidx/text" " rax += 0x[0-9a-f]{16}.*"
+    if [[ `uname -m` = x86_64 ]] && [[ "$SANDSTONE_DEVICE_TYPE" != "GPU" ]]; then
+        # OpenDCDiag's built-in register dumper is only implemented for x86-64.
+        # Scan messages to find the one containing "Registers:".
+        local msgcount=$((yamldump[/tests/0/threads/$threadidx/messages@len]))
+        local regmsgidx=-1
+        for ((i = 0; i < msgcount; ++i)); do
+            if [[ "${yamldump[/tests/0/threads/$threadidx/messages/$i/text]}" = *"Registers:"* ]]; then
+                regmsgidx=$i
+                break
+            fi
+        done
+        (( regmsgidx >= 0 ))
+        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$regmsgidx/level" "info"
+        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$regmsgidx/text" "Registers:"
+        test_yaml_regexp "/tests/0/threads/$threadidx/messages/$regmsgidx/text" " rax += 0x[0-9a-f]{16}.*"
     fi
 }

@@ -9,10 +9,11 @@
 //     All unit tests should be put in framework/unit-tests/sandstone_utils_tests.cpp
 
 #include "sandstone_utils.h"
+#include "sandstone_yaml.h"
 
-#include <stdexcept>
 #include <string>
 
+#include <inttypes.h>
 #include <math.h>
 #include <string.h>
 #include <time.h>
@@ -201,3 +202,181 @@ std::string stdprintf(const char *fmt, ...)
 {
     return va_start_and_stdprintf(fmt);
 }
+
+namespace YamlFormatter {
+std::string_view escape_for_single_line(std::string_view message, std::string &storage)
+{
+    const char quote = '\'';
+    size_t pos = message.find(quote);
+    if (pos == std::string_view::npos)
+        return message;
+
+    // Message contains apostrophes, so we need to double the single
+    // quotes. Do that by looping over the string copying it in chunks
+    // delimited by apostrophes, with the apostrophes being copied twice
+    // (that means we're inefficient for back-to-back apostrophes, but
+    // that's not common English text)
+    storage.resize(0);          // just in case
+    storage.reserve(message.size() + message.size() / 16);  // 1/16th is guesstimate
+
+    while (pos != std::string_view::npos) {
+        storage += message.substr(0, pos + 1);
+        message.remove_prefix(pos);
+        pos = message.find(quote, 1);
+    }
+
+    storage += message;     // copy the last chunk (if any)
+    return storage;
+}
+
+static void escape_multi_line(std::string &append_to, int indent, std::string_view message)
+{
+    append_to += '|';
+    if (message.ends_with('\n'))
+        append_to += '+';
+    append_to += '\n';
+
+    ptrdiff_t nl = message.find('\n');
+    while (nl >= 0) {
+        append_to.append(indent + 2, ' ');
+
+        // write the newline too
+        ++nl;
+        append_to += message.substr(0, nl);
+        message.remove_prefix(nl);
+        nl = message.find('\n');
+    }
+    append_to.append(indent + 2, ' ');
+    append_to += message;
+}
+
+struct FormatSimpleValue
+{
+    FormatSimpleValue(std::string &append_to, std::string_view key,
+                      const YamlFormatter::SimpleValue &value, int indent = 0)
+        : append_to(append_to), indent(indent)
+    {
+        append_to.append(indent, ' ');
+        append_to += key;
+        append_to += ": ";
+        prefix_len = indent + key.size() + 3;
+        std::visit(*this, value);
+    }
+
+    void operator()(bool v)
+    {
+        append_to += v ? "true" : "false";
+    }
+
+    void operator()(uint64_t v)
+    {
+        if (v < 4096)
+            append_to += stdprintf("%" PRIu64, v);
+        else if (int64_t(v) >= 0)
+            append_to += stdprintf("0x%" PRIx64, v);
+        else
+            append_to += stdprintf("'0x%" PRIx64 "'", v);
+    }
+    void operator()(int64_t v)
+    {
+        if (v >= 0)
+            operator()(uint64_t(v));
+        else
+            append_to += stdprintf("%" PRId64, v);
+    }
+    void operator()(uint32_t v)
+    {
+        operator()(uint64_t(v));
+    }
+    void operator()(int32_t v)
+    {
+        operator()(int64_t(v));
+    }
+    void operator()(double v)
+    {
+        Float64 u(v);
+        int cl = fpclassify(v);
+        if (cl == FP_INFINITE) {
+            if (v < 0)
+                append_to += '-';
+            append_to += ".inf";
+            return;
+        }
+
+        std::string r;
+        auto pad_string = [&] {
+            // align to the right with spaces
+            size_t size = prefix_len + r.size() + 15;
+            size = size / 16 * 16;
+            r.resize(size - prefix_len, ' ');
+        };
+        if (cl == FP_NAN) {
+            Float64 qnan(std::numeric_limits<double>::quiet_NaN());
+            r = ".nan";
+            if (u.as_hex != qnan.as_hex) {
+                pad_string();
+                r += stdprintf(" # %s%s(%#" PRIx64 ")",
+                               u.as_nan.sign ? "-" : "",
+                               u.as_nan.quiet ? "nan" : "snan",
+                               u.as_nan.payload);
+            }
+        } else {
+            r = stdprintf("%.17g", v);
+            if (!r.contains('.'))
+                r += ".0";
+            pad_string();
+            r += stdprintf(" # %a", v);
+        }
+
+        append_to += std::move(r);
+    }
+    void operator()(std::string_view v)
+    {
+        if (v.data() == nullptr) {
+            append_to += "null";
+            return;
+        }
+        if (v.ends_with('\n'))
+            v.remove_suffix(1);
+        if (v.contains('\n')) {
+            escape_multi_line(append_to, indent, v);
+        } else {
+            append_to += '\'';
+            append_to += escape_for_single_line(v);
+            append_to += '\'';
+        }
+    }
+
+private:
+    std::string &append_to;
+    int indent;
+    int prefix_len;
+
+    void append_with_comment(std::string_view value, std::string_view comment);
+    void append_with_comment(const char *fmtvalue, const char *fmtcomment, ...);
+};
+
+static std::string format_yaml(const std::map<std::string, YamlFormatter::SimpleValue> &values, int indent)
+{
+    std::string result;
+
+    for (auto &[key, value]: values) {
+        if (result.size())
+            result += '\n';
+        FormatSimpleValue(result, key, value, indent);
+    }
+    return result;
+}
+
+std::string format_yaml(std::string_view key, const SimpleValue &value)
+{
+    std::string result;
+    FormatSimpleValue(result, key, value);
+    return result;
+}
+
+std::string format_yaml(const std::map<std::string, YamlFormatter::SimpleValue> &values)
+{
+    return format_yaml(values, 0);
+}
+} // namespace YamlFormatter
