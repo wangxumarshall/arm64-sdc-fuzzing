@@ -260,11 +260,9 @@ static void child_crash_handler(int signum, siginfo_t *si, void *ucontext)
         // let parent process know
         CrashContext::send(socket, si, ucontext);
 
-        if (on_crash_action & attach_gdb_on_crash) {
-            // now wait for the parent process to be done with us
-            while (thread_state.load(std::memory_order_relaxed) == thread_failed)
-                futex_wait(&thread_state, int(thread_failed));
-        }
+        // wait for the parent process to be done with us
+        while (thread_state.load(std::memory_order_relaxed) == thread_failed)
+            futex_wait(&thread_state, int(thread_failed));
     }
 
     // restore the signal handler so we can be killed
@@ -285,7 +283,7 @@ void CrashContext::send(int sockfd, siginfo_t *si, void *ucontext)
     CrashContext::Fixed fixed = {
         .crash_address = si->si_addr,
         .rip = si->si_addr,
-        .thread_num = ::thread_num + sApp->main_thread_data()->device_range.starting_device,
+        .thread_num = ::thread_num + sApp->main_thread_data()->thread_range.starting_thread,
         .signum = si->si_signo,
         .signal_code = si->si_code,
     };
@@ -585,12 +583,11 @@ static auto communicate_gdb_backtrace(int in, int out, uintptr_t handle)
             size_t old_size = buf.size();
             buf.resize(old_size + more);
             ret = read(in, &buf[old_size], more);
+            buf.resize(old_size + std::max(ret, ssize_t(0)));
             if (ret < 0)
                 return false;
             if (ret == 0)
                 return ReadUntilEof;
-
-            buf.resize(old_size + ret);
 
             if constexpr (!ReadUntilEof) {
                 std::string_view n = needle;
@@ -914,6 +911,48 @@ static bool print_signal_info(const CrashContext::Fixed &ctx)
     return true;
 }
 
+static std::string dump_code_around_pc(pid_t pid, const void *pc)
+{
+#if HAVE_PROCESS_VM_READV
+    CodeDump dump;
+
+    uintptr_t base = uintptr_t(pc) - CodeDump::BytesBefore;
+    uintptr_t last = base + CodeDump::TotalBytes - 1;
+
+    static constexpr uintptr_t PageMask = 4096 - 1;
+
+    if ((base & ~PageMask) == (last & ~PageMask)) {
+        // All bytes fall on the same page: single call suffices.
+        struct iovec local_iov  = { dump.bytes,                         CodeDump::TotalBytes };
+        struct iovec remote_iov = { reinterpret_cast<void *>(base),     CodeDump::TotalBytes };
+        ssize_t n = process_vm_readv(pid, &local_iov, 1, &remote_iov, 1, 0);
+        if (n <= 0)
+            return {};
+        dump.valid_start = 0;
+        dump.valid_end   = n;
+    } else {
+        // The range spans a page boundary: read each page independently so
+        // that an unmapped page on one side doesn't suppress the other.
+        size_t first_len  = (base | PageMask) + 1 - base;
+        size_t second_len = CodeDump::TotalBytes - first_len;
+        struct iovec local1  = { dump.bytes,              first_len  };
+        struct iovec remote1 = { reinterpret_cast<void *>(base),              first_len  };
+        struct iovec local2  = { dump.bytes + first_len,  second_len };
+        struct iovec remote2 = { reinterpret_cast<void *>(base + first_len),  second_len };
+        ssize_t n1 = process_vm_readv(pid, &local1, 1, &remote1, 1, 0);
+        ssize_t n2 = process_vm_readv(pid, &local2, 1, &remote2, 1, 0);
+        if (n1 <= 0 && n2 <= 0)
+            return {};
+        dump.valid_start = (n1 > 0) ? 0          : first_len;
+        dump.valid_end   = (n2 > 0) ? first_len + n2 : n1;
+    }
+
+    return format_code_dump(pc, dump);
+#else
+    return {};
+#endif  // HAVE_PROCESS_VM_READV
+}
+
 static void print_crash_info(int slice, const char *pidstr, CrashContext &ctx)
 {
     int thread = -1;
@@ -935,20 +974,27 @@ static void print_crash_info(int slice, const char *pidstr, CrashContext &ctx)
         generate_backtrace(pidstr, slice, handle, thread);
     }
 
+    if (!handle)
+        return;
+
     // now include the register state
-    if (handle && ctx.contents & CrashContext::MachineContext) {
+    if (ctx.contents & CrashContext::MachineContext) {
         std::string log;
 
 #ifdef __x86_64__
-        dump_gprs(log, &ctx.mc);
-        dump_xsave(log, ctx.xsave_buffer.data(), ctx.xsave_buffer.size(), -1);
+        dump_context(log, &ctx.mc, ctx.xsave_buffer.data(), ctx.xsave_buffer.size());
 #endif
+        dump_device_state(log, thread);
 
         if (log.size()) {
-            log.insert(0, "Registers:\n");
             log_message_preformatted(thread, LOG_LEVEL_VERBOSE(2), log);
         }
     }
+
+    // Dump code bytes around RIP.
+    if (std::string code_log = dump_code_around_pc(ctx.fixed.pid, ctx.fixed.rip);
+            !code_log.empty())
+        log_message_preformatted(thread, LOG_LEVEL_VERBOSE(2), code_log);
 }
 
 void debug_init_global(const char *on_hang_arg, const char *on_crash_arg)
@@ -1125,10 +1171,8 @@ void debug_crashed_child(std::span<const pid_t> children)
         // release the child
         auto &thread_state = sApp->main_thread_data(slice)->thread_state;
         thread_state.load(std::memory_order_acquire);
-        if (on_crash_action != context_on_crash) {
-            thread_state.store(thread_debugged, std::memory_order_relaxed);
-            futex_wake_all(&thread_state);
-        }
+        thread_state.store(thread_debugged, std::memory_order_relaxed);
+        futex_wake_all(&thread_state);
     }
 }
 

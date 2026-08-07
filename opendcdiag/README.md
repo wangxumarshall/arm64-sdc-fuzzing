@@ -18,7 +18,7 @@ released under different licenses.  See
 
 #### Ubuntu
 
-OpenDCDiag has been built and tested on Ubuntu 21.04 and 21.10.
+OpenDCDiag has been built and tested on Ubuntu, starting with 21.04 and 21.10.
 Before building, the following prerequisites must be installed.
 
 ```console
@@ -27,7 +27,7 @@ sudo apt-get install gcc g++ cmake libeigen3-dev libboost-all-dev libzstd-dev zl
 
 #### Fedora
 
-OpenDCDiag has been built and tested on Fedora 33 and 34.
+OpenDCDiag has been built and tested on Fedora, starting with 33 and 34.
 Before building, the following prerequisites must be installed.
 
 ```console
@@ -113,13 +113,52 @@ limitation), and any remaining `-Wunused` notes in
 
 #### Full-load, continuous run
 
-The `-T forever` option loops indefinitely; `-n 0` uses one thread per logical
-CPU for full load; `--ignore-os-error --ignore-timeout` keep it running past
+The `-T forever` option loops indefinitely; `-n <N>` runs with N threads for
+full load (`0` is clamped to 1, so pass the explicit CPU count, e.g.
+`-n $(nproc)`); `--ignore-os-error --ignore-timeout` keep it running past
 errors. See `framework/sandstone_opts.cpp` for the full option set.
 
 ```console
-./builddir/opendcdiag -T forever -n 0 --ignore-os-error --ignore-timeout -o /dev/null -q
+./builddir/opendcdiag -T forever -n $(nproc) --ignore-os-error --ignore-timeout -o builddir/run.log -q
 ```
+
+### Building for GPU
+
+OpenDCDiag can also be built for other device types by specifying the
+`device_type` build option. Currently supported device types are: `cpu`, `gpu`.
+
+OpenDCDiag uses the [oneAPI Level Zero](https://github.com/oneapi-src/level-zero)
+interface to interact with the GPU devices. A library implementing the Level Zero
+API is required to create OpenDCDiag executable with GPU support.
+
+For example, to install Level Zero loader libraries on Ubuntu, use:
+
+```console
+sudo apt-get install libze1 libze-dev intel-ocloc libigdfcl2 libigc2
+```
+
+On Fedora:
+
+```console
+sudo dnf install -y oneapi-level-zero intel-level-zero intel-level-zero-devel intel-ocloc
+```
+
+With the prerequisites installed, OpenDCDiag for GPU devices can be created
+using commands as follows.
+
+```console
+meson setup builddir --buildtype=release -Ddevice_type=gpu
+ninja -C builddir
+```
+
+The GPU binary uses OpenCL Offline Compiler (also known as `ocloc`) to compile
+and embed compute kernels for specific devices into the resulting OpenDCDiag
+binary. The `target_device` build option can be used to specify the devices that
+are to be supported by the created OpenDCDiag executable.
+
+Value specified in the `target_device` option is passed directly to the OpenCL
+Offline Compiler used to build the binary. Refer to the documentation of the
+offline compiler for the accepted values of the `target_device` option.
 
 ## Contributions
 

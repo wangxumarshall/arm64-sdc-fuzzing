@@ -45,6 +45,16 @@ public:
 
     std::vector<std::variant<RootDevice, EndDevice>> devices;
 
+    struct NumaNode
+    {
+        std::vector<EndDevice> devices; // here FLAT/COMPOSITE hierarchy does not matter
+        int id() const
+        {
+            return !devices.empty() ? devices.front()->numa_id : -1;
+        }
+    };
+    std::vector<NumaNode> numa_domains;
+
     static const Topology &topology();
 };
 
@@ -53,7 +63,7 @@ public:
 Topology build_topology();
 
 /// Calls passed function for each 'end' device within topology.
-int for_each_topo_device(std::function<int(const gpu_info_t&)> func);
+int for_each_topo_device(const std::function<int(const gpu_info_t&)>& func);
 
 /// Struct should contain common info for all detected GPUs, such as brand, etc.
 struct HardwareInfo

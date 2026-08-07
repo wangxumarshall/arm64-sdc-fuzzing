@@ -42,11 +42,11 @@ void dump_device_info()
     printf("Detected CPU: %s; family-model-stepping (hex): %02x-%02x-%02x; CPU features: %s\n",
            detected, sApp->hwinfo.family, sApp->hwinfo.model, sApp->hwinfo.stepping,
            device_features_to_string(device_features).c_str());
-    printf("# CPU\tPkgID\tCoreID\tThrdID\tModId\tNUMAId\tApicId\tMicrocode\tPPIN\n");
-    for (i = 0; i < num_cpus(); ++i) {
-        printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t0x%" PRIx64, device_info[i].cpu_number,
+    printf("# CPU\tPkgID\tCoreID\tThrdID\tModId\tDieId\tNUMAId\tApicId\tMicrocode\tPPIN\n");
+    for (i = 0; i < device_count(); ++i) {
+        printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t0x%" PRIx64, device_info[i].cpu_number,
                device_info[i].package_id, device_info[i].core_id, device_info[i].thread_id,
-               device_info[i].module_id, device_info[i].numa_id, device_info[i].hwid,
+               device_info[i].module_id, device_info[i].die_id, device_info[i].numa_id, device_info[i].hwid,
                device_info[i].microcode);
         const HardwareInfo::PackageInfo *pkg = sApp->hwinfo.find_package_id(device_info[i].package_id);
         if (pkg && pkg->ppin)
@@ -58,16 +58,23 @@ void dump_device_info()
 TestResult prepare_test_for_device(struct test *test)
 {
     auto has_smt = []() -> bool {
-        for(int idx = 0; idx < thread_count() - 1; idx++) {
-            if (device_info[idx].core_id == device_info[idx + 1].core_id)
+        for(int idx = 0; idx < device_count() - 1; idx++) {
+            if (device_info[idx].package_id == device_info[idx + 1].package_id &&
+                device_info[idx].core_id == device_info[idx + 1].core_id)
                 return true;
         }
         return false;
     };
 
-    if (test->flags & test_requires_smt && !has_smt()) {
-        log_skip(CpuTopologyIssueSkipCategory, "Test requires SMT (hyperthreading)");
-        return TestResult::Skipped;
+    if (test->flags & test_requires_smt) {
+        if (!Topology::topology().isValid()) {
+            log_skip(CpuTopologyIssueSkipCategory, "Test requires topology information");
+            return TestResult::Skipped;
+        }
+        if (!has_smt()) {
+            log_skip(CpuTopologyIssueSkipCategory, "Test requires SMT (hyperthreading)");
+            return TestResult::Skipped;
+        }
     }
     return TestResult::Passed;
 }

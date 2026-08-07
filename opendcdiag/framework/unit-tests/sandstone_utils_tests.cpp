@@ -8,10 +8,13 @@
 #include "sandstone_chrono.h"
 #include "sandstone_data.h"
 #include "sandstone_utils.h"
+#include "sandstone_yaml.h"
 
 #include <limits.h>
 #include <locale.h>
 #include <inttypes.h>
+
+#ifdef __x86_64__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
@@ -20,6 +23,7 @@
 
 #ifndef __F16C__
 #  error "Please compile with F16C support"
+#endif
 #endif
 
 TEST(SimpleStringUtils, GivenEmptyString_WhenConvertedToMilisecs_ThenReturnZero) {
@@ -180,6 +184,7 @@ TEST(DataCompare, Int128)
     EXPECT_EQ(format_type_helper(__int128_t(-1)), "ffffffffffffffffffffffffffffffff (-1)");
 }
 
+#ifdef __SIZEOF_FLOAT128__
 TEST(DataCompare, Float128)
 {
     using namespace SandstoneDataDetails;
@@ -197,6 +202,7 @@ TEST(DataCompare, Float128)
     EXPECT_EQ(format_type_helper(Float128::quiet_NaN()), "7fff8000000000000000000000000000");
     EXPECT_EQ(format_type_helper(Float128::signaling_NaN()), "7fff4000000000000000000000000000");
 }
+#endif
 
 TEST(DataCompare, Float80)
 {
@@ -749,4 +755,135 @@ TEST(FloatGeneration, new_random_float_prototypes) {
     // briefly verify C interface
     ASSERT_EQ(0, test_floats_prototypes_c());
     ASSERT_EQ(0, test_floats_prototypes_cpp());
+}
+
+TEST(YamlFormatter, booleans) {
+    EXPECT_EQ(format_yaml("key", false), "key: false");
+    EXPECT_EQ(format_yaml("key", true), "key: true");
+}
+
+TEST(YamlFormatter, integer) {
+    EXPECT_EQ(format_yaml("key", 0), "key: 0");
+    EXPECT_EQ(format_yaml("key", 1), "key: 1");
+    EXPECT_EQ(format_yaml("key", -1), "key: -1");
+    EXPECT_EQ(format_yaml("key", 4095), "key: 4095");
+    EXPECT_EQ(format_yaml("key", -4096), "key: -4096");
+    EXPECT_EQ(format_yaml("key", 4096), "key: 0x1000");
+    EXPECT_EQ(format_yaml("key", -4097), "key: -4097");
+    EXPECT_EQ(format_yaml("key", INT_MAX), "key: 0x7fffffff");
+    EXPECT_EQ(format_yaml("key", INT_MIN), "key: -2147483648");
+    EXPECT_EQ(format_yaml("key", int64_t(INT_MAX) + 1), "key: 0x80000000");
+    EXPECT_EQ(format_yaml("key", int64_t(INT_MIN) - 1), "key: -2147483649");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<int64_t>::max()), "key: 0x7fffffffffffffff");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<int64_t>::min()), "key: -9223372036854775808");
+
+    EXPECT_EQ(format_yaml("key", int32_t(0)), "key: 0");
+    EXPECT_EQ(format_yaml("key", int32_t(4096)), "key: 0x1000");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<int32_t>::max()), "key: 0x7fffffff");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<int32_t>::min()), "key: -2147483648");
+
+    EXPECT_EQ(format_yaml("key", uint32_t(0)), "key: 0");
+    EXPECT_EQ(format_yaml("key", uint32_t(4095)), "key: 4095");
+    EXPECT_EQ(format_yaml("key", uint32_t(4096)), "key: 0x1000");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<uint32_t>::max()), "key: 0xffffffff");
+
+    EXPECT_EQ(format_yaml("key", uint64_t(0)), "key: 0");
+    EXPECT_EQ(format_yaml("key", uint64_t(1)), "key: 1");
+    EXPECT_EQ(format_yaml("key", uint64_t(4095)), "key: 4095");
+    EXPECT_EQ(format_yaml("key", uint64_t(4096)), "key: 0x1000");
+    EXPECT_EQ(format_yaml("key", uint64_t(INT_MAX)), "key: 0x7fffffff");
+    EXPECT_EQ(format_yaml("key", uint64_t(std::numeric_limits<int64_t>::max())), "key: 0x7fffffffffffffff");
+
+    // we always print as signed quantities because some YAML parsers don't like
+    // numbers out of the int64_t range
+    EXPECT_EQ(format_yaml("key", uint64_t(std::numeric_limits<int64_t>::min())), "key: '0x8000000000000000'");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<uint64_t>::max()), "key: '0xffffffffffffffff'");
+}
+
+TEST(YamlFormatter, floating_point) {
+    EXPECT_EQ(format_yaml("key", 0.), "key: 0.0        # 0x0p+0");
+    EXPECT_EQ(format_yaml("key", 1.), "key: 1.0        # 0x1p+0");
+    EXPECT_EQ(format_yaml("key", 1.5), "key: 1.5        # 0x1.8p+0");
+    EXPECT_EQ(format_yaml("key", -1.), "key: -1.0       # -0x1p+0");
+    EXPECT_EQ(format_yaml("key", -1.5), "key: -1.5       # -0x1.8p+0");
+    EXPECT_EQ(format_yaml("key", 12345678.), "key: 12345678.0 # 0x1.78c29cp+23");
+    EXPECT_EQ(format_yaml("key", 123456789.),
+              "key: 123456789.0                # 0x1.d6f3454p+26");
+    EXPECT_EQ(format_yaml("key", 1234567890.),
+              "key: 1234567890.0               # 0x1.26580b48p+30");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::max()),
+              "key: 1.7976931348623157e+308    # 0x1.fffffffffffffp+1023");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::epsilon()),
+              "key: 2.2204460492503131e-16     # 0x1p-52");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::min()),
+              "key: 2.2250738585072014e-308    # 0x1p-1022");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::denorm_min()),
+              "key: 4.9406564584124654e-324    # 0x0.0000000000001p-1022");
+
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::infinity()), "key: .inf");
+    EXPECT_EQ(format_yaml("key", -std::numeric_limits<double>::infinity()), "key: -.inf");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::quiet_NaN()), "key: .nan");
+
+    EXPECT_EQ(format_yaml("key", __builtin_nan("1")),
+              "key: .nan       # nan(0x1)");
+    EXPECT_EQ(format_yaml("key", -__builtin_nan("1")),
+              "key: .nan       # -nan(0x1)");
+    EXPECT_EQ(format_yaml("key", -std::numeric_limits<double>::quiet_NaN()),
+              "key: .nan       # -nan(0)");
+    EXPECT_EQ(format_yaml("key", std::numeric_limits<double>::signaling_NaN()),
+              "key: .nan       # snan(0x4000000000000)");
+    EXPECT_EQ(format_yaml("key", -std::numeric_limits<double>::signaling_NaN()),
+              "key: .nan       # -snan(0x4000000000000)");
+    EXPECT_EQ(format_yaml("key", __builtin_nans("1")),
+              "key: .nan       # snan(0x1)");
+    EXPECT_EQ(format_yaml("key", -__builtin_nans("1")),
+              "key: .nan       # -snan(0x1)");
+}
+
+TEST(YamlFormatter, strings) {
+    using namespace std::string_view_literals;
+    EXPECT_EQ(format_yaml("key", std::string_view()), "key: null");
+    EXPECT_EQ(format_yaml("key", "value"sv), "key: 'value'");
+    EXPECT_EQ(format_yaml("key", "it's enough"sv), "key: 'it''s enough'");
+
+    // single, trailing newline is chopped off
+    EXPECT_EQ(format_yaml("key", "value\n"sv), "key: 'value'");
+
+    // multiline
+    EXPECT_EQ(format_yaml("key", "Hello\nWorld"sv), "key: |\n  Hello\n  World");
+    EXPECT_EQ(format_yaml("key", "Hello\nWorld\n"sv), "key: |\n  Hello\n  World");
+    EXPECT_EQ(format_yaml("key", "Hello\n\nWorld\n\n"sv), "key: |+\n  Hello\n  \n  World\n  ");
+}
+
+TEST(YamlFormatter, map) {
+    using namespace std::string_view_literals;
+    std::map<std::string, YamlFormatter::SimpleValue> map;
+    std::string expected;
+    EXPECT_EQ(format_yaml(map), expected);
+
+    map["1"] = 1;
+    expected = "1: 1";
+    ASSERT_EQ(format_yaml(map), expected);
+
+    map["a"] = "a"sv;
+    expected += "\na: 'a'";
+    ASSERT_EQ(format_yaml(map), expected);
+
+    map["double"] = 0.0;
+    map["doublenan"] = -std::numeric_limits<double>::quiet_NaN();
+    expected += "\ndouble: 0.0     # 0x0p+0";
+    expected += "\ndoublenan: .nan # -nan(0)";
+    ASSERT_EQ(format_yaml(map), expected);
+
+    map["multiline"] = "Hello\nWorld"sv;
+    expected += "\nmultiline: |\n  Hello\n  World";
+    ASSERT_EQ(format_yaml(map), expected);
+
+    map["nulled"] = std::string_view();
+    expected += "\nnulled: null";
+    ASSERT_EQ(format_yaml(map), expected);
+
+    map["snan"] = std::numeric_limits<double>::signaling_NaN();
+    expected += "\nsnan: .nan      # snan(0x4000000000000)";
+    ASSERT_EQ(format_yaml(map), expected);
 }

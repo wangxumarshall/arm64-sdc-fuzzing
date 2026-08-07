@@ -29,6 +29,7 @@
 #mesondefine SANDSTONE_ALLOW_STDOUT_FROM_TESTS
 #mesondefine SANDSTONE_DEFAULT_LOGGING
 #mesondefine SANDSTONE_NO_LOGGING
+#mesondefine SANDSTONE_NO_TEST_NAMES
 #mesondefine SANDSTONE_RESTRICTED_CMDLINE
 #mesondefine SANDSTONE_CHILD_BACKTRACE
 #mesondefine SANDSTONE_CHILD_DEBUG_CRASHES
@@ -36,8 +37,10 @@
 
 #mesondefine SANDSTONE_DEVICE_CPU
 #mesondefine SANDSTONE_DEVICE_GPU
+#mesondefine SANDSTONE_DEVICE_IDXD
 
 #mesondefine SANDSTONE_FREQUENCY_MANAGER
+#mesondefine SANDSTONE_ULOG
 
 #define SANDSTONE_CHILD_DEBUG (SANDSTONE_CHILD_DEBUG_CRASHES || SANDSTONE_CHILD_DEBUG_HANGS)
 
@@ -53,9 +56,10 @@ static constexpr bool ChildBacktrace = SANDSTONE_CHILD_BACKTRACE;
 static constexpr bool ChildDebug = SANDSTONE_CHILD_DEBUG;
 static constexpr bool ChildDebugCrashes = SANDSTONE_CHILD_DEBUG_CRASHES;
 static constexpr bool ChildDebugHangs = SANDSTONE_CHILD_DEBUG_HANGS;
+static constexpr bool HasBuiltinTestList = SANDSTONE_BUILTIN_TEST_LIST;
+static constexpr bool HasUlogSupport = SANDSTONE_ULOG;
 static constexpr bool NoLogging = SANDSTONE_NO_LOGGING;
 static constexpr bool RestrictedCommandLine = SANDSTONE_RESTRICTED_CMDLINE;
-static constexpr bool HasBuiltinTestList = SANDSTONE_BUILTIN_TEST_LIST;
 } // namespace SandstoneConfig
 
 #endif /* __cplusplus */

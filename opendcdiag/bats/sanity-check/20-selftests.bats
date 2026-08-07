@@ -117,6 +117,9 @@ tap_negative_check() {
 }
 
 @test "TAP output fails" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "TAP skipped for GPU"
+    fi
     # not all tests
     for test in selftest_failinit selftest_fail; do
         local notok
@@ -130,6 +133,9 @@ tap_negative_check() {
 }
 
 @test "TAP output crash" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "TAP skipped for GPU"
+    fi
     if $is_asan; then
         skip "Crashing tests skipped with ASAN"
     fi
@@ -149,6 +155,9 @@ tap_negative_check() {
 }
 
 @test "TAP output OS error" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "TAP skipped for GPU"
+    fi
     run $SANDSTONE --output-format=tap --selftests --retest-on-failure=0 --on-crash=kill -e selftest_oserror -o /dev/null -v
     [[ $status -eq 2 ]]
     sed 's/\r$//' <<<"$output" | \
@@ -156,6 +165,9 @@ tap_negative_check() {
 }
 
 @test "TAP silent output" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "TAP skipped for GPU"
+    fi
     local -a opts=(--output-format=tap --quick --selftests --quiet --disable="*fork" -e @positive)
     $SANDSTONE "${opts[@]}" > $BATS_TEST_TMPDIR/output.tap
 
@@ -330,6 +342,61 @@ selftest_pass() {
     test_yaml_regexp "/tests/1/result" skip
 }
 
+@test "selftest_pass YAML has main thread and loop-count at -vvv" {
+    # Verify that at least 1 main thread exists with runtime
+    # and resource-usage when running at -vvv verbosity.
+    # Also confirm loop-count is printed for silent threads.
+    declare -A yamldump
+    sandstone_selftest -vvv -e selftest_pass
+    [[ "$status" -eq 0 ]]
+    test_yaml_regexp "/tests/0/threads/0/thread" 'main'
+    test_yaml_numeric "/tests/0/threads/0/runtime" 'value >= 0'
+    if ! $is_windows; then
+        test_yaml_regexp "/tests/0/threads/0/resource-usage" '\{.*\}'
+    fi
+    for ((i = 1; i <= MAX_PROC; ++i)); do
+        test_yaml_numeric "/tests/0/threads/$i/loop-count" 'value >= 0'
+    done
+}
+
+@test "selftest_pass TAP has main thread and loop-count at -vvv" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "TAP skipped for GPU"
+    fi
+    # Verify that at least 1 main thread exists with runtime
+    # and resource-usage when running at -vvv verbosity.
+    # Also confirm loop-count is printed for silent threads.
+    run $SANDSTONE --selftests --retest-on-failure=0 --on-crash=kill -o /dev/null \
+        -e selftest_pass --output-format=tap -vvv
+    [[ "$status" -eq 0 ]]
+
+    tap_output=$(echo "$output" | sed 's/\r$//')
+    [[ "$tap_output" = *"Main thread:"* ]]
+
+    for ((i = 0; i < MAX_PROC; ++i)); do
+        [[ "$tap_output" = *"Thread $i on CPU"* ]]
+        echo "$tap_output" | grep -A1 "Thread $i on CPU" | grep -q "loop-count:"
+    done
+}
+
+@test "selftest_pass Key-value has main thread and loop-count at -vvv" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "Key-value skipped for GPU"
+    fi
+    # Verify that at least 1 main thread exists with runtime
+    # and resource-usage when running at -vvv verbosity.
+    # Also confirm loop-count is printed for silent threads.
+    run $SANDSTONE --selftests --retest-on-failure=0 --on-crash=kill -o /dev/null \
+        -e selftest_pass --output-format=key-value -vvv
+    [[ "$status" -eq 0 ]]
+    key_val_output=$(echo "$output" | sed 's/\r$//')
+
+    for ((i = 0; i < MAX_PROC; ++i)); do
+        [[ "$key_val_output" = *"selftest_pass_messages_thread_${i}_cpu = "* ]]
+        [[ "$key_val_output" = *"selftest_pass_thread_${i}_loop_count = "* ]]
+    done
+}
+
 @test "selftest_preinit" {
     declare -A yamldump
     sandstone_selftest -e selftest_preinit
@@ -457,7 +524,7 @@ function selftest_log_skip_init_common() {
     test_yaml_regexp "/tests/0/result" skip
     test_yaml_regexp "/tests/0/skip-category" Runtime
     test_yaml_regexp "/tests/0/skip-reason" '.*test_run().*'
-    for ((i = 0; i < yamldump[/tests/0/threads@len]; ++i)); do
+    for ((i = 0; i < MAX_PROC; ++i)); do
         test_yaml_regexp "/tests/0/threads/$i/messages/0/level" skip
         test_yaml_regexp "/tests/0/threads/$i/messages/0/text" '.*Skipping.*'
     done
@@ -639,9 +706,9 @@ function selftest_log_skip_init_common() {
     check_test 1
 }
 
-@test "selftest_log_raw_yaml" {
+function selftest_log_yaml_common() {
     declare -A yamldump
-    sandstone_selftest -e selftest_log_raw_yaml
+    sandstone_selftest -e $1
     [[ "$status" -eq 0 ]]
     test_yaml_regexp "/exit" pass
     test_yaml_regexp "/tests/0/result" pass
@@ -652,6 +719,13 @@ function selftest_log_skip_init_common() {
         test_yaml_regexp "/tests/0/threads/$i/messages/0/details/random" '.*'
         test_yaml_regexp "/tests/0/threads/$i/messages/0/details/text" 'foo bar'
     done
+}
+
+@test "selftest_log_raw_yaml" {
+    selftest_log_yaml_common selftest_log_raw_yaml
+}
+@test "selftest_log_formatted_yaml" {
+    selftest_log_yaml_common selftest_log_formatted_yaml
 }
 
 @test "selftest_logdata" {
@@ -668,10 +742,6 @@ function selftest_log_skip_init_common() {
 }
 
 @test "selftest_logs_options" {
-    run $SANDSTONE -n1 --selftests -e selftest_logs_options -O dummy=dummy
-    if [[ $status == 64 ]]; then
-       skip "Not supported"
-    fi
     declare -A yamldump
     sandstone_selftest -vvv --max-messages=0 -e selftest_logs_options
     [[ "$status" -eq 0 ]]
@@ -768,18 +838,18 @@ test_random() {
         skip "Test only works with Debug builds (to mock the topology)"
     fi
     local results=()
-    local cpus=()
+    local devices=()
     seed=$1
     shift
-    for cpu; do
-        r=${random_results[$cpu]}
+    for device; do
+        r=${random_results[$device]}
         [[ -n "$r" ]]
         results+=("$r")
-        cpus+=($cpu)
+        devices+=($device)
     done
 
     declare -A yamldump
-    SANDSTONE_MOCK_TOPOLOGY="${cpus[*]}" sandstone_selftest -e selftest_logs_random -s $seed
+    SANDSTONE_MOCK_TOPOLOGY="${devices[*]}" sandstone_selftest -e selftest_logs_random -s $seed
     [[ "$status" -eq 0 ]]
     test_yaml_regexp "/exit" pass
     #test_yaml_regexp "/tests/0/result" pass
@@ -790,13 +860,15 @@ test_random() {
         numbers=${yamldump[/tests/0/threads/$i/messages/0/text]}
         numbers=${numbers#I> }
         if [[ "$numbers" != "${results[$i]}" ]]; then
-            echo "Random numbers for CPU ${cpus[$i]} ($numbers) don't match expected (${results[$i]})" >&2
+            echo "Random numbers for CPU ${devices[$i]} ($numbers) don't match expected (${results[$i]})" >&2
             false
         fi
     done
 }
 
 @test "selftest_logs_random_lcg" {
+    local -r SEED=LCG:1348219713
+
     if [[ "$SANDSTONE_DEVICE_TYPE" = "CPU" ]]; then
         local -Ar random_results=(
             [p0c0t0]="2008263207 1313955870 34286625 1487267185"
@@ -811,15 +883,30 @@ test_random() {
         )
 
         # Mocking 4 sockets of 1 core each
-        test_random LCG:1348219713 p0c0t0 p1c0t0 p2c0t0 p3c0t0
+        test_random $SEED p0c0t0 p1c0t0 p2c0t0 p3c0t0
 
         # Mocking 1 socket of 4 single-thread cores
-        test_random LCG:1348219713 p0c0t0 p0c1t0 p0c2t0 p0c3t0
+        test_random $SEED p0c0t0 p0c1t0 p0c2t0 p0c3t0
 
         # Mocking 1 socket of 4 hyperthreaded cores
-        test_random LCG:1348219713 p0c0t0 p0c0t1 p0c1t0 p0c1t1
-    # else
-    #     # TODO
+        test_random $SEED p0c0t0 p0c0t1 p0c1t0 p0c1t1
+    else
+
+        local -Ar random_results=(
+            [0000:19:00.0]="1138815635 483121179 1217508736 179228007"
+            [1234:55:66.7]="945355282 1364802319 2016901430 1677790785"
+            [1111:00:11.0]="1181093213 1154624167 1220074666 1632667158"
+            [9876:55:44.3]="1855020762 81573543 1298969202 314824636"
+        )
+
+        # we need >1 for the duration of this selftest
+        local max_proc_old=$MAX_PROC
+        MAX_PROC=`nproc`
+
+        # Mocking 4 GPUs
+        test_random $SEED 0000:19:00.0 1234:55:66.7 1111:00:11.0 9876:55:44.3
+
+        MAX_PROC=$max_proc_old
     fi
 }
 
@@ -829,8 +916,9 @@ test_random() {
         skip "AES engine is not present in this build"
     fi
 
+    local -r SEED=AES:87608d752b11fb972c8f0b4c19cdecf7789f728ad4ee0468d370f4b3e6321308
+
     if [[ "$SANDSTONE_DEVICE_TYPE" = "CPU" ]]; then
-        local -r SEED=AES:87608d752b11fb972c8f0b4c19cdecf7789f728ad4ee0468d370f4b3e6321308
         local -Ar random_results=(
             [p0c0t0]="1442152966 848034066 1178242204 1152613460"
             [p0c0t1]="801863574 1764783886 468436526 1150421294"
@@ -851,8 +939,22 @@ test_random() {
 
         # Mocking 1 socket of 4 hyperthreaded cores
         test_random $SEED p0c0t0 p0c0t1 p0c1t0 p0c1t1
-    # else
-    #     # TODO
+    else
+        local -Ar random_results=(
+            [0000:19:00.0]="1801315994 1428042404 1906386045 648907624"
+            [1234:55:66.7]="1043019765 489305543 1649509585 1525138440"
+            [1111:00:11.0]="2064196841 141036801 666473059 1756577774"
+            [9876:55:44.3]="1219182571 577652178 1203741544 709846939"
+        )
+
+        # we need >1 for the duration of this selftest
+        local max_proc_old=$MAX_PROC
+        MAX_PROC=`nproc`
+
+        # Mocking 4 GPUs
+        test_random $SEED 0000:19:00.0 1234:55:66.7 1111:00:11.0 9876:55:44.3
+
+        MAX_PROC=$max_proc_old
     fi
 }
 
@@ -1194,7 +1296,7 @@ function selftest_logerror_init_common() {
     [[ "$status" -eq 1 ]]
     test_yaml_regexp "/exit" fail
     test_yaml_regexp "/tests/0/test" selftest_fail_run_mainproc
-    for ((i = 0; i < yamldump[/tests/0/threads@len]; ++i)); do
+    for ((i = 0; i < MAX_PROC; ++i)); do
         test_yaml_regexp "/tests/0/threads/$i/state" failed
         test_yaml_regexp "/tests/0/threads/$i/messages/0/level" info
         test_yaml_regexp "/tests/0/threads/$i/messages/0/text" 'I> run returns FAIL'
@@ -1259,6 +1361,22 @@ function selftest_logerror_init_common() {
     test_yaml_regexp "/tests/0/threads/0/thread" 'main'
     test_yaml_regexp "/tests/0/threads/0/messages/0/level" info
     test_yaml_regexp "/tests/0/threads/0/messages/0/text" 'I> cleanup returns FAIL'
+}
+
+@test "selftest_fail_run_and_cleanup" {
+    declare -A yamldump
+    sandstone_selftest -e selftest_fail_run_and_cleanup
+    [[ "$status" -eq 1 ]]
+    test_yaml_regexp "/exit" fail
+    test_yaml_regexp "/tests/0/threads/0/thread" 'main'
+    test_yaml_regexp "/tests/0/threads/0/messages/0/level" info
+    test_yaml_regexp "/tests/0/threads/0/messages/0/text" 'I> cleanup returns FAIL'
+
+    # check every thread also failed
+    for ((i = 1; i < MAX_PROC + 1; ++i)); do
+        test_yaml_regexp "/tests/0/threads/$i/state" failed
+        test_yaml_regexp "/tests/0/threads/$i/messages/0/text" 'I> run returns FAIL'
+    done
 }
 
 @test "selftest_logerror_cleanup" {
@@ -1397,6 +1515,7 @@ function selftest_logerror_common() {
     pattern=$2
     set -e
     fail_common
+    test_yaml_numeric "/tests/0/threads@len" "value >= $MAX_PROC"
     for ((i = 0; i < ${yamldump[/tests/0/threads@len]}; ++i)); do
         local cpu=${yamldump[/tests/0/threads/$i/thread]}
         [[ "$cpu" = [0-9]* ]] || continue   # skip main thread
@@ -1428,7 +1547,7 @@ function selftest_logerror_common() {
     fail_common
 
     # ensure that we see 4 error messages in each thread, in spite of --max-messages
-    for ((i = 0; i < ${yamldump[/tests/0/threads@len]}; ++i)); do
+    for ((i = 0; i < MAX_PROC; ++i)); do
         local cpu=${yamldump[/tests/0/threads/$i/thread]}
         [[ "$cpu" = [0-9]* ]] || continue   # skip main thread
 
@@ -1470,40 +1589,85 @@ function selftest_logerror_common() {
     fail_callback_common
 }
 
+function selftest_cxxthrow_common() {
+    if $is_asan; then
+        skip "Crashing tests skipped with ASAN"
+    fi
+    sandstone_selftest --on-crash=kill -e "$BATS_TEST_DESCRIPTION"
+    [[ "$status" -eq 1 ]]
+    test_yaml_regexp "/exit" fail
+    test_yaml_regexp "/tests/0/result" "crash"
+    local seenmessage=false
+    for ((i = 0; i < ${yamldump[/tests/0/threads@len]}; ++i)); do
+        local cpu=${yamldump[/tests/0/threads/$i/thread]}
+        [[ "$cpu" = [0-9]* ]] || continue   # skip main thread
+        # All threads attempt to throw, but not all of them may have done so
+        if [[ -n "${yamldump[/tests/0/threads/$i/messages@len]}" ]]; then
+            test_yaml_regexp "/tests/0/threads/$i/messages/0/level" error
+            test_yaml_regexp "/tests/0/threads/$i/messages/0/text" 'E> Caught C\+\+ exception of type.*'
+            seenmessage=true
+        fi
+    done
+    $seenmessage
+}
 @test "selftest_cxxthrow" {
     declare -A yamldump
-    selftest_logerror_common selftest_cxxthrow 'Caught C\+\+ exception: .*'
+    selftest_cxxthrow_common
 }
-
 @test "selftest_cxxthrow_with_cb" {
     declare -A yamldump
-    selftest_logerror_common selftest_cxxthrow_with_cb 'Caught C\+\+ exception: .*'
+    # Because this is a crash, we could race between one thread doing abort() and
+    # another running the callbacks. Therefore, we run just one.
+    MAX_PROC=1
+    selftest_cxxthrow_common
     fail_callback_common
 }
 
 @test "selftest_datacompare" {  # also "_with_cb" version
     declare -A yamldump
     local dataregexp='0x[0-9a-f]+( \(([-0-9]+|[-+0-9a-fpx.]+)\))?'
-    for test in `$SANDSTONE --selftests --list-tests | sed -n '/^selftest_datacomparefail/s/\r$//p'`; do
+    local testlist=($($SANDSTONE --selftests --list-tests | sed -n '/^selftest_datacomparefail_/{s/\r$//;p;}'))
+    ((${#testlist[@]} > 0))      # ensure we've found at least one
+    for test in ${testlist[@]}; do
+        printf '# %s\n' "$test" >&3     # print as progress report
+
         type=${test#selftest_datacomparefail_}
+        type=${type%_with_cb}   # if any
         case "$type" in
             Float16)            type=_Float16;;
             long_double)        type=_Float64x;;
         esac
+        local description="data of type '$type'.*"
+        case "$type" in
+            uint8_t)            description='';;
+        esac
+
         sandstone_selftest -vvv -e $test
         set -e
         fail_common
         [[ "$test" != *_with_cb ]] || fail_callback_common
         for ((i = 1; i <= MAX_PROC; ++i)); do
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/level" error
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/type" $type
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/offset" '\[.*\]'
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/address" '(0x)?[0-9a-f]+'
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/actual" "$dataregexp"
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/expected" "$dataregexp"
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/mask" '0x[0-9a-f]+'
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/actual data" '[0-9a-f ]+'
-            test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/expected data" '[0-9a-f ]+'
+            # there may be debug messages ahead of our error
+            local found=0
+            for ((j = 0; !found && j < ${yamldump[/tests/0/threads/$i/messages@len]}; ++j)); do
+                [[ "${yamldump[/tests/0/threads/$i/messages/$j/level]}" = error ]] || continue
+                found=1
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/level" error
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/type" $type
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/offset" '\[.*\]'
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/address" '(0x)?[0-9a-f]+'
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/description" "$description"
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/expected" "$dataregexp"
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/mask" '0x[0-9a-f]+'
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/actual data" '[0-9a-f ]+'
+                test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/expected data" '[0-9a-f ]+'
+                test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/description" "$description"
+                if [[ -n "$description" ]]; then
+                    test_yaml_expr "/tests/0/threads/$i/messages/0/data-miscompare/details/rare" = False
+                    test_yaml_numeric "/tests/0/threads/$i/messages/0/data-miscompare/details/count" 'value == 16'
+                fi
+            done
+            ((found))
         done
     done
 }
@@ -1512,14 +1676,21 @@ function selftest_datacompare_nodifference_common() {
     sandstone_selftest "$@"
     fail_common
     for ((i = 1; i <= MAX_PROC; ++i)); do
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/level" error
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/type" 'uint8_t'
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/offset" None
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/address" '(0x)?[0-9a-f]+'
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/actual" None
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/expected" None
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/mask" None
-        test_yaml_regexp "/tests/0/threads/$i/messages/0/data-miscompare/remark" '.+'
+        # there may be debug messages ahead of our error
+        local found=0
+        for ((j = 0; !found && j < ${yamldump[/tests/0/threads/$i/messages@len]}; ++j)); do
+            [[ "${yamldump[/tests/0/threads/$i/messages/$j/level]}" = error ]] || continue
+            found=1
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/level" error
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/type" 'uint8_t'
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/offset" None
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/address" '(0x)?[0-9a-f]+'
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/actual" None
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/expected" None
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/mask" None
+            test_yaml_regexp "/tests/0/threads/$i/messages/$j/data-miscompare/remark" '.+'
+        done
+        ((found))
     done
 }
 
@@ -1787,9 +1958,14 @@ selftest_crash_common() {
     # Ensure we can use this option even if gdb isn't found
     # (can't use run_sandstone_yaml here because we empty $PATH)
     if ! $is_windows; then
+        local marker="Registers:"
+        if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+            marker="gpu_runtime_state:"
+        fi
+
         run env PATH=/ $SANDSTONE -Y --selftests -e selftest_sigsegv --retest-on-failure=0 --on-crash=context -o -
         [[ $status -eq 1 ]]     # instead of 64 (EX_USAGE)
-        [[ "$output" = *"level: info"*"Registers:"* ]]
+        [[ "$output" = *"level: info"*"$marker"* ]]
         ! [[ "$output" = *Backtrace:* ]]
 
         # And that we get a context even without the option
@@ -1797,9 +1973,60 @@ selftest_crash_common() {
         opts=(${opts/--on-crash=*})     # remove --on-crash
         SANDSTONE="${opts[@]}"          # rejoin with spaces
         run env PATH=/ $SANDSTONE -Y --selftests -e selftest_sigsegv --retest-on-failure=0 -o -
-        [[ "$output" = *"level: info"*"Registers:"* ]]
+        [[ "$output" = *"level: info"*"$marker"* ]]
         ! [[ "$output" = *Backtrace:* ]]
     fi
+}
+
+crash_code_dump_common() {
+    local testname=$1 signame=$2
+    if ! $is_windows; then
+        check_gdb_usable
+    fi
+    sandstone_selftest -n1 -e $testname --on-crash=context
+    [[ "$status" -eq 1 ]]
+    test_yaml_regexp "/exit" fail
+    test_yaml_regexp "/tests/0/result" crash
+    if $is_windows; then
+        test_yaml_regexp "/tests/0/threads/1/messages/0/text" \
+            ".*Received exception 0x[0-9a-f]+ \(.*\), RIP = 0x.*"
+    else
+        local signum=`kill -l $signame`
+        test_yaml_regexp "/tests/0/threads/1/messages/0/text" \
+            ".*Received signal $signum \(.*\) code=[0-9]+.* RIP = 0x.*"
+    fi
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        "Code around RIP \(0x[0-9a-f]+\):"
+}
+
+@test "crash code dump (sigill near unreadable)" {
+    declare -A yamldump
+    crash_code_dump_common selftest_sigill_near_unreadable ILL
+    # RIP row: some readable hex bytes followed by ??
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        " +0x[0-9a-f]+: ([0-9a-f]{2} )+(\?\? )+\?\?"
+}
+
+@test "crash code dump (sigsegv readable-unreadable)" {
+    declare -A yamldump
+    crash_code_dump_common selftest_sigsegv_readable_unreadable SEGV
+    # First row: some readable bytes then ??
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        " +0x[0-9a-f]+: ([0-9a-f]{2} )+(\?\? )+\?\?"
+    # RIP row: entirely ??
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        " +0x[0-9a-f]+: (\?\? )+\?\?"
+}
+
+@test "crash code dump (sigsegv unreadable-readable)" {
+    declare -A yamldump
+    crash_code_dump_common selftest_sigsegv_unreadable_readable SEGV
+    # Row 0: entirely ?? (RIP page unmapped)
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        " +0x[0-9a-f]+: (\?\? )+\?\?"
+    # Row 1: some ?? followed by readable bytes
+    test_yaml_regexp "/tests/0/threads/1/messages/2/text" \
+        " +0x[0-9a-f]+: (\?\? )+([0-9a-f]{2} )+[0-9a-f]{2}"
 }
 
 @test "crash backtrace" {
@@ -1965,4 +2192,112 @@ selftest_interrupt_common() {
     test_yaml_regexp "/tests/1/test" selftest_test_optional_beta
     test_yaml_regexp "/tests/2/test" selftest_test_optional_include_optional
     test_yaml_regexp "/tests/3/test" selftest_test_optional_beta_include_optional
+}
+
+thread_ratio_expected_threads() {
+    local count=$1
+    local ratio=$2
+    local threads
+    if [[ "$ratio" == -* ]]; then
+        threads=$(( count + ratio ))
+    else
+        threads=$(awk "BEGIN { printf \"%d\", int($count * $ratio) }")
+    fi
+    (( threads = threads > 0 ? threads : 1 ))
+    echo "$threads"
+}
+
+visible_device_count() {
+    local count
+    count=$($SANDSTONE --dump-device-info | grep -c '^[0-9]')
+    echo "$count"
+}
+
+check_thread_ratio_plans() {
+    local ratio=$1
+    local logical_id_key=logical
+    local start_id_key=starting_cpu
+    local device_info_key=cpu-info
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        logical_id_key=logical_cpu
+        start_id_key=starting_device
+        device_info_key=device-info
+    fi
+
+    # fullsocket
+    local fs_count=${yamldump[/test-plans/fullsocket/0/count]}
+    local expected=$(thread_ratio_expected_threads "$fs_count" "$ratio")
+    test_yaml_numeric "/test-plans/fullsocket/0/threads" "value == $expected"
+
+    local next_plan=
+    if [[ "$SANDSTONE_DEVICE_TYPE" == "CPU" ]]; then
+        next_plan=core_groups
+    elif [[ "$SANDSTONE_DEVICE_TYPE" == "GPU" ]]; then
+        next_plan=isolate_numa
+    fi
+    if [[ -n "$next_plan" ]]; then
+        local slice_count=${yamldump[/test-plans/$next_plan@len]}
+        for ((i = 0; i < slice_count; i++)); do
+            local count=${yamldump[/test-plans/$next_plan/$i/count]}
+            expected=$(thread_ratio_expected_threads "$count" "$ratio")
+            test_yaml_numeric "/test-plans/$next_plan/$i/threads" "value == $expected"
+        done
+    fi
+
+    # heuristic slices
+    slice_count=${yamldump[/test-plans/heuristic@len]}
+    for ((i = 0; i < slice_count; i++)); do
+        local count=${yamldump[/test-plans/heuristic/$i/count]}
+        expected=$(thread_ratio_expected_threads "$count" "$ratio")
+        test_yaml_numeric "/test-plans/heuristic/$i/threads" "value == $expected"
+    done
+
+    # Verify each test thread is pinned to the expected device's CPU.
+    # Thread t within a slice must be on the t-th device's logical CPU.
+    # We look up logical CPUs from device-info because they are not necessarily
+    # contiguous (e.g. device 1 could be logical CPU 120).
+    local thread_idx=$slice_count
+    for ((i = 0; i < slice_count; i++)); do
+        local start=${yamldump[/test-plans/heuristic/$i/$start_id_key]}
+        local threads=${yamldump[/test-plans/heuristic/$i/threads]}
+
+        # Build array of logical CPUs for this slice's devices
+        local -a valid_cpus=()
+        local count=${yamldump[/test-plans/heuristic/$i/count]}
+        for ((d = start; d < start + count; d++)); do
+            valid_cpus+=("${yamldump[/$device_info_key/$d/$logical_id_key]}")
+        done
+
+        for ((t = 0; t < threads; t++)); do
+            local logical=${yamldump[/tests/0/threads/$thread_idx/id/$logical_id_key]}
+            if (( logical != valid_cpus[t] )); then
+                echo "Thread $thread_idx: expected logical CPU ${valid_cpus[$t]}, got $logical" >&2
+                return 1
+            fi
+            thread_idx=$(( thread_idx + 1 ))
+        done
+    done
+}
+
+@test "thread_ratio delta YAML pass output" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "thread_ratio skipped for GPU"
+    fi
+    if [[ $(visible_device_count) -le 1 ]]; then
+        skip "thread_ratio delta skipped: requires at least 2 visible devices"
+    fi
+    declare -A yamldump
+    sandstone_selftest -e selftest_pass -vvv --max-cores-per-slice=2 --thread-ratio=-1
+    test_yaml_regexp "/exit" pass
+    check_thread_ratio_plans -1
+}
+
+@test "thread_ratio 70% YAML pass output" {
+    if [[ "$SANDSTONE_DEVICE_TYPE" = "GPU" ]]; then
+        skip "thread_ratio skipped for GPU"
+    fi
+    declare -A yamldump
+    sandstone_selftest -e selftest_pass -vvv --max-cores-per-slice=2 --thread-ratio=70%
+    test_yaml_regexp "/exit" pass
+    check_thread_ratio_plans 0.70
 }

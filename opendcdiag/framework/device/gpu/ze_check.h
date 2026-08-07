@@ -9,23 +9,15 @@
 #include "sandstone_p.h"
 #include "ze_utils.h"
 
-#include "level_zero/ze_api.h"
+#include <level_zero/ze_api.h>
 
-extern bool logging_in_test;
-
-/// Check return value of an L0 API call. Log the return status and return EXIT_FAILURE if check against "success" status fails.
+/// Check return value of an L0 API call.
+/// In test context it returns EXIT_SKIP; outside tests it returns EXIT_FAILURE.
 #define ZE_CHECK(...) \
     do { \
         auto result = (__VA_ARGS__); \
         if (result != ZE_RESULT_SUCCESS) { \
-            if (!sApp->shmem) { \
-                fprintf(stderr, "L0 API call failed with status %s\n", to_string(result)); \
-            } else if (logging_in_test) { \
-                log_debug("L0 API call failed with status %s", to_string(result)); \
-            } else { \
-                logging_printf(LOG_LEVEL_VERBOSE(1), "L0 API call failed with status %s\n", to_string(result)); \
-            } \
-            return EXIT_FAILURE; \
+            return log_skip_or_print(RuntimeSkipCategory, "L0 API call failed with status %s", to_string(result)); \
         } \
     } while (0)
 

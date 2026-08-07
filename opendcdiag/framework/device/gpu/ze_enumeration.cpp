@@ -8,10 +8,12 @@
 #include "multi_slice_gpu.h"
 #include "topology_gpu.h"
 
-#include "level_zero/ze_api.h"
-#include "level_zero/zes_api.h"
+#include <level_zero/ze_api.h>
+#include <level_zero/zes_api.h>
 
-#include <type_traits>
+#include <functional>
+#include <unordered_map>
+#include <vector>
 
 /// ZE API allows for nested enumeration of devices and their subdevices,
 /// depending on the ZE_FLAT_DEVICE_HIERARCHY env var value.
@@ -28,6 +30,9 @@ int for_each_ze_device(const std::function<int(ze_device_handle_t, ze_driver_han
 
     // Always pick the last ("newest") one.
     auto ze_driver = drivers.back();
+    if (!ze_driver) {
+        return log_skip_or_print(RuntimeSkipCategory, "Could not initialize driver handle");
+    }
     int gpu_number = 0;
     uint32_t n_devices = 0;
     ZE_CHECK(zeDeviceGet(ze_driver, &n_devices, nullptr));
@@ -35,6 +40,9 @@ int for_each_ze_device(const std::function<int(ze_device_handle_t, ze_driver_han
     ZE_CHECK(zeDeviceGet(ze_driver, &n_devices, devices.data()));
 
     for (int i = 0; i < (int)devices.size(); i++) {
+        if (!devices[i]) {
+            return log_skip_or_print(RuntimeSkipCategory, "Could not initialize device handle");
+        }
         ze_device_properties_t device_properties = { .stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES };
         ZE_CHECK(zeDeviceGetProperties(devices[i], &device_properties));
         if (device_properties.type == ZE_DEVICE_TYPE_GPU) {
@@ -67,12 +75,18 @@ int for_each_zes_device(const std::function<int(zes_device_handle_t, ze_driver_h
 
     int gpu_number = 0;
     for (auto zes_driver: zes_drivers) {
+        if (!zes_driver) {
+            return log_skip_or_print(RuntimeSkipCategory, "Could not initialize driver handle");
+        }
         uint32_t n_zes_devices = 0;
         ZE_CHECK(zesDeviceGet(zes_driver, &n_zes_devices, nullptr));
         std::vector<zes_device_handle_t> zes_devices(n_zes_devices);
         ZE_CHECK(zesDeviceGet(zes_driver, &n_zes_devices, zes_devices.data()));
 
         for (int i = 0; i < (int)zes_devices.size(); i++) {
+            if (!zes_devices[i]) {
+                return log_skip_or_print(RuntimeSkipCategory, "Could not initialize device handle");
+            }
             zes_device_properties_t device_prop = { .stype = ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES };
             ZE_CHECK(zesDeviceGetProperties(zes_devices[i], &device_prop));
             if (device_prop.core.type == ZE_DEVICE_TYPE_GPU) {
@@ -91,25 +105,30 @@ int for_each_zes_device(const std::function<int(zes_device_handle_t, ze_driver_h
 }
 
 namespace {
-template <typename Map, typename Func>
-int find_and_call_func(const gpu_info_t& info, ze_driver_handle_t ze_driver, const Map& map, const Func& func)
+template <typename DeviceType>
+int find_and_call_func(
+    const gpu_info_t& info, ze_driver_handle_t ze_driver,
+    const std::unordered_map<MultiSliceGpu, DeviceType>& map,
+    const std::function<int(DeviceType, ze_driver_handle_t, const MultiSliceGpu&)>& func
+)
 {
     MultiSliceGpu indices{
         .gpu_number = info.gpu_number, .device_index = info.device_index, .subdevice_index = info.subdevice_index
     };
     auto it = map.find(indices);
     if (it != map.cend()) {
-        func(it->second, ze_driver, indices);
-        return EXIT_SUCCESS;
+        return func(it->second, ze_driver, indices);
     }
-    return EXIT_FAILURE;
+    return log_skip_or_print(RuntimeSkipCategory, "Could not find func for device");
 }
 
-template <typename DeviceType>
+// XXX depending on API version, ze_device_handle_t and zes_device_handle_t can be the exact same type,
+// so we need an explicit template argument to choose between for_each_zes_device and for_each_ze_device.
+template <typename DeviceType, bool IsSysmanAPI = false>
 int for_each_device_within_topo_internal(const std::function<int(DeviceType, ze_driver_handle_t, const MultiSliceGpu&)>& func)
 {
     // Collect all handles for easier lookup.
-    ze_driver_handle_t ze_driver;
+    ze_driver_handle_t ze_driver{};
     std::unordered_map<MultiSliceGpu, DeviceType> dev_handles;
     auto emplace_map = [&](DeviceType dev_handle, ze_driver_handle_t driver, const MultiSliceGpu& indices) {
         ze_driver = driver;
@@ -118,20 +137,20 @@ int for_each_device_within_topo_internal(const std::function<int(DeviceType, ze_
     };
 
     int ret;
-    if constexpr (std::is_same_v<DeviceType, ze_device_handle_t>) {
-        ret = for_each_ze_device(emplace_map);
-    } else {
+    if constexpr (IsSysmanAPI) {
         ret = for_each_zes_device(emplace_map);
+    } else {
+        ret = for_each_ze_device(emplace_map);
     }
-    if (ze_driver == nullptr || ret != EXIT_SUCCESS) {
-        return EXIT_FAILURE;
+    if (ret != EXIT_SUCCESS) {
+        return ret;
     }
 
     ret = for_each_topo_device([&](const gpu_info_t& info) {
         return find_and_call_func(info, ze_driver, dev_handles, func);
     });
     if (ret != EXIT_SUCCESS) {
-        return EXIT_FAILURE;
+        return ret;
     }
 
     return EXIT_SUCCESS;
@@ -145,5 +164,5 @@ int for_each_ze_device_within_topo(const std::function<int(ze_device_handle_t, z
 
 int for_each_zes_device_within_topo(const std::function<int(zes_device_handle_t, ze_driver_handle_t, const MultiSliceGpu&)>& func)
 {
-    return for_each_device_within_topo_internal<zes_device_handle_t>(func);
+    return for_each_device_within_topo_internal<zes_device_handle_t, true>(func);
 }
