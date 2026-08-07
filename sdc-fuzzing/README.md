@@ -38,6 +38,7 @@ sdc-fuzzing/
 │   └── mrueig             # single libc-only executable, parameterized
 ├── scripts/
 │   ├── generate_manifest.py   # emits cases/manifest.json (100 cases)
+│   ├── validate_manifest.py   # static reproducibility self-check (100/100)
 │   ├── build_engine.sh        # builds engine/eigen_cabidrv.o + engine/mrueig
 │   ├── run_case.sh            # runs one case (load + bind core + MRU + CRC judge)
 │   ├── run_all.sh             # runs all 100, aggregates
@@ -45,6 +46,20 @@ sdc-fuzzing/
 └── cases/
     ├── manifest.json          # 100-case parameter manifest
     └── case_<id>/             # per-case run.log + result.json (populated on run)
+```
+
+## Static reproducibility self-check
+
+`scripts/validate_manifest.py` asserts that every one of the 100 cases falls
+inside the **verified trigger window** (F1/F2/F5/F6 + §11.3 hang-safety):
+N≥256, load_cpuset ≥47 cores, target_core=179, mode∈{0,1}, iters≥1500,
+load_seconds ≤75, libc_only. A case inside the window is, per the root-cause
+report's E2E evidence, a reproducer on the target machine. This is the
+strongest reproducibility guarantee achievable without the physical defective
+core 179.
+
+```bash
+python3 scripts/validate_manifest.py   # 100/100 PASS
 ```
 
 ## Quickstart

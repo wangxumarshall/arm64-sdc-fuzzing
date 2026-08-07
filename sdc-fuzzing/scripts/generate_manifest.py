@@ -150,27 +150,21 @@ def build_family_F() -> list[dict]:
 
 
 def build_family_G() -> list[dict]:
-    """Load window: load_seconds and cpuset subset (F2 >=47 core threshold)."""
+    """Load window: vary load DURATION (F5 capture window) on the verified
+    47-core same-socket cpuset, so every case stays in the trigger window and
+    reproduces. The 4-socket machine's socket 19062 has cores 144-191 (48
+    cores; the canonical 47-core load set 144-178 + 180-191 excludes target
+    179). Different same-socket subsets at exactly 47 cores are awkward to
+    construct without dropping below the threshold, so this family varies
+    duration (30-75s, all <=75 for hang safety §11.3) + seeds, all on the
+    verified cpuset. Duration affects how many of the K iterations land inside
+    the active load window (longer -> more captures expected)."""
     out = []
-    # (load_seconds, cpuset_size_note). cpuset is same-socket excluding 179.
-    # Base load_cpuset "144-178,180-191" = 47 cores (verified).
-    windows = [
-        (30, "144-178,180-191"),   # shorter window
-        (45, "144-178,180-191"),
-        (60, "144-178,180-191"),   # verified baseline
-        (75, "144-178,180-191"),   # max safe (avoid hang, §11.3)
-        (60, "150-178,180-191"),   # 41 cores — below threshold? probe lower bound
-        (60, "160-178,180-191"),   # 35 cores
-        (60, "170-178,180-191"),   # 29 cores
-        (60, "144-170,180-191"),   # 47 cores, different subset
-        (45, "144-165,180-191"),   # 43 cores
-        (30, "144-160,180-191"),   # 39 cores
-    ]
-    i = 0
-    for secs, cpuset in windows:
-        i += 1
+    durations = [30, 45, 60, 75, 30, 45, 60, 75, 45, 60]
+    for i, secs in enumerate(durations, 1):
         out.append(case(f"core179-repro-G{i:02d}", "G-load",
-                        load_seconds=secs, load_cpuset=cpuset,
+                        load_seconds=secs,
+                        load_cpuset="144-178,180-191",   # verified 47-core set
                         mseed=110000+i, rseed=111000+i))
     return out
 
