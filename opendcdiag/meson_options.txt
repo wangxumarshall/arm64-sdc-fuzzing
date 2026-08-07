@@ -8,7 +8,7 @@ option('march_base', type : 'string', value : '',
 option('framework_options', type : 'array', value : [],
     description : 'Configuration options for the framework. ' +
     'Possible options: restricted-cmdline, no-child-debug{,-crashes,-hangs}, no-child-backtrace, ' +
-    'no-test-names, no-ulog, allow-stdout-from-tests')
+    'allow-stdout-from-tests')
 option('dependency_link', type : 'combo', choices : ['dynamic', 'static'], value : 'dynamic',
     description : 'Link preference for dependencies: dynamic (default) or static')
 option('docdir', type : 'string', value : 'doc/dcdiag',
@@ -33,7 +33,8 @@ option('afl_inc', type : 'string', value : '',
     description : '(Optional) Directory with AFL header files (absolute path).')
 option('coverage', type : 'boolean', value : false,
     description : 'Enable code coverage (default false)')
-option('device_type', type: 'combo', choices : ['cpu', 'gpu', 'idxd'], value: 'cpu',
+option('device_type', type: 'combo', choices : ['cpu', 'gpu'], value: 'cpu',
     description : 'Device type for the build (default cpu).')
 option('target_device', type : 'string', value: 'bmg',
     description : 'Type of the device to be used for the build. Run `ocloc compile --help` for a full list of available device types. Defaults to "bmg". For SPIR-V intermediate format use "spirv".')
+option('eigen3_root', type: 'string', value: '', description: 'Root directory for Eigen3 installation (optional)')

@@ -17,3 +17,7 @@ tags
 /docs/sdc1-01-02-core179-diagnostics/probe
 # run artifacts
 /run-forever.out
+# local backups of test sources (not part of the build)
+/tests/cpu_backup_*/
+# Claude Code plan files (session-local)
+/.claude-plans/
