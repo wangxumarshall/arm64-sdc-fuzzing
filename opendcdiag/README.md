@@ -49,34 +49,18 @@ two specifics that commonly trip up fresh checkouts:
   Eigen 3.x (e.g. `libeigen3-dev`/`eigen3-devel` provides 3.3.x). When the
   system Eigen is too old, the build falls back to the **bundled Eigen 5.0.1
   source tree under `third-part/`** (see `tests/cpu/meson.build`). That tree is
-  a git submodule, so it must be fetched before the first build — see the next
-  section.
-- **No `.gitmodules` in this repo**: `opendcdiag/` is itself checked out as a
-  git submodule of a parent repository, and its `third-part` (Eigen) entry is a
-  nested submodule whose config lives in the parent. As a result, a plain
-  `git submodule update --init` run *inside* `opendcdiag/` does **not** discover
-  `third-part/`. You must either init it from the parent repo, or init it by
-  path from here.
+  **committed to the repo** (vendored), so a fresh clone already has it — no
+  submodule fetch or extra step is required.
 
-#### Initialize the bundled Eigen source (third-part/)
+#### Bundled Eigen source (third-part/)
 
-Run one of the following before the first build. `third-part/` is in
-`.gitignore` (fetched, not committed), so a fresh clone leaves it empty and the
-build will `assert`-fail without it (unless a system Eigen >= 5.0 is present).
-
-```console
-# Option A: from the parent repository (init all nested submodules)
-cd .. && git submodule update --init --recursive opendcdiag/third-part
-
-# Option B: from inside opendcdiag/, init by path
-git submodule update --init third-part
-
-# Option C: no git history — clone Eigen 5.0.1 directly
-git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
-```
-
-If the build complains `Bundled Eigen 5.0 source not found under third-part/`,
-you skipped this step.
+The Eigen 5.0.1 source is vendored under `third-part/` as ordinary committed
+files (it was previously a git submodule, which required a separate
+`git submodule update --init` step that often broke fresh checkouts — that is
+no longer needed). `tests/cpu/meson.build` prefers a system `eigen3 >= 5.0`
+when present and otherwise uses the bundled tree; if `meson setup` prints
+`Using bundled Eigen 5.0 source from third-part/`, the vendored tree is in
+use.
 
 #### Native build (x86_64 or ARM64)
 

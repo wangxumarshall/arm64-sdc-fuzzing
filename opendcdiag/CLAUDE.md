@@ -15,7 +15,8 @@ Output binary: `opendcdiag` (was historically `sandstone`).
 - Deps: boost 1.83 (headers only is fine — `meson.build` falls back from
   header-check), gtest_main 1.14, libzstd 1.5.5, zlib 1.2.13.
 - Eigen: system pkg is 3.3.8 (too old; needs >= 5.0) → build uses the
-  bundled `third-part/` Eigen 5.0.1 submodule. See "Pitfall" below.
+  bundled `third-part/` Eigen 5.0.1 source, which is **committed to the repo**
+  (vendored, not a submodule). No fetch step needed.
 
 ## Build commands
 
@@ -28,34 +29,21 @@ ninja -C builddir
 Cross from x86: `meson setup builddir --cross-file meson-cross-arm64.ini`.
 Fuzzing (AFL): `./scripts/build-fuzzing.sh build-fuzzing` (needs `afl-gcc`).
 
-## Pitfall: third-part/ Eigen submodule does not auto-init
+## Bundled Eigen 5.0.1 source (third-part/)
 
-**This is the #1 thing that breaks a fresh build.** Root cause, in full:
+The Eigen 5.0.1 source tree is **vendored directly under `third-part/`** as
+ordinary committed files — it is no longer a git submodule, so **no
+`git submodule update --init` step is needed** on a fresh checkout. This was
+previously the #1 fresh-build breaker (a nested submodule whose config lived
+in the parent repo, invisible to a plain `git submodule update --init` run
+from inside `opendcdiag/`); vendoring eliminates that footgun.
 
-- `opendcdiag/` is itself a git submodule of `../` (the parent repo).
-- `opendcdiag/third-part` (Eigen 5.0.1) is a *nested* submodule.
-- There is **no `.gitmodules` inside `opendcdiag/`** — the submodule config
-  for `opendcdiag/third-part` lives in the *parent* `.gitmodules`.
-- `third-part/` is listed in `opendcdiag/.gitignore` (fetched, not committed).
-- Consequence: a plain `git submodule update --init` run from inside
-  `opendcdiag/` finds nothing and leaves `third-part/` empty. The next
-  `meson setup` hits the `assert(fs.is_dir('../../third-part/Eigen'))` in
-  `tests/cpu/meson.build` and fails.
-
-**Fix — always do one of these on a fresh checkout:**
-
-```console
-git submodule update --init third-part              # from inside opendcdiag/
-# or from the parent repo:
-git submodule update --init --recursive opendcdiag/third-part
-# or without git: clone Eigen 5.0.1 straight in:
-git clone --depth 1 --branch 5.0.1 https://gitlab.com/libeigen/eigen.git third-part
-```
-
-If `meson setup` prints `Dependency eigen3 found: NO` followed by
-`Using bundled Eigen 5.0 source from third-part/`, the submodule is present
-and the fallback is working. If instead you see the `assert` failure, it is
-not.
+`tests/cpu/meson.build` prefers a system `eigen3 >= 5.0` when present and
+otherwise falls back to the bundled tree via
+`assert(fs.is_dir('../../third-part/Eigen'))`. If `meson setup` prints
+`Using bundled Eigen 5.0 source from third-part/`, the vendored tree is
+being used. To switch Eigen versions, replace the contents of `third-part/`
+(keep the flat layout: `third-part/Eigen/Core` must exist).
 
 ## Full-load / continuous run
 
