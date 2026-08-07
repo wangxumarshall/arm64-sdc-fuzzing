@@ -286,20 +286,28 @@ for (int k = 0; k < 1500; k++) {
 
 #### 10.4.2 纯 C 复现尝试(不 #include 任何 Eigen 头文件)与关键发现
 
-为验证能否进一步去除 Eigen 头文件依赖,用纯 C(libc + libm)重建 numeric Cholesky 的指令序列:
+为验证能否进一步去除 Eigen 头文件依赖,用纯 C(libc + libm + NEON intrinsics)重建 numeric Cholesky 的指令序列:
 
-| 纯 C 变体 | 算法特征 | 核 179 满载失败 | 结论 |
-|---|---|---|---|
-| `mru_dense.c` | 密集 LDL^T(cdiv + FMA rank-1 update + branch) | **0/1500** | ❌ 不触发 |
-| `mru_sparse.c` | 稀疏 CSC LDL^T(+ elimination tree + 间接寻址) | **0/1500** | ❌ 不触发 |
-| `mru_sparse.c -O3 -ffast-math` | 同上 + 强制向量化尝试 | **0/1500** | ❌ 不触发 |
-| **`esdiag_phase2.cpp`(Eigen)** | **稀疏 Cholesky + NEON 向量化 FMA** | **12/1500** | ✅ 触发 |
+| 纯 C 变体 | 算法特征 | 指令足迹 | 核 179 满载失败 | 结论 |
+|---|---|---|---|---|
+| `mru_dense.c` | 密集 LDL^T(标量 FMA + branch) | ~450 | **0/1500** | ❌ 不触发 |
+| `mru_sparse.c` | 稀疏 CSC LDL^T(+ elim tree + 间接) | ~500 | **0/1500** | ❌ 不触发 |
+| `mru_sparse.c -O3 -ffast-math` | + 强制向量化 | ~500 | **0/1500** | ❌ 不触发 |
+| `mru_sparse.c -ffp-contract=fast` | + FMA contraction(fmadd/fmsub) | ~500 | **0/1500** | ❌ 不触发 |
+| `mru_neon.c` | 密集 LDL^T + NEON intrinsics(vfmaq_f64) | ~460 | **0/1500** | ❌ 不触发 |
+| **`esdiag3.cpp`(Eigen compute)** | **完整稀疏 Cholesky** | **~6477** | **13/1500** | ✅ 触发 |
+| **`esdiag_phase2.cpp`(Eigen numeric-only)** | **numeric factorize** | **~7165** | **5-12/1500** | ✅ 触发 |
 
 **关键发现(给芯片设计的重要负反馈):**
-- **纯 C 标量/稀疏实现不触发,只有 Eigen 版触发** → 触发需要 Eigen 编译产物的**具体指令序列**,不是泛化的算法模式。
-- 反汇编对比:`esdiag_phase2` 含 **82 处 NEON 向量化指令**(fmla/vld/vst/q 寄存器)与 10 处 `fmsub`(FMA),而纯 C sparse 版仅 3 处 NEON、1 处 fmadd。
-- **触发因子 = NEON 向量化 FMA 在 numeric factorize 列更新循环中的特定序列**(Eigen 的固定大小 block 用 NEON 4×4 FMA,纯 C 标量无法生成等价序列,即便 `-O3 -ffast-math` 也无法向量化稀疏间接循环)。
-- 这把根因进一步精确:**故障依赖 NEON SIMD FMA pipe 的特定指令交错**,在 numeric factorize 列更新中触发 OoO 状态泄漏。
+- **所有纯 C 变体(标量/稀疏/NEON intrinsics)都不触发,只有 Eigen 版触发** → 触发不是单一指令类型(NEON FMA)的问题,而是**指令足迹/执行窗口规模**的问题。
+- **强相关**:纯 C 变体 ~450-500 条指令,**0 失败**;Eigen 变体 ~6477-7165 条指令,**触发**。指令足迹差 **~13-15×**。
+- **机理**:Eigen 的 numeric factorize_preordered 是大型代码(elimination tree 符号分析 + 稀疏三角求解 + rank-1 update + 多分支),填满 OoO 引擎的 ROB/物理寄存器堆到临界状态,在该状态下偶发跨迭代状态泄漏;纯 C 的简化实现(无论标量/稀疏/NEON)代码足迹太小,**无法填满执行窗口**,故不触发。
+- **给设计的负反馈**:**故障不可用简化/标量测试复现** —— 需要足够大的代码足迹(填满 OoO 执行窗口)才触发。这本身说明缺陷与**ROB/PRF 容量压力**强相关,而非特定指令。DFT 向量需保留完整 numeric factorize 的代码足迹,不能用简化版替代。
+
+**MRU 约束与可行性**:
+- 完全纯 C(不 #include Eigen)的 MRU **不可行**:需要在纯 C 中重写 Eigen 的完整 factorize_preordered(符号分析 + elimination tree + 稀疏求解 + rank-1 update),等价于重写 Eigen,失去"最小"意义。
+- Eigen 是 header-only 模板库,`#include <Eigen/...>` 编译时全部内联,链接产物(`ldd`)仅依赖 libstdc++/libm/libgcc_s/libc(运行时基础库),无 Eigen 的 .so/.a。但 `#include` 本身是对 Eigen 头文件的源码依赖,严格意义下违反"不依赖现有软件库(除 libc)"的约束。
+- **结论**:满足"无外部库链接依赖"的最小可用 MRU 是 `esdiag_phase2.cpp`(Eigen header-only);满足"完全不依赖任何非 libc 头文件"的纯 C MRU 在不重写 Eigen 的前提下**不可行**,该不可行性本身是重要发现(见上)。
 
 #### 10.4.3 MRU 结论
 
