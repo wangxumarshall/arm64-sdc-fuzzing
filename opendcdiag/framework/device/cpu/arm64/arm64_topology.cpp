@@ -501,7 +501,7 @@ void Arm64TopologyDetector::detect(const LogicalProcessorSet &enabled_cpus)
     for (int i = 0; i < sApp->thread_count; ++i) {
         device_info[i].package_id = -1;
         device_info[i].numa_id = -1;
-        device_info[i].tile_id = -1;
+        device_info[i].die_id = -1;
         device_info[i].module_id = -1;
         device_info[i].core_id = -1;
         device_info[i].thread_id = -1;
