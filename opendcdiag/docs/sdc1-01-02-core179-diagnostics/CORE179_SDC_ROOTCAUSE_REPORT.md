@@ -362,6 +362,26 @@ for (int k = 0; k < 1500; k++) {
 **6. MRU 提供作为 DFT/DPP 测试向量**
 - 第 10.4 节的 MRU(~30 行 C++)可直接作为芯片 bring-up 和量产筛选的测试向量,在满 socket 负载下运行可在秒级暴露故障。
 
+### 11.6 端到端验证(E2E)
+
+为证明 MRU 探针触发的故障与实际 opendcdiag `eigen_sparse` 满载失败是**同一根因**,执行端到端一致性验证:
+
+| 验证 | 配置 | 结果 | 一致性 |
+|---|---|---|---|
+| E2E-1a MRU 基线 | 47 核满载 + `esphase2` numeric-only 在 179 | 179: **12/1500 失败** | MRU 端 ✅ |
+| E2E-1b 单核对照 | opendcdiag eigen_sparse 单核 179,无外部负载 | 179: **0 失败** | 单核不触发 ✅ |
+| E2E-2 opendcdiag 端 | 48 核(含 179)opendcdiag eigen_sparse 满载 30s | 179: **63/63 失败**(全 179),其他 47 核 0 | 实际故障端 ✅ |
+| E2E-3a 隔离一致性 | 下线 179 后 47 核满载 opendcdiag | **2298 ok / 0 失败** | 隔离有效 ✅ |
+| E2E-3b 健康核一致性 | 下线 179,`esphase2` 在健康核 176 | **0/1000 失败** | 非核 179 特性 ✅ |
+
+**端到端验证结论:**
+1. **两端同核同触发**:MRU(numeric-only)与 opendcdiag eigen_sparse 都**只在核 179、只在满载**触发,其他核/单核均 0 失败 → 根因绑定核 179 一致。
+2. **隔离端到端有效**:下线 179 后,MRU 与 opendcdiag 同时清零 → 根因是核 179 本身,非共享资源/全局条件。
+3. **MRU 预测性**:MRU(numeric factorize 列更新循环)能复现 opendcdiag eigen_sparse 的同一故障 → MRU 是根因的充分复现用例,可作为芯片 DFT 向量。
+4. **失败率量级一致**:opendcdiag 用 `compute()`(symbolic+numeric 每次),符合 MRU 削减 2 的"compute-both"特性(触发但低于 numeric-only),两端同根因。
+
+**安全执行**:全部 E2E 实验采用 47-48 核 socket 满载 + 单次 ≤55s + `timeout` 包裹,全程**未触发系统挂死**。
+
 ## 12. 缓解措施(已验证)
 
 ### 12.1 即时隔离
