@@ -68,6 +68,7 @@ def main() -> int:
 
     ok = True
     ids = set()
+    seed_pairs = set()
     results = {"pass": 0, "fail": 0}
     fails = []
 
@@ -76,6 +77,10 @@ def main() -> int:
         if cid in ids:
             fails.append((cid, "duplicate id")); ok = False; results["fail"] += 1; continue
         ids.add(cid)
+        pair = (c["matrix_seed"], c["rhs_seed"])
+        if pair in seed_pairs:
+            fails.append((cid, f"duplicate (matrix_seed,rhs_seed)={pair} — not an independent case")); ok = False; results["fail"] += 1; continue
+        seed_pairs.add(pair)
         cissues = []
         N = c["matrix_dim"]
 

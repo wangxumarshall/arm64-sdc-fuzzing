@@ -181,14 +181,16 @@ def build_family_A() -> list[dict]:
     """
     out = []
     plan = [(256, 5, 3000), (384, 8, 1500), (512, 7, 1000)]
-    seeds = [12345, 22222, 33333, 44444, 55555, 66666, 77777]
     i = 0
     for N, cnt, K in plan:
         for _ in range(cnt):
             i += 1
+            # unique (ms, rs) per case: ms = 100000 + i, rs = 200000 + i*7.
+            # avoids the rotation collision that duplicated A06==A13 seeds
+            # (both ended at 66666/77778). Each case is now an independent
+            # observation (distinct matrix structure) of the same defect.
             out.append(case(f"core179-repro-A{i:02d}", "A-scale",
-                            N=N, mseed=seeds[(i-1) % len(seeds)],
-                            rseed=seeds[i % len(seeds)] + 1, iters=K))
+                            N=N, mseed=100000 + i, rseed=200000 + i * 7, iters=K))
     return out[:20]
 
 
