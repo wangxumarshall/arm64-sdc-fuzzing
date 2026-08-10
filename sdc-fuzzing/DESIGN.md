@@ -1,8 +1,10 @@
 # SDC-Fuzzing: 100 用例复现 core-179 SDC 的设计与生成机制
 
-**作者:** Claude (sdc-fuzzing 循环迭代 #1, 2026-08-07)
+**作者:** Claude (sdc-fuzzing 循环迭代 #1/#2, 2026-08-07 / 2026-08-10)
 **目标:** 深度理解当前项目源码,构建真实复现 SDC 的用例生成机制 `sdc-fuzzing`,设计 sdc-fuzzing 方案,自动化生成 100 个用例,使得这 100 个 SDC 检测用例都能复现 core-179 核 SDC 问题。
 **根因依据:** [`opendcdiag/docs/sdc1-01-02-core179-diagnostics/CORE179_SDC_ROOTCAUSE_REPORT.md`](../opendcdiag/docs/sdc1-01-02-core179-diagnostics/CORE179_SDC_ROOTCAUSE_REPORT.md)
+
+> **迭代 #2 修正(2026-08-10):** 经实测计时发现,迭代 #1 的清单对 N≥384 的用例一律用 K=3000,但单次 factorize 在 N=384/512/768/1024 下分别约 0.6/2.4/7.5/17s/iter,在 ≤75s 的安全负载窗口(§11.3)内根本跑不完 K=3000。迭代 #2 引入**多窗口累积(multi-window accumulation)**与**实测计时可行性模型**,把 N 限制到根因报告 §10.3 已验证的 {256,384,512},并对每个用例按计时模型分配 `iters_per_window` 与 `max_windows`,使 100 个用例都在 ≤75s 单窗口安全限内可执行、可在有限批量(≤60 窗/用例)内跑完。详见 §4.1 与 §7。
 
 ---
 
@@ -78,6 +80,30 @@ case = {
 
 **触发机器码不变性(硬约束):** 所有 100 个用例**共享** `eigen_cabidrv.o` 的 `escfactorize` / `escsolve` / `escanalyze` 机器码(从 Eigen 5.0 模板编译,`-fno-exceptions -fno-rtti`)。用例之间**不重新编译 Eigen 机器码**,只参数化驱动器(`mru_eigenmc.c` 的变体)的输入矩阵与运行参数。这保证"触发签名"恒定 → 100 个用例的"复现"是同一根因的不同观察,而不是 100 个不同的 bug。
 
+## 4.1 可行性模型与多窗口累积(迭代 #2 新增)
+
+**问题:** §11.3 要求单次负载窗口 ≤75s(规避挂死)。但实测 `engine/mrueig` 在 47 核满载下单次 `factorize()+solve()` 的墙钟随 N 急剧增长:
+
+| N | mode 1 per-iter(满载实测) | K=3000 总墙钟 | 能否塞进 75s 单窗口 |
+|---|---|---|---|
+| 256 | ~24 ms | ~73 s | **临界**(刚好超 70s 预算 → 需 2 窗口) |
+| 384 | ~582 ms | ~29 min | ❌ 需多窗口 |
+| 512 | ~2345 ms | ~117 min | ❌ 需多窗口 |
+| 768 | ~7.5 s(外推) | ~6.3 h | ❌ 不可行(已从清单移除) |
+| 1024 | ~17 s | ~14 h | ❌ 不可行(已从清单移除) |
+
+mode 0(compute-both,每次重做 analyze)的 per-iter 约为 mode 1 的 1.6×。
+
+**结论:** N≥384 的 K=3000 在单窗口内不可能完成;N=768/1024 在任何合理窗口数内都跑不到 K≥1500(0.5-1% 捕获窗口下限)。因此迭代 #2 做**两件事**:
+
+1. **N 限制到根因报告已验证的 {256,384,512}**(§10.3 只测了 N=256 与 N=512;N=384 填补其间的间隙;N=768/1024 报告未测,且不可行 → 不编入清单,避免"不可执行的死用例")。
+2. **多窗口累积机制:** 每个用例的清单编码三个量:
+   - `iterations` (= K_total):统计捕获目标(N=256 ≥1500、N=384 ≥1500、N=512 ≥1000,后者为 §10.3 的实测点:K=1000 → 8 fails);
+   - `iters_per_window`:按实测计时模型算出的"一个负载窗口能塞下的 K 块" = `floor((load_seconds - 5s 守卫) × 1000 / per_iter_ms(N,mode))`;
+   - `max_windows`:达到 K_total 所需的窗口数上限 = `ceil(K_total / iters_per_window)`,硬上限 60(单用例 ≤75min)。
+
+`run_case.sh` 据此**循环**执行(负载窗口 + 驱动块),跨窗口累积 `fails` 与 `iters`,任一窗口 `fails>0` 即 **early-PASS**(已观测复现,停止);累计 `iters ≥ K_total` 且 0 fails 即 INCONCLUSIVE(瞬态未捕获,换窗口重跑)。这使 100 个用例都在 ≤75s 单窗口安全限内可执行、批量可跑完(全量 ~11h,见 §5)。
+
 ---
 
 ## 5. 用例家族设计(100 个的分布)
@@ -86,15 +112,17 @@ case = {
 
 | 家族 | 用例数 | 参数化维度 | 取值 | 验证目的 |
 |------|--------|-----------|------|---------|
-| A. 规模扫描 | 20 | N | 256(5), 384(5), 512(5), 768(3), 1024(2) | F2 规模阈值;确认 N≥256 都触发 |
+| A. 规模扫描 | 20 | N | 256(5), 384(8), 512(7) | F2 规模阈值;§10.3 验证 N=256/512 触发,N=384 填间隙。N=768/1024 报告未测且不可行→不编入(见 §4.1) |
 | B. 密度扫描 | 15 | density_p | 0.05,0.08,0.10,0.12,0.15,0.20(各~2-3,变种子) | 间接寻址压力与触发率关系 |
 | C. 对角占优 | 10 | diag_dominance | 2.0,3.0,4.0,6.0,8.0(各2) | 数值条件对触发的影响(SPD 强度) |
 | D. 种子多样性 | 25 | matrix_seed + rhs_seed | 25 个不同 (ms, s) 对,N=256 固定 | F3:损坏固定 elem[0] 与矩阵内容无关 → 25 个不同矩阵都应在 elem[0] 损坏 |
 | E. 模式对比 | 10 | mode | 1(8 个,高触发),0(2 个,低触发) | F6: numeric-only vs compute-both 失败率比 ≈4× |
-| F. 迭代深度 | 10 | K | 1500(2),2500(3),3000(3),5000(2) | F5: 更深迭代是否线性提升捕获数 |
+| F. 迭代深度 | 10 | K | 1500(2),2500(3),3000(3),5000(2) | F5: 更深迭代是否线性提升捕获数(K=5000 用多窗口) |
 | G. 负载窗口 | 10 | load_seconds | 30s/45s/60s/75s(各 2-3)on the verified 47-core cpuset | F2/F5: 捕获窗口时长(全部≥47核阈值内) |
 
 **合计 = 20+15+10+25+10+10+10 = 100。** 每个用例有唯一 `id` 与参数集,清单见 `cases/manifest.json`(由 `scripts/generate_manifest.py` 生成)。
+
+**K_total 与窗口预算(迭代 #2):** 家族 A 按 N 设 K_total:N=256→3000(报告 E2E-1 实测点,~73s→2 窗口),N=384→1500(~15min,~6 窗口),N=512→1000(§10.3 实测点 8 fails,~39min,~38 窗口)。全量 `run_all.sh` 预计 ~11h(N=512 的 7 个用例占主导,~4.5h;N=384 的 8 个用例 ~2h;其余 N=256 用例各 ~2-3 窗口)。所有用例 `max_windows ≤ 60`,批量有界。
 
 **为什么这样分布能"都复现":** 家族 A/C/D/E/F/G 的参数化都在**已验证触发窗口内**(N≥256、满载≥47核、核 179、mode∈{0,1}、load≤75s),根因报告 §10.3/§10.5 E2E 已证明这些维度内都触发(只是率不同);家族 D 的 25 个不同种子矩阵直接验证 F3"损坏固定 elem[0] 与矩阵内容无关" → 必然复现。家族 B(密度)取值在已验证 0.1 的邻域(0.05-0.20);家族 G(负载窗口)在已验证 47-core cpuset 上**只变时长**(30-75s),**绝不降到阈值以下**(迭代#2 修正:迭代#1 曾设计低于 47 核的探边用例,但那些**设计上不触发**,违反"100 个都复现"的退出条件,故全部回到≥47核)。所有 100 个用例通过 `scripts/validate_manifest.py` 的静态可复现性自检:每个用例都在触发窗口内 → 在目标机上即为复现器。
 
@@ -127,31 +155,48 @@ sdc-fuzzing/
 
 ---
 
-## 7. 执行与判定流程(单用例)
+## 7. 执行与判定流程(单用例,多窗口累积)
 
 ```
 run_case.sh case_NNN:
-  1. 从 manifest.json 读 case_NNN 的参数 (N, p, d, ms, s, mode, K, target_core, load_cpuset, load_seconds)
-  2. 后台启动负载: timeout <load_seconds+10> opendcdiag --beta -e eigen_sparse \
-        --cpuset <load_cpuset> -s LCG:323306158 -T <load_seconds>s -o /dev/null
-  3. sleep 2  (等负载起来)
-  4. 前台触发: timeout <load_seconds+10> taskset -c <target_core> \
-        ./engine/mrueig <K> <ms> <s> <N> <p> <d> <mode> 2> cases/case_NNN/run.log
-     (mrueig 内部: analyzePattern 一次 [mode 1] 或 每次 [mode 0], factorize+solve K 次, CRC(x) vs golden)
-  5. 解析 run.log: RESULT ... fails=X/K
-  6. 判定:
-       if fails > 0  → case PASS (复现成功,记录 fails/率)
-       else           → case INCONCLUSIVE (未在该窗口捕获,需重跑或换窗口)
-       (单核 0 失败不是 FAIL,因为 F5:单核本就不触发;负对照用例期望 0)
-  7. 写 cases/case_NNN/result.json
+  1. 从 manifest.json 读参数 (N, p, d, ms, s, mode, K_total, iters_per_window,
+     max_windows, target_core, load_cpuset, load_seconds)
+  2. 循环窗口 w = 1..max_windows:
+     a. 后台启动负载: timeout <load_seconds+10> opendcdiag --beta -e eigen_sparse \
+           --cpuset <load_cpuset> -s LCG:323306158 -T <load_seconds>s -o /dev/null
+     b. sleep 2  (等负载起来,5s 守卫的一部分)
+     c. 计算本窗口块 chunk = min(iters_per_window, K_total - total_iters)
+     d. 前台触发: timeout <load_seconds+15> taskset -c <target_core> \
+           ./engine/mrueig <chunk> <ms> <s> <N> <p> <d> <mode>
+        (mrueig 内部: analyzePattern 一次 [mode 1] 或 每次 [mode 0],
+         factorize+solve chunk 次, CRC(x) vs golden; golden 确定性 → 跨调用一致)
+     e. 解析 stdout="<fails>",累加 total_fails += fails; total_iters += chunk
+     f. 关闭负载;sleep 3(窗口间 settle,避免累积挂死风险 §11.3)
+     g. 若 total_fails > 0 → early-PASS(已观测复现,跳出循环)
+        若 total_iters >= K_total → 跑满统计目标,跳出循环(INCONCLUSIVE 若 0 fails)
+  3. 判定:
+       total_fails > 0  → PASS (复现成功,记录 total_fails/total_iters/率/窗口数)
+       total_fails == 0  → INCONCLUSIVE (所有窗口均未捕获瞬态;换一批新窗口重跑)
+       (单核/健康核 0 失败是负对照,不是 FAIL;F5 单核本就不触发)
+  4. 写 cases/case_NNN/result.json (含 fails, iters, windows_run, K_total, ipw, mw)
 ```
 
 **判定语义(重要):**
-- 用例"复现成功" = `fails > 0` 且损坏在 elem[0](MRU 已内建 elem[0] 校验)。
-- 用例"未捕获" = `fails == 0` 但在满载窗口内 — 概率事件(F5 失败率 0.5-1%,K=3000 期望 ~15-30 fails,单窗口 0 失败概率 < 5%),需重跑 2-3 个窗口确认;**不是设计失败**。
-- 健康核对照(176 / 当前主机的等价核)必为 0 fails,作为负对照。
+- 用例"复现成功" = `total_fails > 0` 且损坏在 elem[0](MRU 已内建 elem[0] CRC 校验)。
+- 用例"未捕获" = `total_fails == 0` 但跑满 K_total — 概率事件(F5 失败率 0.5-1%,K_total≥1500 期望 ~7-30 fails,跨窗口全 0 概率 < 5%),需重跑 2-3 批新窗口确认;**不是设计失败**。
+- 健康核对照(176 / 当前主机的等价核)必为 0 fails,作为负对照(E2E-3/E2E-4)。
 
-**安全:** 全程 `timeout` 包裹,单次 ≤75s,避免报告 §11.3 的挂死(计算损坏波及控制流)。绝不跑全 192 核长时间满载。
+**安全:** 每个负载窗口 `timeout` 包裹、单次 ≤75s;窗口间 sleep 3;硬上限 max_windows≤60;绝不跑全 192 核长时间满载(规避报告 §11.3 的挂死:计算损坏波及控制流)。
+
+**当前主机验证(迭代 #2 实测):** 在本机(2 socket/128 核,无 cpu179)上:
+- 构建产物 `ldd` 仅 libc+libm(F8 ✓);
+- 17 个跨 7 家族的代表性用例单核跑均产出**唯一 golden CRC** 且 **0 fails**(健康核,E2E-4 ✓);
+- golden CRC 确定性(同参数两次跑一致)→ 跨窗口累积有效 ✓;
+- `run_case.sh` 多窗口:2-窗口用例跑满 K_total、early-PASS(fake engine 模拟 fails>0)两条路径均验证 ✓;
+- `run_case.sh` 负载+驱动协调(1-47 核满载 + 核 0 驱动)端到端跑通,INCONCLUSIVE 判定正确 ✓;
+- `validate_manifest.py`:100/100 通过触发不变量 + 可行性自检 ✓。
+
+这些是**不依赖物理核 179 的最强保证**;真正的 fails>0 确认需在 4 路 192 核目标机跑 `run_all.sh`。
 
 ---
 
@@ -188,13 +233,22 @@ run_case.sh case_NNN:
 
 ## 10. 落地步骤(本循环迭代产出)
 
+**迭代 #1(2026-08-07):**
 1. ✅ 写本 DESIGN.md(本文)。
 2. ✅ 复制 `eigen_cabidrv.cpp` 到 `sdc-fuzzing/engine/`,编写参数化 `mru_driver.c`(支持 N/p/d/ms/s/mode/K 命令行)。
 3. ✅ 写 `scripts/generate_manifest.py` 生成 100 用例清单。
 4. ✅ 写 `scripts/build_engine.sh` 构建 `engine/eigen_cabidrv.o` + `engine/mrueig`。
-5. ✅ 写 `scripts/run_case.sh` + `run_all.sh` + `analyze_results.py`。
-6. ✅ 本机冒烟:构建 + 单核跑基线用例(期望 0 fails,确认机制)。
-7. ⏳ 目标机执行 `run_all.sh`(需 4 路 192 核机,本循环不可得;留待目标机)。
+5. ✅ 写 `scripts/run_case.sh` + `run_all.sh` + `analyze_results.py` + `validate_manifest.py`。
+6. ✅ 本机冒烟:构建(libc-only)+ 单核跑基线用例(0 fails,确认机制)。
+7. ✅ 静态可复现性自检 `validate_manifest.py`:100/100 通过。
+
+**迭代 #2(2026-08-10)— 可行性修正:**
+8. ✅ 实测 `engine/mrueig` 在 47 核满载下的 per-iter 墙钟随 N 急剧增长(N=256~24ms→N=1024~17s),发现迭代 #1 对 N≥384 一律 K=3000 在 ≤75s 安全窗口内不可行。
+9. ✅ 引入**实测计时可行性模型** + **多窗口累积机制**(`iters_per_window`/`max_windows`),改写 `generate_manifest.py`(v2)与 `run_case.sh`(多窗口循环 + early-PASS)。
+10. ✅ 把 N 限制到报告 §10.3 已验证的 {256,384,512}(移除未测且不可行的 768/1024),按 N 设 K_total(256→3000、384→1500、512→1000)。
+11. ✅ 扩 `validate_manifest.py` 为触发不变量 + 可行性双检查(N≤512、iters_per_window≥1、max_windows≤60、ipw×mw≥K_total),100/100 通过。
+12. ✅ 本机端到端验证:17 个跨家族用例单核 0 fails + 唯一 golden CRC;golden 确定性;多窗口 early-PASS 与跑满 K_total 两路径;负载+驱动协调;analyze 汇总。
+13. ⏳ 目标机执行 `run_all.sh`(需 4 路 192 核机;本机无 cpu179,fails>0 须在目标机确认)。`run_all.sh` 与 `manifest.json` 就绪,迁到目标机即可执行(全量 ~11h)。
 
 ---
 

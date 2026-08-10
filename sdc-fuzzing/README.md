@@ -25,6 +25,17 @@ libc-only) and only vary the **external conditions** (matrix size N, density,
 diag-dominance, seeds, mode, iteration count, load window). Each case is an
 independent observation of the same root cause.
 
+**Iteration #2 (feasibility-corrected):** a case's `iterations` (K_total) may
+exceed what fits in one 75 s load window (§11.3 safety ceiling), because
+per-`factorize` wall scales steeply with N (N=256 ~24 ms/iter → N=512 ~2.4 s/iter).
+So the manifest encodes `iters_per_window` + `max_windows` (from a measured
+timing model), and `run_case.sh` does **multi-window accumulation**: loop
+(load window + driver chunk) until K_total is reached **or** a fail is observed
+(early-PASS). N is limited to {256,384,512} (the values the root-cause report
+§10.3 measured; N=768/1024 are not report-verified and can't reach K≥1500 in a
+practical window count, so they're excluded). All 100 cases stay within the
+≤75 s single-window safety limit and a ≤60-window-per-case batch bound.
+
 ## Layout
 
 ```
@@ -50,16 +61,16 @@ sdc-fuzzing/
 
 ## Static reproducibility self-check
 
-`scripts/validate_manifest.py` asserts that every one of the 100 cases falls
-inside the **verified trigger window** (F1/F2/F5/F6 + §11.3 hang-safety):
-N≥256, load_cpuset ≥47 cores, target_core=179, mode∈{0,1}, iters≥1500,
-load_seconds ≤75, libc_only. A case inside the window is, per the root-cause
-report's E2E evidence, a reproducer on the target machine. This is the
-strongest reproducibility guarantee achievable without the physical defective
-core 179.
+`scripts/validate_manifest.py` asserts that every one of the 100 cases passes
+**both** a trigger-invariant check (F1/F2/F5/F6 + §11.3 hang-safety + N≤512
+report-coverage) **and** a feasibility check (`iters_per_window`≥1,
+`max_windows`≤60, `iters_per_window × max_windows ≥ iterations`). A case
+passing both is, per the root-cause report's E2E evidence, a reproducer on the
+target machine. This is the strongest reproducibility guarantee achievable
+without the physical defective core 179.
 
 ```bash
-python3 scripts/validate_manifest.py   # 100/100 PASS
+python3 scripts/validate_manifest.py   # 100/100 PASS (trigger + feasibility)
 ```
 
 ## Quickstart
@@ -95,17 +106,20 @@ CASE_TARGET_CORE=0 ./scripts/run_case.sh core179-repro-A01   # expect INCONCLUSI
 
 ## Judgment
 
-- **PASS** = `fails > 0` (reproduction observed; corruption always at `x[0]`,
-  which is inside the CRC window). Log records fail count + rate.
-- **INCONCLUSIVE** = `0 fails` in that load window. The SDC is transient
-  (0.5-1% per-iter rate under load), so a single 0-fail window is a
-  probability event, not a design failure — rerun in a fresh load window.
+- **PASS** = `total_fails > 0` (reproduction observed in some window;
+  corruption always at `x[0]`, which is inside the CRC window). Log records
+  fail count + rate + windows run.
+- **INCONCLUSIVE** = `total_fails == 0` over all windows run (which reached
+  K_total). The SDC is transient (0.5-1% per-iter rate under load), so a
+  0-fail batch is a probability event, not a design failure — rerun in fresh
+  load windows.
 - **Negative control**: same case bound to a healthy core (e.g. 176) must
   return 0 fails. Single-core (no load) must also return 0 fails.
 
 ## Safety
 
-Every run is `timeout`-wrapped, load ≤ 75s per case, 5s settle between cases.
+Every load window is `timeout`-wrapped, ≤ 75 s, with a 5 s spin-up guard and a
+3 s settle between windows. Hard cap `max_windows ≤ 60` per case (≤75 min).
 Never run all-192-core long-duration load (root-cause report §11.3: corruption
 can propagate to control flow and hang the machine).
 
@@ -113,10 +127,10 @@ can propagate to control flow and hang the machine).
 
 | Family | # | Varies | Verifies |
 |--------|---|--------|----------|
-| A-scale | 20 | N ∈ {256,384,512,768,1024} | F2: N≥256 threshold |
+| A-scale | 20 | N ∈ {256,384,512} | F2: N≥256 threshold (§10.3 verified 256/512) |
 | B-density | 15 | density 0.05–0.20 | indirect-addressing pressure |
 | C-diag | 10 | diag-dominance 2–8 | SPD numerical conditioning |
 | D-seed | 25 | 25 distinct (matrix,rhs) seeds | F3: corruption fixed at elem[0] regardless of matrix |
 | E-mode | 10 | mode 1 (8) vs mode 0 (2) | F6: numeric-only ≈ 4× compute-both rate |
-| F-iters | 10 | K ∈ {1500,2500,3000,5000} | F5: deeper K → more captures |
+| F-iters | 10 | K ∈ {1500,2500,3000,5000} | F5: deeper K → more captures (K=5000 multi-window) |
 | G-load | 10 | load_seconds / cpuset size | F2: ≥47-core threshold |
