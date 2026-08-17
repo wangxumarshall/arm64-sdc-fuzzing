@@ -17,6 +17,14 @@ tags
 /docs/sdc1-01-02-core179-diagnostics/probe
 # run artifacts
 /run-forever.out
+# SDC fault-injection / var_data: binaries (sources in tests/cpu/arm64/sdc_fuzzing/)
+# and run-output dirs are regenerable; only deterministic fixtures + golden stay tracked.
+/docs/sdc1-01-02-core179-diagnostics/var_data/var_loop
+/docs/sdc1-01-02-core179-diagnostics/var_data/var_mc_var
+/docs/sdc1-01-02-core179-diagnostics/var_data/*.csc.L_factor.txt
+/docs/sdc1-01-02-core179-diagnostics/var_data/dry_*/
+/docs/sdc1-01-02-core179-diagnostics/var_data/real_runs/
+/docs/sdc1-01-02-core179-diagnostics/var_data/test_runs/
 # local backups of test sources (not part of the build)
 /tests/cpu_backup_*/
 # Claude Code plan files (session-local)
