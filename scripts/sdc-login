@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# sdc-login.sh - 交互式登录 SDC 设备
+# 用法:
+#   ./sdc-login.sh              # 显示设备列表
+#   ./sdc-login.sh <编号|名称>   # 直接登录,如 ./sdc-login.sh 0101 或 ./sdc-login.sh sdc1-01-01
+#
+# 默认使用密码 SDC@2026 登录;可通过环境变量 SDC_PASS 覆盖:
+#   SDC_PASS=xxx ./sdc-login.sh 0101
+
+set -euo pipefail
+
+# 默认密码,可通过环境变量 SDC_PASS 覆盖
+DEFAULT_PASS="${SDC_PASS:-SDC@2026}"
+
+# 设备列表: 编号 | 名称 | 地址 | 端口 | 用户
+DEVICES=(
+  "0101|sdc1-01-01|123.60.114.33|33455|sdc"
+  "0102|sdc1-01-02|123.60.114.33|33456|sdc"
+)
+
+# sshpass 路径: 优先使用脚本同目录下的,其次从 PATH 查找
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SSHPASS_BIN="${SCRIPT_DIR}/sshpass"
+if [[ ! -x "$SSHPASS_BIN" ]]; then
+  SSHPASS_BIN="$(command -v sshpass || true)"
+fi
+
+usage() {
+  cat <<EOF
+用法: $(basename "$0") [设备编号|设备名称]
+
+可登录设备:
+EOF
+  for d in "${DEVICES[@]}"; do
+    local id name addr port user
+    IFS='|' read -r id name addr port user <<< "$d"
+    printf "  %s  %-12s  %s@%s -p %s\n" "$id" "$name" "$user" "$addr" "$port"
+  done
+  exit 1
+}
+
+pick_device() {
+  local sel="$1"
+  for d in "${DEVICES[@]}"; do
+    local id name
+    IFS='|' read -r id name _ _ _ <<< "$d"
+    # 按编号或名称匹配
+    if [[ "$id" == "$sel" || "$name" == "$sel" ]]; then
+      echo "$d"
+      return 0
+    fi
+  done
+  echo "错误: 未找到设备 '$sel'" >&2
+  return 1
+}
+
+main() {
+  local choice="${1:-}"
+
+  if [[ -z "$choice" || "$choice" == "-h" || "$choice" == "--help" ]]; then
+    usage
+  fi
+
+  local entry
+  if ! entry="$(pick_device "$choice")"; then
+    usage
+  fi
+
+  local id name addr port user
+  IFS='|' read -r id name addr port user <<< "$entry"
+
+  if [[ -z "$SSHPASS_BIN" ]]; then
+    echo "错误: 未找到 sshpass,请安装或将 sshpass 放到脚本同目录" >&2
+    exit 1
+  fi
+
+  printf "正在登录 %s (%s, %s@%s -p %s)...\n" "$id" "$name" "$user" "$addr" "$port"
+  exec "$SSHPASS_BIN" -p "$DEFAULT_PASS" ssh \
+    -o StrictHostKeyChecking=accept-new \
+    -o PreferredAuthentications=password \
+    -o PubkeyAuthentication=no \
+    "${user}@${addr}" -p "${port}"
+}
+
+main "${1:-}"
