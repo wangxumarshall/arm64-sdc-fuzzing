@@ -29,3 +29,10 @@ tags
 /tests/cpu_backup_*/
 # Claude Code plan files (session-local)
 /.claude-plans/
+# Vendored Eigen upstream-repo metadata (not part of OpenDCDiag config);
+# these files ship in the Eigen source tree but are irrelevant to the build.
+/third-part/.gitlab-ci.yml
+/third-part/.gitlab/
+/third-part/.gitattributes
+/third-part/.gitignore
+/third-part/.git-blame-ignore-revs
