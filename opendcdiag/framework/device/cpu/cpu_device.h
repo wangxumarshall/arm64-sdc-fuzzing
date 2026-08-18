@@ -117,12 +117,10 @@
 
 /// used to determine whether one or more CPU features are available at runtime.  f is a bitmask
 /// of cpu features as defined in the auto-generated cpu_features.h file.  For example, a test
-/// may call device_has_feature(cpu_feature_avx512f) to determine whether AVX-512 is available.
+/// may call cpu_has_feature(cpu_feature_avx512f) to determine whether AVX-512 is available.
 /// Normally, cpuid detection is handle automatically by the framework via test's minimum_cpu field.
 /// This macro is provided in case tests need more fine grained control.
-#define device_has_feature(f)      ((device_compiler_features & (f)) == (f) || (device_features & (f)) == (f))
-/// Alias for legacy code.
-#define cpu_has_feature(f)         device_has_feature(f)
+#define cpu_has_feature(f)      ((device_compiler_features & (f)) == (f) || (device_features & (f)) == (f))
 
 /// Describes the field @c native_core_type in @ref cpu_info_t
 // use typed enums
@@ -146,13 +144,12 @@ typedef uint8_t NativeCoreType;                 // C17 or older
 /// data, only data is valid; if unified, both are set to the same value. In all
 /// the cases the value is the cache size in bytes.  A field is valid if it
 /// contains a value >= 0.  Fields with negative values are invalid.
+/// TODO: consider changing this, with L1D & L1I being the same size, they are
+/// indistinguishable from a unified cache.
 struct cache_info_t
 {
     int cache_instruction;
     int cache_data;
-    int16_t id;
-    bool is_unified;
-    int8_t _reserved;
 };
 
 /// cpu_info_t contains information about a logical CPU
@@ -173,8 +170,8 @@ struct cpu_info_t
     int16_t core_id;
     /// Module ID inside of a package, -1 if not known.
     int16_t module_id;
-    /// Die ID inside of a package, -1 if not known.
-    int16_t die_id;
+    /// Tile ID inside of a package, -1 if not known. May combine with the die ID.
+    int16_t tile_id;
     /// The core type, if known. See enum definition.
     NativeCoreType native_core_type;
     /// NUMA node ID in the system, -1 if not known.
@@ -199,7 +196,7 @@ typedef struct cpu_info_t device_info_t;
 /// device_info is an array of cpu_info_t structures.  Each element of the array
 /// contains information about a logical CPU that will be used to
 /// execute a test's test_run function.  The size of this array is
-/// equal to the value returned by device_count().
+/// equal to the value returned by num_cpus().
 extern struct cpu_info_t *device_info;
 // Interim alias for compatibility.
 extern struct cpu_info_t *cpu_info asm("device_info");

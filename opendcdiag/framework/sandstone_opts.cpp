@@ -7,8 +7,6 @@
 #include "topology.h"
 #include "sandstone_opts.hpp"
 
-#include <boost/algorithm/string.hpp>
-
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,7 +66,6 @@ enum {
     output_format_option,
     quality_option,
     quick_run_option,
-    raw_list_test_ids,
     raw_list_tests,
     raw_list_group_members,
     raw_list_groups,
@@ -92,7 +89,6 @@ enum {
     total_retest_on_failure,
     triage_option,
     ud_on_failure_option,
-    ulog_option,
     use_builtin_test_list_option,
 #if SANDSTONE_FREQUENCY_MANAGER
     vary_frequency,
@@ -100,7 +96,6 @@ enum {
 #endif
     version_option,
     weighted_testrun_option,
-    thread_ratio_option,
     alpha_option,
     beta_option,
 
@@ -137,7 +132,6 @@ static struct option long_options[]  = {
     { "inject-idle", required_argument, nullptr, inject_idle_option },
     { "include-optional", no_argument, nullptr, include_optional_option },
     { "list", no_argument, nullptr, 'l' },
-    { "list-test-ids", no_argument, nullptr, raw_list_test_ids },
     { "list-tests", no_argument, nullptr, raw_list_tests },
     { "list-group-members", required_argument, nullptr, raw_list_group_members },
     { "list-groups", no_argument, nullptr, raw_list_groups },
@@ -179,7 +173,6 @@ static struct option long_options[]  = {
     { "test-time", required_argument, nullptr, 't' },   // repeated below
     { "force-test-time", no_argument, nullptr, force_test_time_option },
     { "test-option", required_argument, nullptr, 'O'},
-    { "thread-ratio", required_argument, nullptr, thread_ratio_option },
     { "threads", required_argument, nullptr, 'n' },
     { "time", required_argument, nullptr, 't' },        // repeated above
     { "timeout", required_argument, nullptr, timeout_option },
@@ -187,9 +180,6 @@ static struct option long_options[]  = {
     { "total-retest-on-failure", required_argument, nullptr, total_retest_on_failure },
     { "total-time", required_argument, nullptr, 'T' },
     { "ud-on-failure", no_argument, nullptr, ud_on_failure_option },
-#if SANDSTONE_ULOG
-    { "ulog", required_argument, nullptr, ulog_option },
-#endif
     { "use-builtin-test-list", optional_argument, nullptr, use_builtin_test_list_option },
 #if SANDSTONE_FREQUENCY_MANAGER
     { "vary-frequency", no_argument, nullptr, vary_frequency},
@@ -457,9 +447,6 @@ struct ProgramOptionsParser {
             case disable_option:
             case 'e':
             case 'O':
-#if SANDSTONE_ULOG
-            case ulog_option:
-#endif
                 add_to_map_as_vec(opt, optarg);
                 break;
 
@@ -510,7 +497,6 @@ struct ProgramOptionsParser {
             case max_logdata_option:
             case max_messages_option:
             case reschedule_option:
-            case thread_ratio_option:
                 opts_map.insert_or_assign(opt, optarg);
                 break;
 
@@ -560,7 +546,6 @@ struct ProgramOptionsParser {
                 break;
 
             case 'l':
-            case raw_list_test_ids:
             case raw_list_tests:
             case raw_list_groups:
             case dump_cpu_info_option:
@@ -742,19 +727,17 @@ struct ProgramOptionsParser {
                 opts.action = Action::exit;
                 return EXIT_SUCCESS;
             case 'l':
-                opts.list_test_mode = ProgramOptions::ListMode::WithDescription;
-                opts.action = Action::list_tests;
-                return EXIT_SUCCESS;
-            case raw_list_test_ids:
-                opts.list_test_mode = ProgramOptions::ListMode::RawTestIds;
+                opts.list_tests_include_descriptions = true;
+                opts.list_tests_include_tests = true;
+                opts.list_tests_include_groups = true;
                 opts.action = Action::list_tests;
                 return EXIT_SUCCESS;
             case raw_list_tests:
-                opts.list_test_mode = ProgramOptions::ListMode::RawTests;
+                opts.list_tests_include_tests = true;
                 opts.action = Action::list_tests;
                 return EXIT_SUCCESS;
             case raw_list_groups:
-                opts.list_test_mode = ProgramOptions::ListMode::RawGroups;
+                opts.list_tests_include_groups = true;
                 opts.action = Action::list_tests;
                 return EXIT_SUCCESS;
             case raw_list_group_members: {
@@ -778,26 +761,11 @@ struct ProgramOptionsParser {
         }
 
         // test selection
-        auto assign_maybe_split = [&](auto&& vec) {
-            std::vector<std::string> res;
-            res.reserve(vec.size());
-
-            for (const char* elem : vec) {
-                if (!std::string_view{elem}.contains(',')) { // is single name
-                    res.emplace_back(elem);
-                    continue;
-                }
-                std::vector<std::string> tokens;
-                boost::split(tokens, elem, boost::is_any_of(","), boost::token_compress_on);
-                std::ranges::copy(tokens, std::back_inserter(res));
-            }
-            return res;
-        };
         if (auto it = opts_map.find('e'); it != opts_map.end()) {
-            opts.enabled_tests = assign_maybe_split(std::move(std::get<std::vector<const char*>>(it->second)));
+            opts.enabled_tests = std::move(std::get<std::vector<const char*>>(it->second));
         }
         if (auto it = opts_map.find(disable_option); it != opts_map.end()) {
-            opts.disabled_tests = assign_maybe_split(std::move(std::get<std::vector<const char*>>(it->second)));
+            opts.disabled_tests = std::move(std::get<std::vector<const char*>>(it->second));
         }
 
         // times
@@ -909,23 +877,12 @@ struct ProgramOptionsParser {
             auto maybe_int = ParseIntArgument<>{
                     .name = "-n / --threads",
                     .min = 1,
-                    .max = app_cfg->device_count,
+                    .max = app_cfg->thread_count,
                     .range_mode = OutOfRangeMode::Saturate
             }(value);
             if (maybe_int) {
-                opts.device_count = maybe_int.value();
+                opts.thread_count = maybe_int.value();
             } else {
-                return EX_USAGE;
-            }
-        }
-
-        if (auto value = string_opt_for(thread_ratio_option)) {
-            std::string str_value(value);
-            if (!validate_thread_ratio(str_value, opts.thread_ratio, app_cfg->device_count)) {
-                fprintf(ERR_STREAM, "%s: invalid value for --thread-ratio: %s\n"
-                    "Value must be a fraction (0.0-1.0 or 0%%-100%%) or a signed delta (-N threads). "
-                    "For signed deltas, N must be less than the number of visible devices (%d).\n",
-                        argv[0], value, app_cfg->device_count);
                 return EX_USAGE;
             }
         }
@@ -959,10 +916,6 @@ struct ProgramOptionsParser {
             }
         }
 
-#if SANDSTONE_ULOG
-        if (auto it = opts_map.find(ulog_option); it != opts_map.end())
-            opts.ulog_args = std::get<std::vector<const char*>>(it->second);
-#endif
         if (auto it = opts_map.find(_format_option); it != opts_map.end()) {
             switch (std::get<int>(it->second)) {
             case 'Y': {
@@ -1200,34 +1153,6 @@ struct ProgramOptionsParser {
         static_assert(!SandstoneConfig::RestrictedCommandLine || SandstoneConfig::HasBuiltinTestList,
                 "Restricted command-line build must have a built-in test list");
         return EXIT_SUCCESS;
-    }
-
-    bool validate_thread_ratio(std::string str_value, ThreadRatio& thread_ratio, const int device_count) {
-        bool isValid = false;
-        char *end = nullptr;
-        if (str_value.starts_with('-')) {
-            // delta mode: -N threads relative to device count
-            // Not using ParseIntArgument so we have a single error usage message
-            long val = strtol(str_value.c_str(), &end, 10);
-            if (*end != '\0') {
-                isValid = false;
-            } else if (val < 0 && val >= -(device_count - 1)) {
-                thread_ratio = int(val);
-                isValid = true;
-            }
-        } else {
-            // parse as fraction (e.g. 0.5, 50%, .75)
-            float val = strtof(str_value.c_str(), &end);
-            if (*end == '%') {
-                val /= 100;
-                ++end;
-            }
-            if (*end == '\0' && val > 0 && val <= 1) {
-                thread_ratio = val;
-                isValid = true;
-            }
-        }
-        return isValid;
     }
 };
 } /* anonymous namespace */

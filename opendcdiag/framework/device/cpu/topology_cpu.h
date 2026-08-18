@@ -37,15 +37,21 @@ public:
     {
         std::vector<Core> cores;
         // std::vector<Module> modules;
+    };
 
-        /// Size in bytes of the last-level (L3) cache attributable to this grouping.
-        size_t l3_cache_size = 0;
+    struct NumaNode : CoreGrouping
+    {
+        int id() const
+        {
+            return cores.size() ? cores.front().threads.front().numa_id : -1;
+        }
     };
 
     struct Package : CoreGrouping
     {
-        // any grouping inside of a package (see build_topology() for rules)
-        std::vector<CoreGrouping> groups;
+        // We consider different core types in a heterogeneous system to be a
+        // different "NUMA" nodes.
+        std::vector<NumaNode> numa_domains;
         int id() const
         {
             return cores.size() ? cores.front().threads.front().package_id : -1;

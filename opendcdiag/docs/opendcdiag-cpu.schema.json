@@ -78,9 +78,6 @@
         "fullsocket": {
           "$ref": "#/$defs/test-plan-entry"
         },
-        "core_groups": {
-          "$ref": "#/$defs/test-plan-entry"
-        },
         "heuristic": {
           "$ref": "#/$defs/test-plan-entry"
         }
@@ -176,9 +173,6 @@
         "numa_node": {
           "type": "integer"
         },
-        "die": {
-          "type": "integer"
-        },
         "module": {
           "type": "integer"
         },
@@ -217,7 +211,12 @@
         }
       },
       "required": [
-        "logical"
+        "logical",
+        "package",
+        "numa_node",
+        "module",
+        "core",
+        "thread"
       ]
     },
     "test-plan-entry": {
@@ -230,16 +229,12 @@
           },
           "count": {
             "type": "integer"
-          },
-          "threads": {
-            "type": "integer"
           }
         },
         "minItems": 1,
         "required": [
           "count",
-          "starting_cpu",
-          "threads"
+          "starting_cpu"
         ]
       }
     },
@@ -328,9 +323,6 @@
                 ]
               },
               "id": {
-                "$ref": "#/$defs/cpu-info"
-              },
-              "previous-cpu": {
                 "$ref": "#/$defs/cpu-info"
               },
               "context": {
@@ -543,12 +535,6 @@
               },
               "remark": {
                 "type": "string"
-              },
-              "details": {
-                "type": [
-                  "object",
-                  "array"
-                ]
               }
             },
             "required": [
@@ -559,12 +545,6 @@
               "mask",
               "offset",
               "type"
-            ]
-          },
-          "details": {
-            "type": [
-              "map",
-              "array"
             ]
           }
         },

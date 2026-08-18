@@ -34,18 +34,9 @@ static int kreg1_run(struct test *test, int cpu) {
 
         // 提取低 4 位掩码 (每个 lane 取最低位)
         uint8_t mask1 = 0, mask2 = 0;
-        // NEON lane accessors require a compile-time constant index, so the
-        // loop is unrolled explicitly via switch.
         for (int i = 0; i < 4; ++i) {
-            uint32_t l = 0, g = 0;
-            switch (i) {
-                case 0: l = vgetq_lane_u32(lt, 0); g = vgetq_lane_u32(gt, 0); break;
-                case 1: l = vgetq_lane_u32(lt, 1); g = vgetq_lane_u32(gt, 1); break;
-                case 2: l = vgetq_lane_u32(lt, 2); g = vgetq_lane_u32(gt, 2); break;
-                default: l = vgetq_lane_u32(lt, 3); g = vgetq_lane_u32(gt, 3); break;
-            }
-            if (l) mask1 |= (1 << i);
-            if (g) mask2 |= (1 << i);
+            if (vgetq_lane_u32(lt, i)) mask1 |= (1 << i);
+            if (vgetq_lane_u32(gt, i)) mask2 |= (1 << i);
         }
 
         // 3. 掩码逻辑运算 (与 x86 完全一致)
@@ -59,13 +50,8 @@ static int kreg1_run(struct test *test, int cpu) {
         // 构造掩码向量 (每个 lane 根据 or_mask 对应位为全 1 或全 0)
         uint32x4_t blend_mask = vdupq_n_u32(0);
         for (int i = 0; i < 4; ++i) {
-            uint32_t val = (or_mask & (1 << i)) ? 0xFFFFFFFFu : 0;
-            switch (i) {
-                case 0: blend_mask = vsetq_lane_u32(val, blend_mask, 0); break;
-                case 1: blend_mask = vsetq_lane_u32(val, blend_mask, 1); break;
-                case 2: blend_mask = vsetq_lane_u32(val, blend_mask, 2); break;
-                default: blend_mask = vsetq_lane_u32(val, blend_mask, 3); break;
-            }
+            uint32_t val = (or_mask & (1 << i)) ? 0xFFFFFFFF : 0;
+            blend_mask = vsetq_lane_u32(val, blend_mask, i);
         }
         // vbslq_f32: 如果掩码位为 1 选择 vec_b，否则选择 vec_a
         float32x4_t result = vbslq_f32(blend_mask, vec_b, vec_a);

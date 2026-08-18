@@ -56,8 +56,6 @@ if device_type == 'cpu'
     )
 elif device_type == 'gpu'
     framework_config.set10('SANDSTONE_DEVICE_GPU', true)
-elif device_type == 'idxd'
-    framework_config.set10('SANDSTONE_DEVICE_IDXD', true)
 else
     error('Unknown device type: ' + device_type)
 endif
@@ -88,7 +86,6 @@ framework_incdir = [
 framework_files = files()
 generated_files = files()
 extra_objects = []
-premain_files = []
 
 # Run device-specific build steps early to ensure that any auto-generated
 # file is available before anything else.
@@ -145,11 +142,7 @@ framework_config.set(
     'SANDSTONE_DEFAULT_LOGGING',
     'TestConfig::OutputFormat::' + get_option('logging_format'),
 )
-framework_config.set10(
-    'SANDSTONE_NO_TEST_NAMES',
-    get_option('framework_options').contains('no-test-names') or
-    get_option('logging_format') == 'no_output'
-)
+
 framework_config.set10(
     'SANDSTONE_RESTRICTED_CMDLINE',
     get_option('framework_options').contains('restricted-cmdline'),
@@ -177,11 +170,6 @@ else
     )
 endif
 
-framework_config.set10(
-    'SANDSTONE_ULOG',
-    not get_option('framework_options').contains('no-ulog'),
-)
-
 framework_config.set10('SANDSTONE_SSL_BUILD', get_option('ssl_link_type') != 'none')
 framework_config.set10(
     'SANDSTONE_SSL_LINKED',
@@ -193,17 +181,16 @@ framework_files += files(
     'Floats.cpp',
     'generated_vectors.c',
     'logging.cpp',
+    'mmap_region.c',
     'random.cpp',
     'sandstone.cpp',
     'sandstone_chrono.cpp',
     'sandstone_context_dump.cpp',
     'sandstone_data.cpp',
     'sandstone_opts.cpp',
-    'sandstone_run.cpp',
     'sandstone_test_groups.cpp',
     'sandstone_tests.cpp',
     'sandstone_thread.cpp',
-    'sandstone_ulog.cpp',
     'sandstone_utils.cpp',
     'static_vectors.c',
     'test_knobs.cpp',
@@ -275,30 +262,10 @@ if target_machine.system() == 'darwin'
     ]
 endif
 
-framework_extra_cpp_args = []
-
 if target_machine.system() != 'windows' and target_machine.system() != 'cygwin'
     subdir('sysdeps/unix')
 endif
 subdir(sysdeps_dir)
-
-if premain_files.length() > 0
-    framework_main_a = static_library(
-        'framework_main',
-        premain_files,
-        build_by_default: false,
-        include_directories: [
-            framework_incdir,
-        ],
-        cpp_args: [
-            debug_c_flags,
-            march_generic_flags,
-            default_cpp_flags,
-            default_cpp_warn,
-        ],
-    )
-    extra_objects += framework_main_a.extract_all_objects(recursive: false)
-endif
 
 configure_file(
     input: 'sandstone_config.h.in',
@@ -329,7 +296,6 @@ framework_a = static_library(
         march_flags,
         default_cpp_flags,
         default_cpp_warn,
-        framework_extra_cpp_args,
     ],
 )
 

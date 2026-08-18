@@ -37,12 +37,8 @@ static int insert_extract_run(struct test *test, int cpu) {
         float orig_vals[LANES];
         for (int i = 0; i < LANES; ++i) {
             orig_vals[i] = dist(rng);
+            orig_vec = vsetq_lane_f32(orig_vals[i], orig_vec, i);
         }
-        // NEON lane accessors need a compile-time-constant index.
-        orig_vec = vsetq_lane_f32(orig_vals[0], orig_vec, 0);
-        orig_vec = vsetq_lane_f32(orig_vals[1], orig_vec, 1);
-        orig_vec = vsetq_lane_f32(orig_vals[2], orig_vec, 2);
-        orig_vec = vsetq_lane_f32(orig_vals[3], orig_vec, 3);
 
         // 2. 随机选择 lane 和插入值
         int lane = static_cast<int>(dist(rng) * LANES);  // 0..3

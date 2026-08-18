@@ -22,26 +22,20 @@ struct ProgramOptions {
 
     const char* seed = nullptr;
     int max_cores_per_slice = 0;
-    int device_count = -1;
-    ThreadRatio thread_ratio = 1.0f;
+    int thread_count = -1;
     bool fatal_errors = false;
-    enum class ListMode : uint8_t {
-        // action must be list_tests for these
-        WithDescription,
-        RawTestIds,
-        RawTests,
-        RawGroups,
-    } list_test_mode = {};
     const char* on_hang_arg = nullptr;
     const char* on_crash_arg = nullptr;
     std::vector<const char*> deviceset;
-    std::vector<const char *> ulog_args;
 
     std::string list_group_name; // for list_group
+    bool list_tests_include_descriptions = false; // for list_tests
+    bool list_tests_include_tests = false; // for list_tests
+    bool list_tests_include_groups = false; // for list_tests
 
     // test selection
-    std::vector<std::string> enabled_tests;
-    std::vector<std::string> disabled_tests;
+    std::vector<const char *> enabled_tests;
+    std::vector<const char *> disabled_tests;
     const char *test_list_file_path = nullptr;
 
     struct test_set_cfg test_set_config = {
@@ -59,7 +53,7 @@ struct ProgramOptions {
     void apply_restrictions() {
         seed = nullptr;
         max_cores_per_slice = 0;
-        device_count = -1;
+        thread_count = -1;
         fatal_errors = true;
         on_hang_arg = nullptr;
         on_crash_arg = nullptr;

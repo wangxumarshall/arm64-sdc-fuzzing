@@ -31,7 +31,6 @@
 #include "sandstone_kvm.h"
 #endif // _WIN32
 #include "sandstone_p.h"
-#include "topology.h"
 
 #include <exception>
 #include <unordered_map>
@@ -118,15 +117,6 @@ static int selftest_timedpass_noloop_run(struct test *test, int)
     return EXIT_SUCCESS;
 }
 
-template <auto Generator, int LoopCount>
-static int selftest_busywait_random_generation_run(struct test *test, int)
-{
-    TEST_LOOP(test, LoopCount) {
-        Generator();
-    }
-    return EXIT_SUCCESS;
-}
-
 static int selftest_preinit_preinit(struct test *test)
 {
     check_is_main_process();
@@ -204,44 +194,6 @@ static int selftest_lograwyaml_run(struct test *test, int cpu)
     return EXIT_SUCCESS;
 }
 
-static int selftest_logformattedyaml_run(struct test *test, int cpu)
-{
-    std::map<std::string, YamlFormatter::SimpleValue> map = {
-        { "cpu", cpu },
-        { "random", random64() },
-        { "text", std::string_view("foo bar") },
-        { "large_number", int64_t(LLONG_MAX) },
-        { "small_number", int64_t(LLONG_MIN) },
-    };
-    log_yaml(SANDSTONE_LOG_INFO, "Some details from the test", map);
-    return EXIT_SUCCESS;
-}
-
-#if SANDSTONE_DEVICE_CPU
-static int selftest_logs_l3cachesize_init(struct test *)
-{
-    const Topology &topology = Topology::topology();
-
-    size_t aggregate = 0;
-    std::string group_sizes;
-    for (const Topology::Package &pkg : topology.packages) {
-        for (const Topology::CoreGrouping &group : pkg.groups) {
-            if (group_sizes.size())
-                group_sizes += ", ";
-            group_sizes += std::to_string(group.l3_cache_size);
-        }
-        aggregate += pkg.l3_cache_size;
-    }
-
-    log_yaml(SANDSTONE_LOG_INFO,
-             stdprintf("L3 cache size for this topology\n"
-                       "l3-aggregate-size: %zu\n"
-                       "l3-group-sizes: [ %s ]\n\n",
-                       aggregate, group_sizes.c_str()).c_str());
-    return EXIT_SUCCESS;
-}
-#endif // SANDSTONE_DEVICE_CPU
-
 static int selftest_logs_options_init(struct test *test)
 {
     const char *strvalue = get_testspecific_knob_value_string(test, "StringValue", "DefaultValue");
@@ -284,9 +236,11 @@ static int selftest_logs_reschedule_init(struct test *test)
     return EXIT_SUCCESS;
 }
 
-static void deterministic_reschedule(struct test *test, int thread)
+static int selftest_logs_reschedule_run(struct test *test, int thread)
 {
     sem_t *semaphores = (sem_t *) test->data;
+    int cpu_number = sched_getcpu();
+    log_info("%d", cpu_number);
 
     // Let's wait unit previous CPU has finished
     if (thread > 0)
@@ -298,14 +252,6 @@ static void deterministic_reschedule(struct test *test, int thread)
     // unless we are the last one
     if (thread < thread_count()-1)
         sem_post(&semaphores[thread]);
-}
-
-static int selftest_logs_reschedule_run(struct test *test, int thread)
-{
-    int cpu_number = sched_getcpu();
-    log_info("%d", cpu_number);
-
-    deterministic_reschedule(test, thread);
 
     cpu_number = sched_getcpu();
     log_info("%d", cpu_number);
@@ -695,29 +641,6 @@ static int selftest_reportfailmsg_run(struct test *test, int thread)
     return EXIT_SUCCESS;
 }
 
-static int selftest_fail_after_reschedule_run(struct test *test, int thread)
-{
-    deterministic_reschedule(test, thread);
-    report_fail_msg("Failed after reschedule(), on cpu %d", sched_getcpu());
-    return EXIT_SUCCESS;
-}
-
-static int selftest_fail_after_reschedule_lowest_cpu_run(struct test *test, int thread)
-{
-    int n = thread_count();
-    n *= n;
-    while (n--) {
-        struct timespec ts = { 0, random() & 0x3ff };   // ~1 us
-        nanosleep(&ts, nullptr);    // yield CPU a little (we can ignore EINTR)
-
-        reschedule();
-        if (sched_getcpu() == device_info[0].cpu_number)
-            report_fail_msg("Failed after reschedule(), from thread %d", thread);
-        test_loop_condition(1);     // count loops
-    }
-    return EXIT_SUCCESS;
-}
-
 template <typename T> static T make_datacompare_value();
 #define MAKE_DATA_VALUE(Type, Value)    \
     template<> Type make_datacompare_value() { return Value; }
@@ -736,54 +659,11 @@ static int selftest_datacomparefail_with_cb_init(struct test *test)
 template <typename T> static int selftest_datacomparefail_run(struct test *, int thread)
 {
     constexpr size_t Count = 16;
-    const char *type_name = SandstoneDataDetails::TypeToDataType<T>::name();
     T values[Count + 1] = {};
 
     int diff = (thread & (Count - 1));
     values[diff] = make_datacompare_value<T>();
 
-    auto formatter = [&](ptrdiff_t idx) {
-        std::map<std::string, YamlFormatter::SimpleValue> map = {
-            { "rare", false },
-            { "modified_at", diff },
-            { "count", Count },
-        };
-        return stdprintf("data of type '%s' at index %td\n", type_name, idx)
-                + format_yaml(map);
-    };
-
-    if constexpr (std::is_same_v<T, uint8_t>) {
-        // stateless comparison with no description
-        memcmp_or_fail(values, values + 1, Count);
-    } else if constexpr (std::is_same_v<T, float>) {
-        // older, printf-like formatting
-        memcmp_or_fail(values, values + 1, Count,
-                       "data of type '%s'\n"
-                       "rare: false\n"
-                       "modified_at: %d\n"
-                       "count: %zu\n", type_name, diff, Count);
-    } else if constexpr (std::is_integral_v<T>) {
-        // use the C++ way with a lambda
-        memcmp_or_fail(values, values + 1, Count, formatter);
-    } else {
-        // use the C way
-        using FormatterType = decltype(formatter);
-        auto c_callback = [](void *token, ptrdiff_t idx) {
-            auto formatter = static_cast<FormatterType *>(token);
-            std::string result = std::move(*formatter)(idx);
-            return strdup(result.c_str());
-        };
-
-        // memcmp_or_fail_cb is only provided as a C macro (it uses C generics
-        // and __auto_type), so we must go straight to the callback.
-        DataType type = SandstoneDataDetails::TypeToDataType<T>::Type;
-        _memcmp_fail_report_cb(values, values + 1, Count * sizeof(T), type, c_callback, &formatter);
-    }
-
-    // won't be reached, but verify that it compiles
-    memcmp_or_fail(values, values + 1, Count, [] {
-        abort(); return std::string();
-    });
     memcmp_or_fail(values, values + 1, Count);
     return EXIT_SUCCESS;
 }
@@ -801,7 +681,7 @@ static int selftest_datacomparefailrare_run(struct test *, int)
         for (T &value : expected)
             value = frandom_scale(1);
     } else {
-        memset_random(expected);
+        memset_random(expected.data(), sizeof(expected));
     }
 
     std::array actual = expected;
@@ -827,17 +707,8 @@ static int selftest_datacompare_nodifference_run(struct test *, int)
     memset_random(actual, sizeof(actual));
     memcpy(expected, actual, sizeof(actual));
 
-    auto formatter = [&](ptrdiff_t idx) -> std::string {
-        assert(idx >= -1);
-        assert(idx < ptrdiff_t(sizeof(actual)));
-        std::string r = "random data\ndata: 0h";
-        for (uint8_t b : actual)
-            r += stdprintf("%02x", b);
-        return r;
-    };
-    memcmp_or_fail(actual, expected, sizeof(actual), formatter);    // won't fail
-    // now pretend we did see a failure and call the internal reporting function
-    _memcmp_fail_report(actual, expected, sizeof(actual), UInt8Data, nullptr);
+    memcmp_or_fail(actual, expected, sizeof(actual));        // won't fail
+    memcmp_fail_report(actual, expected, sizeof(actual), nullptr);
 }
 
 static int selftest_cxxthrow_run(struct test *, int) noexcept(false)
@@ -891,15 +762,17 @@ static void cause_sigill()
     __m128i one = _mm_set1_epi32(-1);
 #if SANDSTONE_DEVICE_CPU
 #ifndef __APX_F__
-    if (device_has_feature(cpu_feature_apx_f)) {
+    if (cpu_has_feature(cpu_feature_apx_f)) {
         // force-init the APX state
-        asm ("movl %0, %%r17d" : : "i" (0x12345678));
+        // encodes to:   movl  $0x12345678, %r17d
+        asm (".byte 0xd5, 0x10\n"
+             "movl  %0, %%ecx" : : "i" (0x12345678));
     }
 #endif
 #ifndef __clang__
-    if (device_has_feature(cpu_feature_avx)) {
+    if (cpu_has_feature(cpu_feature_avx)) {
         // init the AVX state (using inline assembly to avoid vzeroupper)
-        if (device_has_feature(cpu_feature_avx512f)) {
+        if (cpu_has_feature(cpu_feature_avx512f)) {
             // %gN: make zmm
             asm ("vpternlogd $0xff, %g0, %g0, %g0" : "=x" (one));
         } else {
@@ -908,7 +781,7 @@ static void cause_sigill()
         }
     }
 #endif
-    if (device_has_feature(cpu_feature_amx_tile)) {
+    if (cpu_has_feature(cpu_feature_amx_tile)) {
         // init the AMX state
         alignas(64) static struct amx_tileconfig cfg = {
             .palette = 1,
@@ -1021,74 +894,8 @@ static void cause_sigsegv_noncanonical()
 
 static void cause_sigsegv_instruction()
 {
-    // Jump near a page boundary so that both the page containing the address
-    // and the adjacent page are unmapped.
-    uintptr_t ptr = 0xff0 + (rand() & 0xf);
+    uintptr_t ptr = rand() & 0xfff;
     force_call(ptr);
-}
-
-static void cause_sigill_partial()
-{
-    constexpr size_t page_size = 4096;
-    // Map writable first so we can write the instruction bytes.
-    auto *pages = static_cast<uint8_t *>(
-            mmap(nullptr, 2 * page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-    if (pages == MAP_FAILED) {
-        log_skip(SelftestSkipCategory, "mmap failed: %s", strerror_for_mmap());
-        return;
-    }
-
-    // Write a guaranteed-crash instruction 8 bytes before the page boundary
-    // (offset 0xff8) so that RIP is valid/readable but the 8 bytes after it
-    // cross into PROT_NONE, producing a partial code dump.
-    uint8_t *insn = pages + page_size - 8;
-#if defined(__x86_64__)
-    insn[0] = 0x0f; insn[1] = 0x0b;    // UD2
-#elif defined(__aarch64__)
-    insn[0] = 0x00; insn[1] = 0x00; insn[2] = 0x00; insn[3] = 0x00;   // UDF #0
-#else
-    log_skip(SelftestSkipCategory, "unsupported architecture");
-    munmap(pages, 2 * page_size);
-    return;
-#endif
-
-    if (mprotect(pages, page_size, PROT_READ | PROT_EXEC) < 0
-            || mprotect(pages + page_size, page_size, PROT_NONE) < 0) {
-        log_skip(SelftestSkipCategory, "mprotect failed: %s", strerror_for_mmap());
-        munmap(pages, 2 * page_size);
-        return;
-    }
-    force_call(uintptr_t(insn));
-    munmap(pages, 2 * page_size);
-}
-
-static void cause_sigsegv_readable_unreadable()
-{
-    constexpr size_t page_size = 4096;
-    // First page readable, second PROT_NONE. Jump 4 bytes into the unreadable
-    // page: row 1 of the dump shows readable bytes then ??, row 2 is all ??.
-    auto *pages = static_cast<uint8_t *>(
-            mmap(nullptr, 2 * page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-    if (pages == MAP_FAILED || mprotect(pages, page_size, PROT_READ | PROT_EXEC) < 0) {
-        log_skip(SelftestSkipCategory, "mmap/mprotect failed: %s", strerror_for_mmap());
-        return;
-    }
-    force_call(uintptr_t(pages + page_size + 4));
-    munmap(pages, 2 * page_size);
-}
-
-static void cause_sigsegv_unreadable_readable()
-{
-    constexpr size_t page_size = 4096;
-    // First page PROT_NONE, second readable. Jump 4 bytes before the readable page.
-    auto *pages = static_cast<uint8_t *>(
-            mmap(nullptr, 2 * page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-    if (pages == MAP_FAILED || mprotect(pages + page_size, page_size, PROT_READ | PROT_EXEC) < 0) {
-        log_skip(SelftestSkipCategory, "mmap/mprotect failed: %s", strerror_for_mmap());
-        return;
-    }
-    force_call(uintptr_t(pages + page_size - 4));
-    munmap(pages, 2 * page_size);
 }
 
 static void cause_sigtrap_int3()
@@ -1492,37 +1299,6 @@ static struct test selftests_array[] = {
     .desired_duration = -1,
     .quality_level = TEST_QUALITY_PROD,
 },
-#if SANDSTONE_DEVICE_CPU
-{
-    .id = "selftest_logs_l3cachesize",
-    .description = "Reports the aggregate L3 cache size of the topology (heuristic scheduling)",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_init = selftest_logs_l3cachesize_init,
-    .test_run = selftest_pass_run,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_logs_l3cachesize_coregroup",
-    .description = "Reports the aggregate L3 cache size of the topology (core-group scheduling)",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_init = selftest_logs_l3cachesize_init,
-    .test_run = selftest_pass_run,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-    .flags = test_schedule_isolate_coregroup,
-},
-{
-    .id = "selftest_logs_l3cachesize_socket",
-    .description = "Reports the aggregate L3 cache size of the topology (socket scheduling)",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_init = selftest_logs_l3cachesize_init,
-    .test_run = selftest_pass_run,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-    .flags = test_schedule_isolate_socket,
-},
-#endif // SANDSTONE_DEVICE_CPU
 {
     .id = "selftest_logdata",
     .description = "Logs data for later parsing",
@@ -1551,17 +1327,18 @@ static struct test selftests_array[] = {
 },
 {
     .id = "selftest_log_raw_yaml",
-    .description = "Logs YAML content (raw string)",
+    .description = "Logs YAML content",
     .groups = DECLARE_TEST_GROUPS(&group_positive),
     .test_run = selftest_lograwyaml_run,
     .desired_duration = -1,
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_log_formatted_yaml",
-    .description = "Logs YAML content (using format_yaml)",
+    .id = "selftest_log_raw_yaml_with_cb",
+    .description = "Logs YAML content (with callback active)",
     .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_run = selftest_logformattedyaml_run,
+    .test_init = selftest_log_platform_init,
+    .test_run = selftest_lograwyaml_run,
     .desired_duration = -1,
     .quality_level = TEST_QUALITY_PROD,
 },
@@ -1843,27 +1620,6 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_busywait_random_generation",
-    .description = "Calls the random() function in a loop",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_run = selftest_busywait_random_generation_run<random, 1000*1000>,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_busywait_random32_generation",
-    .description = "Calls the random32() function in a loop",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_run = selftest_busywait_random_generation_run<random32, 1000*1000>,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_busywait_random128_generation",
-    .description = "Calls the random128() function in a loop",
-    .groups = DECLARE_TEST_GROUPS(&group_positive),
-    .test_run = selftest_busywait_random_generation_run<random128, 1000*1000>,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
     .id = "selftest_check_sequential",
     .description = "Checks that threads were run sequentially",
     .test_init = selftest_check_sequential_init,
@@ -1970,7 +1726,7 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_datacomparefailrare_int_50pct",
+    .id = "selftest_datacomparefail_int_50pct",
     .description = "Fakes a memcmp_or_fail that finds a difference that isn't there, 50% of the time",
     .groups = DECLARE_TEST_GROUPS(&group_random),
             .test_run = selftest_datacomparefailrare_run<std::ratio<1, 2>>,
@@ -1978,7 +1734,7 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_datacomparefailrare_int_rare",
+    .id = "selftest_datacomparefail_int_rare",
     .description = "Fakes a memcmp_or_fail that finds a difference that isn't there, less than 0.1% of the time",
     .groups = DECLARE_TEST_GROUPS(&group_random),
             .test_run = selftest_datacomparefailrare_run<std::ratio<1, 1024>>,
@@ -1986,7 +1742,7 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_datacomparefailrare_double_50pct",
+    .id = "selftest_datacomparefail_double_50pct",
     .description = "Fakes a memcmp_or_fail that finds a difference that isn't there, 50% of the time",
     .groups = DECLARE_TEST_GROUPS(&group_random),
             .test_run = selftest_datacomparefailrare_run<std::ratio<1, 2>, double>,
@@ -1994,7 +1750,7 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_datacomparefailrare_double_rare",
+    .id = "selftest_datacomparefail_double_rare",
     .description = "Fakes a memcmp_or_fail that finds a difference that isn't there, less than 0.1% of the time",
     .groups = DECLARE_TEST_GROUPS(&group_random),
             .test_run = selftest_datacomparefailrare_run<std::ratio<1, 1024>, double>,
@@ -2140,15 +1896,6 @@ static struct test selftests_array[] = {
     .quality_level = TEST_QUALITY_PROD,
 },
 {
-    .id = "selftest_fail_run_and_cleanup",
-    .description = "Fails in the run and cleanup functions",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_run = selftest_fail_run,
-    .test_cleanup = selftest_fail_cleanup,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
     .id = "selftest_logerror_cleanup",
     .description = "Fails in the cleanup function with log_error()",
     .groups = DECLARE_TEST_GROUPS(&group_negative),
@@ -2243,24 +1990,6 @@ static struct test selftests_array[] = {
     .groups = DECLARE_TEST_GROUPS(&group_negative),
     .test_init = selftest_init_installcallback,
     .test_run = selftest_reportfailmsg_run,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_fail_after_reschedule",
-    .description = "Fails by calling report_fail_msg() after reschedule()",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_init = selftest_logs_reschedule_init,
-    .test_run = selftest_fail_after_reschedule_run,
-    .test_cleanup = selftest_logs_reschedule_cleanup,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_fail_after_reschedule_lowest_cpu",
-    .description = "Fails by calling report_fail_msg() after reschedule(), but only on the lowest numbered CPU",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_run = selftest_fail_after_reschedule_lowest_cpu_run,
     .desired_duration = -1,
     .quality_level = TEST_QUALITY_PROD,
 },
@@ -2418,30 +2147,6 @@ FOREACH_DATATYPE(DATACOMPARE_TEST)
     .description = "Crashes with SIGSEGV (instruction)",
     .groups = DECLARE_TEST_GROUPS(&group_negative),
     .test_run = selftest_crash_run<cause_sigsegv_instruction>,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_sigill_near_unreadable",
-    .description = "Crashes with SIGILL (UD2/UDF instruction) near a readable/unmapped page boundary",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_run = selftest_crash_run<cause_sigill_partial>,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_sigsegv_readable_unreadable",
-    .description = "Crashes with SIGSEGV (instruction) jumping from a readable page into an unmapped page",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_run = selftest_crash_run<cause_sigsegv_readable_unreadable>,
-    .desired_duration = -1,
-    .quality_level = TEST_QUALITY_PROD,
-},
-{
-    .id = "selftest_sigsegv_unreadable_readable",
-    .description = "Crashes with SIGSEGV (instruction) on an unmapped page adjacent to a readable page",
-    .groups = DECLARE_TEST_GROUPS(&group_negative),
-    .test_run = selftest_crash_run<cause_sigsegv_unreadable_readable>,
     .desired_duration = -1,
     .quality_level = TEST_QUALITY_PROD,
 },

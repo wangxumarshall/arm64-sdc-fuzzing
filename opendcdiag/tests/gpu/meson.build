@@ -13,19 +13,10 @@ level_zero_kernels_generator_script = find_program(
     dirs : [ meson.current_source_dir() / '..' / '..' / 'framework' / 'device' / 'gpu' / 'scripts', ],
 )
 
-level_zero_kernels_generator_ocl = generator(
+level_zero_kernels_generator = generator(
     level_zero_kernels_generator_script,
     arguments : [
         '@BASENAME@', '@INPUT@', target_device, 'OpenCL'
-    ],
-    capture : true,
-    output : '@BASENAME@_source.h',
-)
-
-level_zero_kernels_generator_cmc = generator(
-    level_zero_kernels_generator_script,
-    arguments : [
-        '@BASENAME@', '@INPUT@', target_device, 'CMC'
     ],
     capture : true,
     output : '@BASENAME@_source.h',
@@ -56,25 +47,23 @@ tests_common_incdirs = [
 # fill with tests
 tests_set_base.add(
     files(
-        'event_monitor/event_monitor.cpp',
-        'ze_matmul/ze_matmul.cpp',
-        'ze_memcpy/ze_memcpy.cpp',
+
     )
 )
 
 # fill with OpenCL kernels if used by tests
-level_zero_kernel_sources_ocl = files(
-    'ze_matmul/matmul.cl',
+level_zero_kernel_sources = files(
+
 )
 
 tests_config_base = tests_set_base.apply(tests_config)
-level_zero_kernels_headers_ocl = level_zero_kernels_generator_ocl.process(level_zero_kernel_sources_ocl)
+# level_zero_kernels_headers = level_zero_kernels_generator.process(level_zero_kernel_sources)
 
 tests_base_a = static_library(
     'tests_base',
     sources : [
         tests_config_base.sources(),
-        level_zero_kernels_headers_ocl,
+        # level_zero_kernels_headers,
     ],
     build_by_default: false,
     include_directories : [

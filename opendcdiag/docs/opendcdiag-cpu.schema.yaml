@@ -54,8 +54,6 @@ properties:
     properties:
       fullsocket:
         $ref: '#/$defs/test-plan-entry'
-      core_groups:
-        $ref: '#/$defs/test-plan-entry'
       heuristic:
         $ref: '#/$defs/test-plan-entry'
     required:
@@ -123,8 +121,6 @@ $defs:
         type: integer
       numa_node:
         type: integer
-      die:
-        type: integer
       module:
         type: integer
       core:
@@ -151,6 +147,11 @@ $defs:
           - 'null'
     required:
       - logical
+      - package
+      - numa_node
+      - module
+      - core
+      - thread
 
   test-plan-entry:
     type: array
@@ -161,13 +162,10 @@ $defs:
           type: integer
         count:
           type: integer
-        threads:
-          type: integer
       minItems: 1
       required:
         - count
         - starting_cpu
-        - threads
 
   test-entry:
     type: object
@@ -229,8 +227,6 @@ $defs:
                 - type: string
                   pattern: '^main'
             id:
-              $ref: '#/$defs/cpu-info'
-            previous-cpu:
               $ref: '#/$defs/cpu-info'
             context:
               oneOf:
@@ -372,10 +368,6 @@ $defs:
                 - string
             remark:
               type: string
-            details:
-              type:
-                - object
-                - array
           required:
             - actual
             - address
@@ -384,10 +376,6 @@ $defs:
             - mask
             - offset
             - type
-        details:
-          type:
-            - map
-            - array
       required:
         - level
 

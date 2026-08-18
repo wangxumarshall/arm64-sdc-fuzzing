@@ -43,9 +43,6 @@ struct gpu_info_t
     /// We keep it for legacy reasons (used in selftest.cpp)
     int16_t package_id;
 
-    /// NUMA node ID in the system, -1 if not known.
-    int16_t numa_id;
-
     /// GPU unique index, as iterated by the L0 driver.
     int gpu_number;
 
@@ -85,6 +82,6 @@ inline int gpu_info_t::gpu() const
 // Not used at the moment
 typedef unsigned __int128 device_features_t;
 static const device_features_t device_compiler_features = 0;
-#define device_has_feature(f)      ((device_compiler_features & (f)) == (f) || (device_features & (f)) == (f))
+#define cpu_has_feature(f)      ((device_compiler_features & (f)) == (f) || (device_features & (f)) == (f))
 
 #endif // INC_GPU_DEVICE_H

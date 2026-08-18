@@ -44,13 +44,8 @@ public:
     };
 
     class LogMessagesFile {
-        void *base = nullptr;
-        size_t size = 0;            // actual size, not rounded up to page
+        mmap_region r;
     public:
-        struct sentinel {
-            const char *end_ptr;
-        };
-
         struct const_iterator {
             const LogMessage *ptr;
 
@@ -58,46 +53,32 @@ public:
             using value_type = LogMessage;
             using iterator_category = std::forward_iterator_tag;
 
+            friend auto operator<=>(const_iterator, const_iterator) = default;
             const LogMessage &operator*() const { return *ptr; }
             const LogMessage *operator->() const { return ptr; }
-            // pre-increment
-            const_iterator &operator++() noexcept {
-                ptr = reinterpret_cast<const LogMessage*>(ptr->payload + ptr->msglen);
-                return *this;
-            }
-
-            friend auto operator<=>(const_iterator, const_iterator) = default;
-            friend bool operator==(const_iterator it, sentinel end) noexcept
-            {
-                // the log file may be incomplete if the child crashed while
-                // writing, so we need to check whether this message is fully
-                // present or not.
-                auto hdrend = reinterpret_cast<const char *>(it.ptr + 1);
-                if (hdrend > end.end_ptr)
-                    return true;                                // header incomplete
-                return hdrend + it.ptr->msglen > end.end_ptr;   // payload incomplete
-            }
-            friend bool operator!=(const_iterator it, sentinel end) noexcept
-            { return !(it == end); }
+            const_iterator operator++(int) noexcept
+            { return { reinterpret_cast<const LogMessage *>(ptr->payload + ptr->msglen) }; }
+            const_iterator &operator++() noexcept
+            { return *this = (*this)++; }
         };
 
-        LogMessagesFile() noexcept {}
-        LogMessagesFile(int fd);
+        LogMessagesFile() noexcept : r{} {}
+        explicit LogMessagesFile(mmap_region r) noexcept : r(r) {}
+        LogMessagesFile(int fd) : LogMessagesFile(mmap_file(fd)) {}
         LogMessagesFile(const LogMessagesFile &) = delete;
-        LogMessagesFile(LogMessagesFile &&other) = default;
+        LogMessagesFile(LogMessagesFile &&other) : r(std::exchange(other.r, {})) {}
         ~LogMessagesFile() { unmap(); }
         LogMessagesFile &operator=(const LogMessagesFile &) = delete;
         LogMessagesFile &operator=(LogMessagesFile &&) = delete;
 
-        bool empty() const { return size == 0; }
+        bool empty() const { return r.size == 0; }
         const_iterator begin() const
-        { return { static_cast<const LogMessage *>(base) }; }
-        sentinel end() const
-        { return { bytes() + size }; }
+        { return { static_cast<const LogMessage *>(r.base) }; }
+        const_iterator end() const
+        { return { reinterpret_cast<const LogMessage *>(static_cast<const char *>(r.base) + r.size) }; }
 
-        size_t size_bytes() const { return size; }
-        const char *bytes() const { return static_cast<const char *>(base); }
-        void unmap();
+        size_t size_bytes() const { return r.size; }
+        void unmap() { if (r.size) munmap_file(r); r = {}; }
     };
 
     AbstractLogger(const struct test *test, std::span<const ChildExitStatus> state);
@@ -111,7 +92,6 @@ public:
     static std::string get_skip_message(int thread_num);
     static const char *char_to_skip_category(int val);
     static LogMessagesFile maybe_mmap_log(const PerThreadData::Common *data);
-    static void truncate_log(PerThreadData::Common *data);
     static void munmap_and_truncate_log(PerThreadData::Common *data, LogMessagesFile &r);
     static void print_child_stderr_common(std::function<void(int)> header);
     static std::string_view indent_spaces();
@@ -130,11 +110,6 @@ public:
     static std::string thread_id_header_for_device(int device, LogLevelVerbosity verbosity);
     static void print_thread_header_for_device(int fd, PerThreadData::Test *thr);
     static void print_fixed_for_device();
-    static void device_print_extra_info();
-
-#ifdef SANDSTONE_DEVICE_CPU
-    static std::string thread_id_header_for_cpu(LogicalProcessor lp, int device, LogLevelVerbosity verbosity);
-#endif
 
     const struct test *test;
     MonotonicTimePoint earliest_fail = MonotonicTimePoint::max();
@@ -183,7 +158,7 @@ private:
     inline void maybe_print_messages_header(int fd);
     void print_fixed();
     void print_thread_messages();
-    void print_thread_header(int fd, PerThreadData::Common *data, int thread, int device, LogLevelVerbosity verbosity);
+    void print_thread_header(int fd, int device, LogLevelVerbosity verbosity);
     inline bool want_slice_resource_usage(int slice);
     void maybe_print_slice_resource_usage(int fd, int slice);
     inline int print_test_knobs(int fd, const LogMessagesFile &msgs);
@@ -201,13 +176,6 @@ inline void AbstractLogger::print_thread_header_for_device(int fd, PerThreadData
 { __builtin_unreachable(); }
 inline void AbstractLogger::print_fixed_for_device()
 { __builtin_unreachable(); }
-inline void AbstractLogger::device_print_extra_info()
-{ __builtin_unreachable(); }
-
-#  ifdef SANDSTONE_DEVICE_CPU
-inline std::string AbstractLogger::thread_id_header_for_cpu(LogicalProcessor, int, LogLevelVerbosity)
-{ __builtin_unreachable(); return {}; }
-#  endif
 #endif
 
 #endif /* INC_LOGGING_H */

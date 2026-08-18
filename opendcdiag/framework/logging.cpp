@@ -12,7 +12,6 @@
 #include "sandstone_iovec.h"
 #include "sandstone_utils.h"
 #include "sandstone_virt.h"
-#include "sandstone_yaml.h"
 
 #if SANDSTONE_SSL_BUILD
 #  include "sandstone_ssl.h"
@@ -21,23 +20,15 @@
 #include "logging.h"
 #include "device/logging_device.h"
 
-#include <exception>
 #include <limits>
 #include <string>
 #include <string_view>
-#include <typeinfo>
 #include <unordered_set>
-#if __has_include(<cxxabi.h>)
-#  include <cxxabi.h>
-#endif
 
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <sched.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef _WIN32
@@ -96,7 +87,6 @@ RtlGetVersion(
 
 using LogMessage = AbstractLogger::LogMessage;              // for convenience
 using LogMessagesFile = AbstractLogger::LogMessagesFile;    // for convenience
-using YamlFormatter::escape_for_single_line;                // for convenience
 
 static constexpr const char *levels[] = { "error", "warning", "info", "debug" };
 
@@ -121,7 +111,6 @@ enum class AbstractLogger::LogTypes : uint8_t
 };
 using LogTypes = AbstractLogger::LogTypes;
 
-static void terminate_handler() noexcept;
 static SandstoneApplication::OutputFormat current_output_format()
 {
     if (SandstoneConfig::NoLogging)
@@ -347,38 +336,11 @@ static inline int open_new_log()
         return open_memfd(MemfdCloseOnExec);
 }
 
-static inline void truncate_log_internal(int fd)
+static inline void truncate_log(int fd)
 {
     // truncate files back to empty, preparing for the next iteration
     lseek(fd, 0, SEEK_SET);
     IGNORE_RETVAL(ftruncate(fd, 0));
-}
-
-AbstractLogger::LogMessagesFile::LogMessagesFile(int fd)
-{
-    struct stat st;
-    if (fstat(fd, &st) == -1)
-        return;
-
-    size = st.st_size;
-    if (size == 0)
-        return;
-
-    // map the entire contents
-    base = mmap(NULL, ROUND_UP_TO_PAGE(size), PROT_READ, MAP_PRIVATE, fd, 0);
-    if (base == MAP_FAILED) [[unlikely]] {
-        fprintf(stderr, "%s: failed to map file to memory: %s\n", program_invocation_name,
-                strerror_for_mmap());
-        exit(EX_OSERR);
-    }
-}
-
-void AbstractLogger::LogMessagesFile::unmap()
-{
-     if (size)
-         munmap(base, ROUND_UP_TO_PAGE(size));
-     base = nullptr;
-     size = 0;
 }
 
 AbstractLogger::LogMessagesFile AbstractLogger::maybe_mmap_log(const PerThreadData::Common *data)
@@ -388,18 +350,13 @@ AbstractLogger::LogMessagesFile AbstractLogger::maybe_mmap_log(const PerThreadDa
     return LogMessagesFile(data->log_fd);
 }
 
-void AbstractLogger::truncate_log(PerThreadData::Common *data)
-{
-    truncate_log_internal(data->log_fd);
-    data->messages_logged.store(0, std::memory_order_relaxed);
-}
-
 void AbstractLogger::munmap_and_truncate_log(PerThreadData::Common *data, LogMessagesFile &r)
 {
     if (r.empty())
         return;
     r.unmap();
-    truncate_log(data);
+    truncate_log(data->log_fd);
+    data->messages_logged.store(0, std::memory_order_relaxed);
 }
 
 void logging_init_global_child()
@@ -411,7 +368,6 @@ void logging_init_global_child()
     logging_printf(LOG_LEVEL_QUIET, "# stdout is expected to be connected to " _PATH_DEVNULL
                    " so you should never see this message\n");
 #endif
-    std::set_terminate(terminate_handler);
 }
 
 static bool should_log_to_file()
@@ -551,13 +507,11 @@ void logging_init_global(void)
         data->log_fd = open_new_log();
     };
     for_each_main_thread(logopener);
-    for (int i = 0; i < thread_count(); i++)
-        logopener(sApp->test_thread_data(i), i);
+    for_each_test_thread(logopener);
 
 #ifdef __GLIBC__
     setenv("LIBC_FATAL_STDERR_", "1", true);
 #endif
-    std::set_terminate(terminate_handler);
 }
 
 int logging_close_global(int exitcode)
@@ -597,8 +551,7 @@ int logging_close_global(int exitcode)
         close(data->log_fd);
     };
     for_each_main_thread(logcloser);
-    for (int i = 0; i < thread_count(); i++)
-        logcloser(sApp->test_thread_data(i), i);
+    for_each_test_thread(logcloser);
 #endif
 
     /* leak all file descriptors without closing, the application
@@ -651,7 +604,6 @@ void logging_mark_thread_failed(int thread_num) noexcept
     // get_monotonic_time_now() because we'll compare to
     // sApp->current_test_starttime.
     thr->fail_time = std::chrono::steady_clock::now();
-    thr->failing_cpu = LogicalProcessor(sched_getcpu());
     if (thread_num >= 0) {
         auto tthr = static_cast<PerThreadData::Test *>(thr);
         tthr->inner_loop_count_at_fail = tthr->inner_loop_count;
@@ -681,8 +633,8 @@ void logging_run_callback()
 
     // make sure so we don't recurse in case the callback calls log_error()
     thr->thread_flags |= uint32_t(PerThreadData::Common::Flag::CallbackCalled);
-    if (!SandstoneConfig::NoLogging && sApp->current_test_failure_callback.call)
-        sApp->current_test_failure_callback.call(sApp->current_test_failure_callback.token);
+    if (!SandstoneConfig::NoLogging && sApp->current_test_failure_callback.cb)
+        sApp->current_test_failure_callback.cb(sApp->current_test_failure_callback.token);
 }
 
 static void log_message_preformatted(int thread_num, std::string_view msg)
@@ -690,7 +642,7 @@ static void log_message_preformatted(int thread_num, std::string_view msg)
     LogLevelVerbosity level = status_level(msg[0]);
     bool is_error = msg[0] == 'E';
     if (is_error)
-        assert(sApp->thread_data(thread_num)->has_failed());
+        logging_mark_thread_failed(thread_num);
 
     log_message_preformatted(thread_num, level, msg);
     if (is_error)
@@ -791,52 +743,6 @@ void logging_printf(LogLevelVerbosity level, const char *fmt, ...)
         log_message_to_syslog(msg.c_str());
 }
 #endif /* SANDSTONE_NO_LOGGING */
-
-static void terminate_handler() noexcept
-{
-    if (sApp->shmem->cfg.ud_on_failure)
-        ud2();
-    logging_mark_thread_failed(thread_num);
-    // the rest of the setting up the error state is done by log_message below
-
-    std::string msg;
-    if (current_output_format() == SandstoneApplication::OutputFormat::no_output) {
-        msg = SANDSTONE_LOG_ERROR;
-    } else if (std::exception_ptr ex = std::current_exception()) {
-        // get some information about the current exception
-        msg = SANDSTONE_LOG_ERROR "Caught C++ exception of type ";
-        bool appended_name = [&] {
-            int status = -1;
-#if __has_include(<cxxabi.h>)
-            const std::type_info *ti = ex.__cxa_exception_type();
-            char *demangled = abi::__cxa_demangle(ti->name(), nullptr, nullptr, &status);
-            if (status == 0)
-                msg += demangled;
-            free(demangled);
-#endif
-            return status == 0;
-        }();
-
-        try {
-            throw;  // rethrow
-        } catch (std::exception &e) {
-            if (!appended_name)
-                msg += typeid(e).name();
-            if (std::string_view what = e.what(); what.size()) {
-                msg += ": ";
-                msg += what;
-            }
-        } catch (...) {
-            if (!appended_name)
-                msg += "<unknown>";
-        }
-    }
-    if (msg.empty())
-        msg = SANDSTONE_LOG_ERROR "std::terminate() called without an exception";
-
-    log_message_preformatted(thread_num, msg);
-    abort();
-}
 
 static std::string kernel_info()
 {
@@ -1036,6 +942,7 @@ void logging_flush(void)
 
 void logging_init(const struct test *test)
 {
+    sApp->current_test_failure_callback = {};
     if (sApp->shmem->cfg.verbosity <= 0)
         progress_bar_update();
 
@@ -1072,27 +979,24 @@ void logging_finish()
 {
 }
 
-// returns true if we are done and no logging is required
-static inline bool message_common_check(int thread_num, const char *fmt)
+static inline void assert_log_message(const char *fmt)
 {
     assert(fmt);
     assert(fmt[0] == 'd' || fmt[0] == 'I' || fmt[0] == 'W' || fmt[0] == 'E');
     assert(fmt[1] == '>');
     assert(fmt[2] == ' ');
-
-    if (!SandstoneConfig::Debug && *fmt == 'd')
-        return true;       /* no Debug in non-debug build */
-    if (*fmt == 'E')
-        logging_mark_thread_failed(thread_num);
-    return current_output_format() == SandstoneApplication::OutputFormat::no_output;
+    (void)fmt;  // for release builds
 }
 
 #undef log_platform_message
 void log_platform_message(const char *fmt, ...)
 {
-    if (message_common_check(thread_num, fmt))
+    if (current_output_format() == SandstoneApplication::OutputFormat::no_output)
         return;
 
+    assert_log_message(fmt);
+    if (!SandstoneConfig::Debug && *fmt == 'd')
+        return;         /* no Debug in non-debug build */
     va_list va;
     va_start(va, fmt);
     std::string msg = create_filtered_message_string(fmt, va);
@@ -1127,9 +1031,12 @@ void log_message_skip(int thread_num, SkipCategory category, const char *fmt, ..
 #undef log_message
 void log_message(int thread_num, const char *fmt, ...)
 {
-    if (message_common_check(thread_num, fmt))
+    if (current_output_format() == SandstoneApplication::OutputFormat::no_output)
         return;
 
+    assert_log_message(fmt);
+    if (!SandstoneConfig::Debug && *fmt == 'd')
+        return;         /* no Debug in non-debug build */
     va_list va;
     va_start(va, fmt);
     std::string msg = create_filtered_message_string(fmt, va);
@@ -1138,23 +1045,46 @@ void log_message(int thread_num, const char *fmt, ...)
 }
 
 #if SANDSTONE_NO_LOGGING == 0
-void install_failure_callback(void (*cb)(void *), void *token, void (*cleanup)(void *))
+void install_failure_callback(void (*cb)(void *), void *token)
 {
     assert(thread_num < 0 && "callbacks can only be installed from the main thread");
     sApp->current_test_failure_callback.token = token;
-    sApp->current_test_failure_callback.call = cb;
-    sApp->current_test_failure_callback.cleanup = cleanup;
+    sApp->current_test_failure_callback.cb = cb;
+}
+#endif
+
+/// Escapes \c{message} suitable for a single-quote YAML line and returns it.
+/// The \c{storage} parameter is used in case we need to do escaping.
+/// (This could've been a std::variant<std::string, std::string_view>)
+static std::string_view escape_for_single_line(std::string_view message, std::string &storage)
+{
+    const char quote = '\'';
+    size_t pos = message.find(quote);
+    if (pos == std::string_view::npos)
+        return message;
+
+    // Message contains apostrophes, so we need to double the single
+    // quotes. Do that by looping over the string copying it in chunks
+    // delimited by apostrophes, with the apostrophes being copied twice
+    // (that means we're inefficient for back-to-back apostrophes, but
+    // that's not common English text)
+    storage.resize(0);          // just in case
+    storage.reserve(message.size() + message.size() / 16);  // 1/16th is guesstimate
+
+    while (pos != std::string_view::npos) {
+        storage += message.substr(0, pos + 1);
+        message.remove_prefix(pos);
+        pos = message.find(quote, 1);
+    }
+
+    storage += message;     // copy the last chunk (if any)
+    return storage;
 }
 
-void logging_cleanup_failure_callback() noexcept
+static std::string_view escape_for_single_line(std::string_view msg, std::string &&storage = {})
 {
-    if (sApp->current_test_failure_callback.cleanup)
-        sApp->current_test_failure_callback.cleanup(sApp->current_test_failure_callback.token);
-    sApp->current_test_failure_callback = {};
+    return escape_for_single_line(msg, storage);
 }
-#else
-void logging_cleanup_failure_callback() noexcept {}
-#endif
 
 static void log_data_common(const char *message, const uint8_t *ptr, size_t size, bool from_memcmp)
 {
@@ -1251,14 +1181,7 @@ static void logging_format_data(DataType type, std::string_view description, con
     };
 
     buffer += "description: '";
-    if (description.size()) {
-        while (description.ends_with('\n'))
-            description.remove_suffix(1);       // chop trailing newlines
-        size_t nl = description.find('\n');
-        buffer += escape_for_single_line(description.substr(0, nl));
-        if (nl != std::string::npos)
-            description.remove_prefix(nl + 1);
-    }
+    buffer += description;
     buffer += "'\ntype:        ";
 
     const char *typeName = SandstoneDataDetails::type_name(type);
@@ -1302,43 +1225,25 @@ static void logging_format_data(DataType type, std::string_view description, con
                   "remark:      'memcmp_offset() could not locate difference'";
     }
 
-    // are there more details supplied by the callback?
-    if (description.size()) {
-        buffer += "\ndetails:\n";
-        std::string_view details = description;
-        size_t lastpos = 0;
-        size_t nl = details.find('\n', lastpos);
-        while (nl != std::string_view::npos) {
-            buffer += "  ";
-            ++nl;       // include newline
-            buffer += details.substr(lastpos, nl - lastpos);
-            lastpos = nl;
-            nl = details.find('\n', lastpos);
-        }
-        buffer += "  ";
-        buffer += details.substr(lastpos);
-    }
-
     PerThreadData::Common *thread = sApp->thread_data(thread_num);
     log_message_for_thread(thread, LogTypes::RawYaml, LOG_LEVEL_QUIET, buffer);
 }
 
 void logging_report_mismatched_data(DataType type, const uint8_t *actual, const uint8_t *expected,
-                                    size_t size, ptrdiff_t offset,
-                                    SandstoneMemcmpOrFail::FormatterCallback formatter,
-                                    const void *token1, void *token2)
+                                    size_t size, ptrdiff_t offset, const char *fmt, va_list va)
 {
     logging_mark_thread_failed(thread_num);
     if (current_output_format() == SandstoneApplication::OutputFormat::no_output)
         return;
 
-    if (formatter) {
+    {
         // create the description of what failed
-        ptrdiff_t idx = offset < 0 ? offset : offset / SandstoneDataDetails::type_size(type);
-        std::string description = formatter(token1, token2, idx);
-        logging_format_data(type, description, actual, expected, offset);
-    } else {
-        logging_format_data(type, {}, actual, expected, offset);
+        std::string description, escaped_description;
+        if (fmt && *fmt)
+            description = vstdprintf(fmt, va);
+
+        logging_format_data(type, escape_for_single_line(description, escaped_description),
+                            actual, expected, offset);
     }
     if (offset < 0) {
         // we couldn't find a difference
@@ -1410,59 +1315,28 @@ void log_thread_context(std::string_view ctx)
     log_message_for_thread(thread, LogTypes::ThreadContext, LOG_LEVEL_VERBOSE(1), ctx);
 }
 
-static PerThreadData::Common *log_yaml_common(int thread_num, char levelchar)
+#undef log_yaml
+void log_yaml(char levelchar, const char *yaml)
 {
+    LogLevelVerbosity level = status_level(levelchar);
     if (levelchar == 'E')
         logging_mark_thread_failed(thread_num);
     if (!SandstoneConfig::Debug && levelchar == 'd')
-        return nullptr;     // no Debug in non-debug build
+        return;             // no Debug in non-debug build
     if (current_output_format() == SandstoneApplication::OutputFormat::no_output)
-        return nullptr;     // short-circuit
+        return;             // short-circuit
 
     PerThreadData::Common *thread = sApp->thread_data(thread_num);
     std::atomic<int> &messages_logged = thread->messages_logged;
     if (messages_logged.load(std::memory_order_relaxed) >= sApp->shmem->cfg.max_messages_per_thread)
-        return nullptr;     // enough messages
-    return thread;
-}
-
-void log_thread_yaml(int thread_num, char levelchar, const char *yaml)
-{
-    LogLevelVerbosity level = status_level(levelchar);
-    PerThreadData::Common *thread = log_yaml_common(thread_num, levelchar);
-    if (!thread)
         return;
+
     log_message_for_thread(thread, LogTypes::RawYaml, level, '\n', yaml);
     if (levelchar == 'E')
         logging_run_callback();
 }
 
-#undef log_yaml
-void log_yaml(char levelchar, const char *yaml)
-{
-    log_thread_yaml(thread_num, levelchar, yaml);
-}
-
-void log_yaml(char levelchar, std::string_view description,
-              const std::map<std::string, YamlFormatter::SimpleValue> &values)
-{
-    assert(description.find('\n') == std::string::npos
-           && "YAML descriptions should not include a newline");
-    if (values.empty())
-        log_yaml(levelchar, description.data());
-
-    PerThreadData::Common *thread = log_yaml_common(thread_num, levelchar);
-    if (!thread)
-        return;
-
-    std::string payload = format_yaml(values);
-    log_message_for_thread(thread, LogTypes::RawYaml, status_level(levelchar),
-                           '\n', description, '\n', payload);
-    if (levelchar == 'E')
-        logging_run_callback();
-}
-
-void logging_mark_knob_used(std::string_view key, YamlFormatter::SimpleValue value, KnobOrigin origin)
+void logging_mark_knob_used(std::string_view key, TestKnobValue value, KnobOrigin origin)
 {
     if (current_output_format() == SandstoneApplication::OutputFormat::no_output)
         return;             // short-circuit
@@ -1487,9 +1361,40 @@ void logging_mark_knob_used(std::string_view key, YamlFormatter::SimpleValue val
     if (!sApp->shmem->cfg.log_test_knobs)
         return;
 
+    struct Visitor {
+        std::string operator()(uint64_t v)
+        {
+            if (v < 4096)
+                return stdprintf("%u", unsigned(v));
+            else
+                return stdprintf("0x%" PRIx64, v);
+        }
+        std::string operator()(int64_t v)
+        {
+            if (v >= 0)
+                return operator()(uint64_t(v));
+            else if (v >= -4096)
+                return stdprintf("%d", int(v));
+            else
+                return stdprintf("-0x%" PRIx64, -v);
+        }
+        std::string operator()(double v)
+        {
+            return stdprintf("%.17g", double(v));
+        }
+        std::string operator()(std::string_view v)
+        {
+            if (v.data() == nullptr) {
+                return "null";
+            } else {
+                return stdprintf("'%s'", escape_for_single_line(v).data());
+            }
+        }
+    };
+    std::string formatted = std::visit(Visitor{}, value);
     PerThreadData::Common *thread = sApp->thread_data(thread_num);
     log_message_for_thread(thread, LogTypes::UsedKnobValue, UsedKnobValueLoggingLevel,
-                           format_yaml(key, value));
+                           key, ": ", formatted);
 }
 
 static void print_content_indented(int fd, std::string_view indent, std::string_view content)
@@ -1669,12 +1574,12 @@ AbstractLogger::print_one_thread_messages_tdata(int fd, PerThreadData::Common *d
 
 void AbstractLogger::print_child_stderr_common(std::function<void(int)> header)
 {
-    LogMessagesFile f(stderr_fd);
-    if (f.size_bytes() == 0)
+    struct mmap_region r = mmap_file(stderr_fd);
+    if (r.size == 0)
         return;
 
     char indent[] = "    ";
-    std::string_view contents(f.bytes(), f.size_bytes());
+    std::string_view contents(static_cast<const char *>(r.base), r.size);
 
     header(AbstractLogger::file_log_fd);
     print_content_indented(AbstractLogger::file_log_fd, indent, contents);
@@ -1682,10 +1587,10 @@ void AbstractLogger::print_child_stderr_common(std::function<void(int)> header)
         header(AbstractLogger::real_stdout_fd);
         print_content_indented(AbstractLogger::real_stdout_fd, indent, contents);
     }
-    f.unmap();
+    munmap_file(r);
 
     /* reset it for the next iteration */
-    truncate_log_internal(stderr_fd);
+    truncate_log(stderr_fd);
 }
 
 static ChildExitStatus find_most_serious_result(std::span<const ChildExitStatus> results)
@@ -1718,18 +1623,11 @@ inline AbstractLogger::AbstractLogger(const struct test *test, std::span<const C
 
     case TestResult::TimedOut:
         // find stuck threads and insert error message
-        for_each_test_thread([](PerThreadData::Test *data, int thread, int device=-1) {
+        for_each_test_thread([](PerThreadData::Test *data, int i) {
             ThreadState thr_state = data->thread_state.load(std::memory_order_relaxed);
-            if (thr_state != thread_running)
-                return;
-
-            // if the thread hasn't failed prior to getting stuck an, mark
-            // the failure as the original processor where it was run.
-            bool had_failed = data->has_failed();
-            log_message(thread, SANDSTONE_LOG_ERROR "Thread is stuck");
-            if (!had_failed)
-                data->failing_cpu = LogicalProcessor(device_info[device].cpu_number);
-        }, slices.size());
+            if (thr_state == thread_running)
+                log_message(i, SANDSTONE_LOG_ERROR "Thread is stuck");
+        });
         return;
 
     case TestResult::CoreDumped:
@@ -1743,19 +1641,19 @@ inline AbstractLogger::AbstractLogger(const struct test *test, std::span<const C
 
     // scan the threads for their state
     int sc = 0;
-    auto message_checker = [&](PerThreadData::Common *data, int thread) {
+    auto message_checker = [&](PerThreadData::Common *data, int i) {
         ThreadState thr_state = data->thread_state.load(std::memory_order_relaxed);
         if (data->has_failed()) {
             earliest_fail = std::min(earliest_fail, data->fail_time);
             testResult = TestResult::Failed;
-        } else if (thread >= 0) {
+        } else if (i >= 0) {
             // thread passed test. Don't count main thread results.
             ++pc;
             if (thr_state == thread_skipped) ++sc;
         }
     };
     for_each_main_thread(message_checker, slices.size());
-    for_each_test_thread(message_checker, slices.size());
+    for_each_test_thread(message_checker);
 
     if (testResult == TestResult::Passed && pc == sc)
         testResult = TestResult::Skipped;       // all threads skipped
@@ -1887,70 +1785,34 @@ void YamlLogger::maybe_print_messages_header(int fd)
     }
 }
 
-void YamlLogger::print_thread_header(int fd, PerThreadData::Common *data, int thread, int device, LogLevelVerbosity verbosity)
+void YamlLogger::print_thread_header(int fd, int device, LogLevelVerbosity verbosity)
 {
     maybe_print_messages_header(fd);
-    if (thread < 0) {
-        int slice = ~thread;
-        if (slice == 0)
+    if (device < 0) {
+        device = ~device;
+        if (device == 0)
             writeln(fd, indent_spaces(), "  - thread: main");
         else
-            writeln(fd, indent_spaces(), "  - thread: main ", std::to_string(slice));
-        maybe_print_slice_resource_usage(fd, slice);
-        return;
-    }
-
-#ifdef SANDSTONE_DEVICE_CPU
-    constexpr bool DeviceIsCpu = true;
-    auto format_logical_processor = [=](LogicalProcessor lp) {
-        return thread_id_header_for_cpu(lp, device, verbosity);
-    };
-#else
-    constexpr bool DeviceIsCpu = false;
-    auto format_logical_processor = [=](LogicalProcessor lp) {
-#  if defined(_WIN32)
-        return stdprintf("{ logical-group: %2u, logical: %2u }",
-                         // see win32/cpu_affinity.cpp
-                         unsigned(lp) / 64u, unsigned(lp) % 64u);
-#  else
-        return stdprintf("{ logical: %d }", std::to_underlying(lp));
-#  endif
-    };
-#endif
-    assert(device >= 0); // All worker threads should have a valid device index
-    dprintf(fd, "%s  - thread: %d\n", indent_spaces().data(), thread);
-
-    auto thr = static_cast<PerThreadData::Test *>(data);
-    bool has_failed = thr->has_failed();
-
-    const char *failing_cpu_label = "detecting-cpu";
-    if (DeviceIsCpu && has_failed) {
-        // if we're testing CPUs, reporting the failing CPU as the 'id'
-        failing_cpu_label = "id";
+            writeln(fd, indent_spaces(), "  - thread: main ", std::to_string(device));
+        maybe_print_slice_resource_usage(fd, device);
     } else {
-        dprintf(fd, "%s    id: %s\n", indent_spaces().data(),
-                thread_id_header_for_device(device, verbosity).c_str());
-    }
-    if (has_failed) {
-        dprintf(fd, "%s    %s: %s\n", indent_spaces().data(), failing_cpu_label,
-                format_logical_processor(thr->failing_cpu).c_str());
-        if (int(thr->previous_cpu) >= 0)
-            dprintf(fd, "%s    previous-cpu: %s\n", indent_spaces().data(),
-                    format_logical_processor(thr->previous_cpu).c_str());
-    }
+        dprintf(fd, "%s  - thread: %d\n", indent_spaces().data(), device);
+        dprintf(fd, "%s    id: %s\n", indent_spaces().data(), thread_id_header_for_device(device, verbosity).c_str());
 
-    if (verbosity > 1) {
-        auto opts = FormatDurationOptions::WithoutUnit;
-        if (has_failed) {
-            writeln(fd, indent_spaces(), "    state: failed");
-            writeln(fd, indent_spaces(), "    time-to-fail: ", format_duration(thr->fail_time, opts));
-            writeln(fd, indent_spaces(), "    loop-count: ",
-                    std::to_string(thr->inner_loop_count_at_fail));
-        } else if (verbosity > 2) {
-            writeln(fd, indent_spaces(), "    loop-count: ",
-                    std::to_string(thr->inner_loop_count));
+        if (verbosity > 1) {
+            PerThreadData::Test *thr = sApp->test_thread_data(device);
+            auto opts = FormatDurationOptions::WithoutUnit;
+            if (std::string time = format_duration(thr->fail_time, opts); time.size()) {
+                writeln(fd, indent_spaces(), "    state: failed");
+                writeln(fd, indent_spaces(), "    time-to-fail: ", time);
+                writeln(fd, indent_spaces(), "    loop-count: ",
+                        std::to_string(thr->inner_loop_count_at_fail));
+            } else if (verbosity > 2) {
+                writeln(fd, indent_spaces(), "    loop-count: ",
+                        std::to_string(thr->inner_loop_count));
+            }
+            print_thread_header_for_device(fd, thr);
         }
-        print_thread_header_for_device(fd, thr);
     }
 }
 
@@ -2248,7 +2110,7 @@ void YamlLogger::print_fixed()
 void YamlLogger::print_thread_messages()
 {
     // print the thread messages
-    auto doprint = [this](PerThreadData::Common *data, int s_tid, int device=-1) {
+    auto doprint = [this](PerThreadData::Common *data, int s_tid) {
         LogMessagesFile r = maybe_mmap_log(data);
         bool want_print = data->has_failed() || sApp->shmem->cfg.verbosity >= 3;
         ssize_t min_size = 0;
@@ -2265,23 +2127,19 @@ void YamlLogger::print_thread_messages()
             return;             /* nothing to be printed, on any level */
         }
 
-        print_thread_header(file_log_fd, data, s_tid, device, LogLevelVerbosity::Max);
+        print_thread_header(file_log_fd, s_tid, LogLevelVerbosity::Max);
         LogLevelVerbosity lowest_level =
                 print_one_thread_messages(file_log_fd, r, LogLevelVerbosity::Max);
 
-        if (file_log_fd != real_stdout_fd) {
-            // print to stdout
-            bool has_messages = lowest_level <= sApp->shmem->cfg.verbosity;
-            if (want_print || has_messages)
-                print_thread_header(real_stdout_fd, data, s_tid, device, sApp->shmem->cfg.verbosity);
-            if (has_messages)
-                print_one_thread_messages(real_stdout_fd, r, sApp->shmem->cfg.verbosity);
+        if (lowest_level <= sApp->shmem->cfg.verbosity && file_log_fd != real_stdout_fd) {
+            print_thread_header(real_stdout_fd, s_tid, sApp->shmem->cfg.verbosity);
+            print_one_thread_messages(real_stdout_fd, r, sApp->shmem->cfg.verbosity);
         }
 
         munmap_and_truncate_log(data, r);
     };
     for_each_main_thread(doprint, slices.size());
-    for_each_test_thread(doprint, slices.size());
+    for_each_test_thread(doprint);
 }
 
 void YamlLogger::print()
@@ -2331,42 +2189,36 @@ void YamlLogger::print_header(std::string_view cmdline, Duration test_duration, 
 #else
     logging_printf(LOG_LEVEL_VERBOSE(1), "device-info:\n");
 #endif
-    for (int i = 0; i < device_count(); ++i) {
+    for (int i = 0; i < thread_count(); ++i) {
         logging_printf(LOG_LEVEL_VERBOSE(1), "- %s   # %d\n",
                        thread_id_header_for_device(i, LOG_LEVEL_VERBOSE(2)).c_str(), i);
     }
 
-    device_print_extra_info();
-
-    auto print_plan = [](const char *name, const SlicePlans::Slices &plan) {
+#if SANDSTONE_DEVICE_CPU
+    auto make_plan_string = [](const std::vector<DeviceRange> &plan) {
         std::string result;
-        for (SlicePlans::Slice s : plan) {
+        for (DeviceRange r : plan) {
             if (result.size())
                 result += ", ";
-#if SANDSTONE_DEVICE_CPU
             result += "{ starting_cpu: ";
-#else
-            result += "{ starting_device: ";
-#endif
-            result += std::to_string(s.device_range.starting_device);
+            result += std::to_string(r.starting_device);
             result += ", count: ";
-            result += std::to_string(s.device_range.device_count);
-            result += ", threads: ";
-            result += std::to_string(s.thread_range.thread_count);
+            result += std::to_string(r.device_count);
             result += " }";
         }
-        logging_printf(LOG_LEVEL_VERBOSE(1), "  %s: [ %s ]\n", name, result.c_str());
+        return result;
     };
-    const SlicePlans::Slices &fullsocket = sApp->slice_plans.plans[SlicePlans::IsolateSockets];
-    const SlicePlans::Slices &heuristic = sApp->slice_plans.plans[SlicePlans::Heuristic];
+    const std::vector<DeviceRange> &fullsocket = sApp->slice_plans.plans[SandstoneApplication::SlicePlans::IsolateSockets];
+    const std::vector<DeviceRange> &isolatenuma = sApp->slice_plans.plans[SandstoneApplication::SlicePlans::IsolateNuma];
+    const std::vector<DeviceRange> &heuristic = sApp->slice_plans.plans[SandstoneApplication::SlicePlans::Heuristic];
     logging_printf(LOG_LEVEL_VERBOSE(1), "test-plans:\n");
-    print_plan("fullsocket", fullsocket);
-#ifdef SANDSTONE_DEVICE_CPU
-    print_plan("core_groups", sApp->slice_plans.plans[SlicePlans::IsolateCoreGroup]);
-#elif defined(SANDSTONE_DEVICE_GPU)
-    print_plan("isolate_numa", sApp->slice_plans.plans[SlicePlans::IsolateNuma]);
+    logging_printf(LOG_LEVEL_VERBOSE(1), "  fullsocket: [ %s ]\n",
+                   make_plan_string(fullsocket).c_str());
+    logging_printf(LOG_LEVEL_VERBOSE(1), "  isolate_numa: [ %s ]\n",
+                   make_plan_string(isolatenuma).c_str());
+    logging_printf(LOG_LEVEL_VERBOSE(1), "  heuristic: [ %s ]\n",
+                   make_plan_string(heuristic).c_str());
 #endif
-    print_plan("heuristic", heuristic);
 }
 
 void YamlLogger::print_tests_header(TestHeaderTime mode)
@@ -2428,24 +2280,4 @@ TestResult logging_print_results(std::span<const ChildExitStatus> status, const 
     }
 
     return AbstractLogger(test, status).testResult;
-}
-
-/// Logs a skip reason during test execution; outside tests, prints a quiet message instead.
-/// Returns either EXIT_SKIP when logging_in_test, EXIT_FAILURE otherwise.
-int log_skip_or_print(SkipCategory cat, const char *fmt, ...)
-{
-    va_list va;
-    va_start(va, fmt);
-    std::string msg = create_filtered_message_string(fmt, va);
-    va_end(va);
-
-    if (!sApp->shmem) {
-        fprintf(stderr, "%s\n", msg.c_str());
-    } else if (logging_in_test) {
-        log_skip(cat, "%s", msg.c_str());
-    } else {
-        logging_printf(LOG_LEVEL_QUIET, "%s\n", msg.c_str());
-    }
-
-    return logging_in_test ? EXIT_SKIP : EXIT_FAILURE;
 }

@@ -73,14 +73,10 @@ static int atomic_simd_256_run(struct test *test, int cpu) {
         // 分别比较两个块是否相等
         uint8x16_t cmp0 = vceqq_u8(read0, reload0);
         uint8x16_t cmp1 = vceqq_u8(read1, reload1);
-        // Check all lanes are 0xFF. NEON lane accessors need a constant index,
-        // so store to a stack array and compare there.
-        uint8_t c0[16], c1[16];
-        vst1q_u8(c0, cmp0);
-        vst1q_u8(c1, cmp1);
         bool consistent = true;
         for (int i = 0; i < 16; ++i) {
-            if (c0[i] != 0xFF || c1[i] != 0xFF) {
+            if (vgetq_lane_u8(cmp0, i) != 0xFF ||
+                vgetq_lane_u8(cmp1, i) != 0xFF) {
                 consistent = false;
                 break;
             }

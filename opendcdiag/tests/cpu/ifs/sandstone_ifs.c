@@ -44,21 +44,14 @@ bool write_file(int dfd, const char *filename, const char* value)
 
 ssize_t read_file_fd(int fd, char buf[BUFLEN])
 {
-        ssize_t n = read(fd, buf, BUFLEN - 1);
+        ssize_t n = read(fd, buf, BUFLEN);
         close(fd);
 
-        if (n < 0) {
-            buf[0] = '\0';
-            return -1;
-        }
-
-        /* skip newlines at the end */
+        /* trim newlines */
         while (n > 0 && buf[n - 1] == '\n') {
+                buf[n - 1] = '\0';
                 --n;
         }
-
-        buf[n] = '\0';
-
         return n;
 }
 

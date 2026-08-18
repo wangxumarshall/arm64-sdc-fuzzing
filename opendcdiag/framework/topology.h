@@ -6,24 +6,20 @@
 #ifndef INC_TOPOLOGY_H
 #define INC_TOPOLOGY_H
 
-#include <sandstone_config.h>
-#include "test_data.h"
-
 #include <bit>
 #include <memory>
 #include <limits>
 #include <span>
 #include <string>
-#include <utility>
-#include <variant>
 #include <vector>
 
 #include <assert.h>
 #include <stdint.h>
 
+#include "gettid.h"
+
 enum class RescheduleMode : int8_t {
-    unset = -1,
-    none  =  0,
+    none    = 0,
     queue,
     barrier,
     random,
@@ -36,11 +32,18 @@ struct DeviceScheduler
     virtual void finish_reschedule() = 0;
 };
 
-using ThreadRatio = std::variant<int, float>;
-
-void make_rescheduler(RescheduleMode mode);
+DeviceScheduler *make_rescheduler(RescheduleMode mode);
 
 using PerThreadFailures = std::vector<__uint128_t>;
+
+struct DeviceRange
+{
+    // a contiguous range
+    int starting_device;
+    int device_count;
+};
+
+enum class LogicalProcessor : int { None = -1 };
 
 struct LogicalProcessorSetOps
 {
@@ -172,23 +175,6 @@ public:
             std::fill(it, std::end(array), 0);      // clear to the end
     }
 
-    // Processes 'sparse' LogicalProcessorSet and returns a vector of processors.
-    std::vector<int> to_vector() const
-    {
-        const int expected = count();
-        std::vector<int> res;
-        res.reserve(expected);
-
-        for (LogicalProcessor lp = next(); lp != LogicalProcessor::None; ) {
-            const int next_cpu = std::to_underlying(lp);
-            res.emplace_back(next_cpu);
-            lp = next(LogicalProcessor(next_cpu + 1));
-        }
-        assert(int(res.size()) == count());
-
-        return res;
-    }
-
 private:
     void ensureSize(int n)
     {
@@ -217,33 +203,7 @@ bool pin_thread_to_logical_processor(LogicalProcessor n, tid_t thread_id, const 
 bool pin_to_logical_processors(DeviceRange, const char *thread_name);
 
 void apply_deviceset_param(const char *param);
-
-struct SlicePlans
-{
-    static constexpr int MinimumCpusPerSocket = 4;
-    static constexpr int DefaultMaxCoresPerSlice = 32;
-    enum Type : int8_t
-    {
-        FullSystem = -1,
-        IsolateSockets,
-#ifdef SANDSTONE_DEVICE_CPU
-        IsolateCoreGroup,
-#elif defined(SANDSTONE_DEVICE_GPU)
-        IsolateNuma,
-#endif
-        Heuristic,
-    };
-    struct Slice {
-        DeviceRange device_range;
-        ThreadRange thread_range;
-    };
-    using Slices = std::vector<Slice>;
-    using SlicesArray = std::array<Slices, 3>;
-    SlicesArray plans;
-};
-
-void slice_plan_init_for_device(SlicePlans::SlicesArray& plans, int max_cores_per_slice);
-int slice_plan_init_for_threads(SlicePlans::SlicesArray& plans, ThreadRatio thread_ratio);
+void slice_plan_init(int max_cores_per_slice);
 
 template <typename EnabledDevices>
 EnabledDevices detect_devices();

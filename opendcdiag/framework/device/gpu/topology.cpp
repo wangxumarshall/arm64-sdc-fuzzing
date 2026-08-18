@@ -25,8 +25,9 @@ int num_packages()
     return 1;
 }
 
-void make_rescheduler(RescheduleMode)
+DeviceScheduler *make_rescheduler(RescheduleMode mode)
 {
+    return nullptr;
 }
 
 namespace {
@@ -42,7 +43,7 @@ const Topology &Topology::topology()
     return cached_topology();
 }
 
-int for_each_topo_device(const std::function<int(const gpu_info_t&)>& func)
+int for_each_topo_device(std::function<int(const gpu_info_t&)> func)
 {
     const auto& topo = Topology::topology();
     for (const auto& device : topo.devices) {
@@ -86,13 +87,13 @@ int parse_int(char*& arg, const char* orig_arg) {
 void update_topology(std::span<const gpu_info_t> new_gpu_info)
 {
     gpu_info_t* end = std::copy(new_gpu_info.begin(), new_gpu_info.end(), device_info);
-    int new_device_count = new_gpu_info.size();
-    if (int excess = sApp->device_count - new_device_count; excess > 0) {
+    int new_thread_count = new_gpu_info.size();
+    if (int excess = sApp->thread_count - new_thread_count; excess > 0) {
         // reset excess entries
         std::fill_n(end, excess, gpu_info_t{});
     }
 
-    sApp->device_count = new_device_count;
+    sApp->thread_count = new_thread_count;
     cached_topology() = build_topology();
 }
 }
@@ -114,7 +115,7 @@ void apply_deviceset_param(const char *param)
         { return gpu.gpu_number == gpu_number; }
     };
 
-    std::span<gpu_info_t> old_gpu_info(device_info, sApp->device_count);
+    std::span<gpu_info_t> old_gpu_info(device_info, sApp->thread_count);
     std::vector<gpu_info_t> new_gpu_info;
     int total_matches = 0;
 
@@ -129,7 +130,7 @@ void apply_deviceset_param(const char *param)
         ++param;
     }
 
-    const auto apply_to_set = [&](const gpu_info_t &gpu) {
+    static const auto apply_to_set = [&](const gpu_info_t &gpu) {
         if (result.contains(gpu.gpu_number)) { // we've got a duplicate
             return;
         }
@@ -253,7 +254,7 @@ std::string build_failure_mask_for_topology(const struct test* test)
 
 uint32_t mixin_from_device_info(int thread_num)
 {
-    const auto& info = device_info[thread_num];
+    auto& info = device_info[thread_num];
     return scramble(
         static_cast<uint32_t>(info.bdf.domain), static_cast<uint32_t>(info.bdf.bus),
         static_cast<uint32_t>(info.bdf.device), static_cast<uint32_t>(info.bdf.function)
@@ -292,54 +293,51 @@ template <>
 GpusSet detect_devices<GpusSet>()
 {
     GpusSet enabled_devices;
-
-    if (const char* mock_topo = getenv("SANDSTONE_MOCK_TOPOLOGY"); SandstoneConfig::Debug && mock_topo && *mock_topo) {
-        // our selftests use mock topologies of up to 4 GPUs, so we need to prepare enough space in device_info
-        static constexpr auto MAX_MOCK_DEVICE_COUNT = 4;
-        sApp->device_count = MAX_MOCK_DEVICE_COUNT;
-        sApp->user_thread_data.resize(sApp->device_count);
-        for (auto i = 0; i < MAX_MOCK_DEVICE_COUNT; i++) {
-            enabled_devices.emplace(MultiSliceGpu{.gpu_number = i}, ZeDeviceCtx{}); // fill with anything, we will check !empty() later
-        }
-        return enabled_devices;
-    }
-
     auto ret = for_each_ze_device([&](ze_device_handle_t device_handle, ze_driver_handle_t driver, const MultiSliceGpu& indices) {
         enabled_devices.emplace(indices, ZeDeviceCtx{ .driver = driver, .ze_handle = device_handle });
         return EXIT_SUCCESS;
     });
-    if (ret != EXIT_SUCCESS) [[unlikely]] {
-        fprintf(stderr, "%s: internal error: gpu enumeration failed!\n",
-                program_invocation_name);
-        return enabled_devices;
-    }
-
-    ret = for_each_zes_device([&](zes_device_handle_t device_handle, ze_driver_handle_t, const MultiSliceGpu& indices) {
+    ret += for_each_zes_device([&](zes_device_handle_t device_handle, ze_driver_handle_t, const MultiSliceGpu& indices) {
         if (!enabled_devices.count(indices)) {
             return EXIT_FAILURE;
         }
         enabled_devices.at(indices).zes_handle = device_handle; // matching indices must mean the exact same device
         return EXIT_SUCCESS;
     });
+
     if (ret != EXIT_SUCCESS) [[unlikely]] {
         fprintf(stderr, "%s: internal error: gpu enumeration failed!\n",
                 program_invocation_name);
         return enabled_devices;
     }
-
     if (enabled_devices.empty()) [[unlikely]] {
         fprintf(stderr, "%s: internal error: gpu devices set appears to be empty!\n",
                 program_invocation_name);
         return enabled_devices;
     }
 
-    sApp->device_count = enabled_devices.size();
-    sApp->user_thread_data.resize(sApp->device_count);
+    sApp->thread_count = enabled_devices.size();
+    sApp->user_thread_data.resize(sApp->thread_count);
 
     return enabled_devices;
 }
 
 namespace {
+/// Processes 'sparse' LogicalProcessorSet and returns a vector of enabled logical cpus.
+std::vector<int> to_vector(const LogicalProcessorSet& set)
+{
+    std::vector<int> res;
+
+    [[maybe_unused]] int i = 0;
+    for (LogicalProcessor lp = set.next(); lp != LogicalProcessor::None; ++i) {
+        auto& next_cpu = res.emplace_back(std::to_underlying(lp));
+        lp = set.next(LogicalProcessor(next_cpu + 1));
+    }
+    assert(i == set.count());
+
+    return res;
+}
+
 /// Reads affinity for given PCI device and constructs a vector of all local logical cpus.
 std::vector<int> find_numa_local_cpus(const ze_pci_address_ext_t& bdf)
 {
@@ -432,26 +430,7 @@ int16_t detect_package_id_via_os(int cpu)
     std::ifstream infile;
     infile.open(file.data());
     if (!infile.is_open()) { [[unlikely]]
-        fprintf(stderr, "%s: internal error: unable to find physical_package_id file: %m\n",
-                program_invocation_name);
-        return res;
-    }
-    infile >> res;
-    infile.close();
-
-    return res;
-}
-
-int16_t detect_numa_node_via_os(const ze_pci_address_ext_t& bdf)
-{
-    int16_t res = -1;
-    auto file = std::format("/sys/bus/pci/devices/{:04x}:{:02x}:{:02x}.{:01x}/numa_node",
-        bdf.domain, bdf.bus, bdf.device, bdf.function);
-
-    std::ifstream infile;
-    infile.open(file.data());
-    if (!infile.is_open()) { [[unlikely]]
-        fprintf(stderr, "%s: internal error: unable to find numa_node file: %m\n",
+        fprintf(stderr, "%s: internal error: unable to find physical_package_id file\n",
                 program_invocation_name);
         return res;
     }
@@ -473,67 +452,19 @@ int16_t detect_numa_node_via_os(const ze_pci_address_ext_t& bdf)
     } while (0)
 }
 
-/// Builds device_info array with only BDF filled, because for now the
-/// only use case is random selftests (mixin is computed from BDF).
-/// Topology is not constructed.
-void create_mock_topology(const char *topo)
-{
-    auto parse_int_and_advance = [&topo](uint32_t *ptr) {
-        char *end;
-        *ptr = strtoll(topo, &end, 16);
-        topo = end;
-    };
-
-    int gpu_count = 0;
-    while (topo && *topo) {
-        gpu_info_t *info = &device_info[gpu_count];
-        gpu_count++;
-
-        info->package_id = info->cpu_number = info->gpu_number = info->device_index = 0;
-        info->numa_id = -1;
-        info->subdevice_index = -1;
-        info->num_subdevices = 0;
-        info->gpu_arch.as_dword = 0x0u;
-
-        parse_int_and_advance(&info->bdf.domain);
-        if (*topo != ':') break;
-        topo++;
-
-        parse_int_and_advance(&info->bdf.bus);
-        if (*topo != ':') break;
-        topo++;
-
-        parse_int_and_advance(&info->bdf.device);
-        if (*topo != '.') break;
-        topo++;
-
-        parse_int_and_advance(&info->bdf.function);
-
-        while (topo && (*topo == ' ' || *topo == ','))
-            ++topo;
-    }
-
-    sApp->device_count = gpu_count;
-}
-
 /// Builds whole device_info array, then builds topology based on that.
 template <>
 void setup_devices<GpusSet>(const GpusSet &enabled_devices)
 {
     device_info = sApp->shmem->device_info;
 
-    if (const char* mock_topo = getenv("SANDSTONE_MOCK_TOPOLOGY"); SandstoneConfig::Debug && mock_topo && *mock_topo) {
-        create_mock_topology(mock_topo);
-        return;
-    }
-
-    assert(enabled_devices.size() == device_count());
+    assert(enabled_devices.size() == thread_count());
     gpu_info_t* info = device_info;
-    [[maybe_unused]] const gpu_info_t* cend = device_info + device_count();
+    [[maybe_unused]] const gpu_info_t* cend = device_info + thread_count();
 
-    auto enabled_cpus = ambient_logical_processor_set().to_vector();
+    auto enabled_cpus = to_vector(ambient_logical_processor_set());
     if (enabled_cpus.size() < enabled_devices.size()) {
-        fprintf(stderr, "%s: error: not enough CPUs available (%zu CPUs vs %zu GPUs)\n",
+        fprintf(stderr, "%s: error: not enough CPUs available (%ld CPUs vs %ld GPUs)\n",
                 program_invocation_name, enabled_cpus.size(), enabled_devices.size());
         exit(EX_USAGE);
     }
@@ -553,7 +484,6 @@ void setup_devices<GpusSet>(const GpusSet &enabled_devices)
 
         info->cpu_number = try_assign_local_cpu(enabled_cpus, info->bdf);
         info->package_id = detect_package_id_via_os(info->cpu_number);
-        info->numa_id = detect_numa_node_via_os(info->bdf);
 
         zes_device_properties_t zes_device_prop = { .stype = ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES };
         CHECK_EXIT(zesDeviceGetProperties(zes_handle, &zes_device_prop));
@@ -578,24 +508,24 @@ void setup_devices<GpusSet>(const GpusSet &enabled_devices)
     cached_topology() = build_topology();
 }
 
-/// Called after apply_deviceset_param(). Means we have smaller device_count and a new range of devices.
+/// Called after apply_deviceset_param(). Means we have smaller thread_count and a new range of devices.
 /// Changes pointer of device_info, as sApp->shmem has moved. Must also rebuild topology (built upon device_info).
 /// TODO: It's very similar to the CPU version. Should we abstract build_topology(), rather than restrict_topology()?
 void restrict_topology(DeviceRange range)
 {
-    assert(range.starting_device + range.device_count <= sApp->device_count);
+    assert(range.starting_device + range.device_count <= sApp->thread_count);
     auto old_gpu_info = std::exchange(device_info, sApp->shmem->device_info + range.starting_device);
-    int old_device_count = std::exchange(sApp->device_count, range.device_count);
+    int old_thread_count = std::exchange(sApp->thread_count, range.device_count);
 
     Topology &topo = cached_topology();
-    if (old_gpu_info != device_info || old_device_count != sApp->device_count /*|| topo.devices.size() == 0  TODO: why would we check that? */) {
+    if (old_gpu_info != device_info || old_thread_count != sApp->thread_count /*|| topo.devices.size() == 0  TODO: why would we check that? */) {
         topo = build_topology();
     }
 }
 
 void rebuild_topology()
 {
-    assert(device_info && sApp->device_count && "device_info must be filled at this point");
+    assert(device_info && sApp->thread_count && "device_info must be filled at this point");
     cached_topology() = build_topology();
 }
 
@@ -667,4 +597,10 @@ void analyze_test_failures_for_topology(const struct test *test, const PerThread
     } else {
         logging_printf(LOG_LEVEL_VERBOSE(1), "# - Some GPUs failed but some others succeeded\n");
     }
+}
+
+void slice_plan_init(int max_cores_per_slice)
+{
+    std::vector plan = { DeviceRange{ 0, thread_count() } };
+    sApp->slice_plans.plans.fill(plan);
 }

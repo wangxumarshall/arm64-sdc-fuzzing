@@ -8,8 +8,6 @@
 #include "logging_cpu.h"
 
 #include <cinttypes>
-#include <climits>
-#include <map>
 
 static constexpr const char *native_device_type(const cpu_info_t *info)
 {
@@ -25,6 +23,17 @@ static constexpr const char *native_device_type(const cpu_info_t *info)
 }
 
 #if !SANDSTONE_NO_LOGGING
+
+namespace {
+bool cpu_is_virtualized()
+{
+#ifdef cpu_feature_hypervisor
+    return cpu_has_feature(cpu_feature_hypervisor);
+#else
+    return false;
+#endif
+}
+}
 
 void KeyValuePairLogger::prepare_line_prefix()
 {
@@ -65,7 +74,7 @@ void KeyValuePairLogger::print(int tc)
     logging_printf(LOG_LEVEL_VERBOSE(1), "%s_description = %s\n", test->id, test->description);
     logging_printf(LOG_LEVEL_VERBOSE(1), "%s_pass_count = %d\n", test->id, pc);
     logging_printf(LOG_LEVEL_VERBOSE(2), "%s_virtualized = %s\n", test->id,
-                   device_has_feature(cpu_feature_hypervisor) ? "yes" : "no");
+                   cpu_is_virtualized() ? "yes" : "no");
     if (should_print_fail_info()) {
         logging_printf(LOG_LEVEL_VERBOSE(1), "%s_fail_percent = %.1f\n", test->id,
                        100. * (thread_count() - pc) / thread_count());
@@ -82,7 +91,7 @@ void KeyValuePairLogger::print(int tc)
     logging_flush();
 }
 
-void KeyValuePairLogger::print_thread_header(int fd, int thread, int device, const char *prefix)
+void KeyValuePairLogger::print_thread_header(int fd, int device, const char *prefix)
 {
     if (device < 0) {
         device = ~device;
@@ -94,58 +103,53 @@ void KeyValuePairLogger::print_thread_header(int fd, int thread, int device, con
         return;
     }
 
-    const cpu_info_t *info = device_info + device;
+    cpu_info_t *info = device_info + device;
     const HardwareInfo::PackageInfo *pkg = sApp->hwinfo.find_package_id(info->package_id);
-    PerThreadData::Test *thr = sApp->test_thread_data(thread);
+    PerThreadData::Test *thr = sApp->test_thread_data(device);
     if (std::string time = format_duration(thr->fail_time); time.size()) {
-        dprintf(fd, "%s_thread_%d_fail_time = %s\n", prefix, thread, time.c_str());
-        dprintf(fd, "%s_thread_%d_loop_count = %u\n", prefix, thread,
+        dprintf(fd, "%s_thread_%d_fail_time = %s\n", prefix, device, time.c_str());
+        dprintf(fd, "%s_thread_%d_loop_count = %u\n", prefix, device,
                 thr->inner_loop_count_at_fail);
     } else {
-        dprintf(fd, "%s_thread_%d_loop_count = %u\n", prefix, thread,
+        dprintf(fd, "%s_thread_%d_loop_count = %u\n", prefix, device,
                 thr->inner_loop_count);
     }
-    dprintf(fd, "%s_messages_thread_%d_cpu = %d\n", prefix, thread, info->cpu_number);
-    dprintf(fd, "%s_messages_thread_%d_family_model_stepping = %02x-%02x-%02x\n", prefix, thread,
+    dprintf(fd, "%s_messages_thread_%d_cpu = %d\n", prefix, device, info->cpu_number);
+    dprintf(fd, "%s_messages_thread_%d_family_model_stepping = %02x-%02x-%02x\n", prefix, device,
             sApp->hwinfo.family, sApp->hwinfo.model, sApp->hwinfo.stepping);
     dprintf(fd, "%s_messages_thread_%d_topology = phys %d, core %d, thr %d\n",
-            prefix, thread, info->package_id, info->core_id, info->thread_id);
-    dprintf(fd, "%s_messages_thread_%d_microcode =", prefix, thread );
+            prefix, device, info->package_id, info->core_id, info->thread_id);
+    dprintf(fd, "%s_messages_thread_%d_microcode =", prefix, device);
     if (info->microcode)
         dprintf(fd, " 0x%" PRIx64, info->microcode);
     dprintf(fd, "\n%s_messages_thread_%d_ppin =",
-            prefix, thread);
+            prefix, device);
     if (pkg && pkg->ppin)
         dprintf(fd, " 0x%" PRIx64, pkg->ppin);
-    dprintf(fd, "\n%s_messages_thread_%d = \\\n", prefix, thread);
+    dprintf(fd, "\n%s_messages_thread_%d = \\\n", prefix, device);
 }
 
 void KeyValuePairLogger::print_thread_messages()
 {
-    auto doprint = [this](PerThreadData::Common *data, int thread, int device=-1) {
+    auto doprint = [this](PerThreadData::Common *data, int i) {
         LogMessagesFile r = maybe_mmap_log(data);
-        bool want_print = data->has_failed() || sApp->shmem->cfg.verbosity >= 3;
 
         if (r.empty() && !data->has_failed() && sApp->shmem->cfg.verbosity < 3)
             return;           /* nothing to be printed, on any level */
 
-        print_thread_header(file_log_fd, thread, device, timestamp_prefix.c_str());
+        print_thread_header(file_log_fd, i, timestamp_prefix.c_str());
         LogLevelVerbosity lowest_level =
                 print_one_thread_messages_tdata(file_log_fd, data, r, LogLevelVerbosity::Max);
 
-        if (file_log_fd != real_stdout_fd) {
-            // print to stdout
-            bool has_messages = lowest_level <= sApp->shmem->cfg.verbosity;
-            if (want_print || has_messages)
-                print_thread_header(real_stdout_fd, thread, device, test->id);
-            if (has_messages)
-                print_one_thread_messages_tdata(real_stdout_fd, data, r, sApp->shmem->cfg.verbosity);
+        if (lowest_level <= sApp->shmem->cfg.verbosity && file_log_fd != real_stdout_fd) {
+            print_thread_header(real_stdout_fd, i, test->id);
+            print_one_thread_messages_tdata(real_stdout_fd, data, r, sApp->shmem->cfg.verbosity);
         }
 
         munmap_and_truncate_log(data, r);
     };
     for_each_main_thread(doprint, slices.size());
-    for_each_test_thread(doprint, slices.size());
+    for_each_test_thread(doprint);
 }
 
 void KeyValuePairLogger::print_child_stderr()
@@ -273,28 +277,27 @@ void TapFormatLogger::maybe_print_yaml_marker(int fd)
     writeln(fd, yamlseparator,
             "\n  info: {version: ", program_version,
             ", timestamp: ", iso8601_time_now(Iso8601Format::WithoutMs),
-            device_has_feature(cpu_feature_hypervisor) ? ", virtualized: true" : nothing,
+            cpu_is_virtualized() ? ", virtualized: true" : nothing,
             "}");
     if (std::string fail_info = fail_info_details(); !fail_info.empty())
         IGNORE_RETVAL(write(fd, fail_info.c_str(), fail_info.size()));
 }
 
-void TapFormatLogger::print_thread_header(int fd, int thread, int device, LogLevelVerbosity verbosity)
+void TapFormatLogger::print_thread_header(int fd, int device, LogLevelVerbosity verbosity)
 {
     maybe_print_yaml_marker(fd);
-    if (thread < 0) {
-        int slice = ~thread;
-        if (slice == 0)
+    if (device < 0) {
+        device = ~device;
+        if (device == 0)
             writeln(fd, "  Main thread:");
         else
-            dprintf(fd, "  Main thread %d:\n", slice);
+            dprintf(fd, "  Main thread %d:", device);
         return;
     }
 
-    const cpu_info_t *info = device_info + device;
-    std::string line = stdprintf("  Thread %d on CPU %d (pkg %d, core %d, thr %d, numa %d, module %d",
-            thread, info->cpu_number, info->package_id, info->core_id,
-            info->thread_id, info->numa_id, info->module_id);
+    cpu_info_t *info = device_info + device;
+    std::string line = stdprintf("  Thread %d on CPU %d (pkg %d, core %d, thr %d", device,
+            info->cpu_number, info->package_id, info->core_id, info->thread_id);
     if (const char *type = native_device_type(info))
         line += stdprintf(", core_type: %s", type);
 
@@ -317,7 +320,7 @@ void TapFormatLogger::print_thread_header(int fd, int thread, int device, LogLev
     writeln(fd, line);
 
     if (verbosity > 1) {
-        PerThreadData::Test *thr = sApp->test_thread_data(thread);
+        PerThreadData::Test *thr = sApp->test_thread_data(device);
         if (std::string time = format_duration(thr->fail_time); time.size())
             writeln(fd, "  - failed: { time: ", time,
                     ", loop-count: ", std::to_string(thr->inner_loop_count_at_fail),
@@ -329,30 +332,25 @@ void TapFormatLogger::print_thread_header(int fd, int thread, int device, LogLev
 
 void TapFormatLogger::print_thread_messages()
 {
-    auto doprint = [this](PerThreadData::Common *data, int thread, int device=-1) {
+    auto doprint = [this](PerThreadData::Common *data, int i) {
         LogMessagesFile r = maybe_mmap_log(data);
-        bool want_print = data->has_failed() || sApp->shmem->cfg.verbosity >= 3;
 
         if (r.empty() && !data->has_failed() && sApp->shmem->cfg.verbosity < 3)
             return;             /* nothing to be printed, on any level */
 
-        print_thread_header(file_log_fd, thread, device, LogLevelVerbosity::Max);
+        print_thread_header(file_log_fd, i, LogLevelVerbosity::Max);
         LogLevelVerbosity lowest_level =
                 print_one_thread_messages_tdata(file_log_fd, data, r, LogLevelVerbosity::Max);
 
-        if (file_log_fd != real_stdout_fd) {
-            // print to stdout
-            bool has_messages = lowest_level <= sApp->shmem->cfg.verbosity;
-            if (want_print || has_messages)
-                print_thread_header(real_stdout_fd, thread, device, sApp->shmem->cfg.verbosity);
-            if (has_messages)
-                print_one_thread_messages_tdata(real_stdout_fd, data, r, sApp->shmem->cfg.verbosity);
+        if (lowest_level <= sApp->shmem->cfg.verbosity && file_log_fd != real_stdout_fd) {
+            print_thread_header(real_stdout_fd, i, sApp->shmem->cfg.verbosity);
+            print_one_thread_messages_tdata(real_stdout_fd, data, r, sApp->shmem->cfg.verbosity);
         }
 
         munmap_and_truncate_log(data, r);
     };
     for_each_main_thread(doprint, slices.size());
-    for_each_test_thread(doprint, slices.size());
+    for_each_test_thread(doprint);
 }
 
 void TapFormatLogger::print_child_stderr()
@@ -373,7 +371,7 @@ auto thread_core_spacing()
         struct { int logical, core; } result = { 1, 1 };
         int max_core_id = 0;
         int max_logical_id = 0;
-        for (int i = 0; i < device_count(); ++i) {
+        for (int i = 0; i < thread_count(); ++i) {
             if (device_info[i].cpu_number > max_logical_id)
                 max_logical_id = device_info[i].cpu_number;
             if (device_info[i].core_id > max_core_id)
@@ -395,73 +393,43 @@ auto thread_core_spacing()
 }
 } // end unnamed namespace
 
-static std::string full_cpu_info(LogicalProcessor lp, LogLevelVerbosity verbosity, const cpu_info_t *info)
+std::string AbstractLogger::thread_id_header_for_device(int thread, LogLevelVerbosity verbosity)
 {
-    assert(lp != LogicalProcessor::None);
+    cpu_info_t *info = device_info + thread;
     std::string line;
 #ifdef _WIN32
-    line = stdprintf("{ logical-group: %2u, logical: %2u",
+    line = stdprintf("{ logical-group: %2u, logical: %2u, ",
                      // see win32/cpu_affinity.cpp
-                     unsigned(lp) / 64u, unsigned(lp) % 64u);
+                     info->cpu_number / 64u, info->cpu_number % 64u);
 #else
-    line = stdprintf("{ logical: %*d", thread_core_spacing().logical, std::to_underlying(lp));
+    line = stdprintf("{ logical: %*d, ", thread_core_spacing().logical, info->cpu_number);
 #endif
-
-    if (info) {
-        line += stdprintf(", package: %d, numa_node: %d, ", info->package_id, info->numa_id);
-        if (info->die_id >= 0)
-            line += stdprintf("die: %d, ", info->die_id);
-        line += stdprintf("module: %*d, core: %*d, thread: %d",
-                          thread_core_spacing().core, info->module_id,
-                          thread_core_spacing().core, info->core_id, info->thread_id);
-        if (const char *type = native_device_type(info))
-            line += stdprintf(", core_type: %s", type);
-        if (verbosity > 1) {
-            auto add_value_or_null = [&line](const char *fmt, uint64_t value) {
-                if (value)
-                    line += stdprintf(fmt, value);
-                else
-                    line += "null";
-            };
-            const HardwareInfo::PackageInfo *pkg = sApp->hwinfo.find_package_id(info->package_id);
+    line += stdprintf("package: %d, numa_node: %d, module: %*d, core: %*d, thread: %d",
+                      info->package_id, info->numa_id, thread_core_spacing().core, info->module_id,
+                      thread_core_spacing().core, info->core_id, info->thread_id);
+    if (const char *type = native_device_type(info))
+        line += stdprintf(", core_type: %s", type);
+    if (verbosity > 1) {
+        auto add_value_or_null = [&line](const char *fmt, uint64_t value) {
+            if (value)
+                line += stdprintf(fmt, value);
+            else
+                line += "null";
+        };
+        const HardwareInfo::PackageInfo *pkg = sApp->hwinfo.find_package_id(info->package_id);
 #ifdef __x86_64__
-            line += stdprintf(", family: %d, model: %#02x, stepping: %d, microcode: ",
-                              sApp->hwinfo.family, sApp->hwinfo.model, sApp->hwinfo.stepping);
-            add_value_or_null("%#" PRIx64, info->microcode);
-            line += ", ppin: ";
-            add_value_or_null("\"%016" PRIx64 "\"", pkg ? pkg->ppin : 0);   // string to prevent loss of precision
+        line += stdprintf(", family: %d, model: %#02x, stepping: %d, microcode: ",
+                          sApp->hwinfo.family, sApp->hwinfo.model, sApp->hwinfo.stepping);
+        add_value_or_null("%#" PRIx64, info->microcode);
+        line += ", ppin: ";
+        add_value_or_null("\"%016" PRIx64 "\"", pkg ? pkg->ppin : 0);   // string to prevent loss of precision
 #else
-            (void) pkg;
-            (void) add_value_or_null;
+        (void) pkg;
+        (void) add_value_or_null;
 #endif
-        }
     }
     line += " }";
     return line;
-}
-
-std::string AbstractLogger::thread_id_header_for_device(int thread, LogLevelVerbosity verbosity)
-{
-    const cpu_info_t *info = device_info + thread;
-    return full_cpu_info(LogicalProcessor(info->cpu_number), verbosity, info);
-}
-
-std::string AbstractLogger::thread_id_header_for_cpu(LogicalProcessor lp, int device, LogLevelVerbosity verbosity)
-{
-    cpu_info_t *info = nullptr;
-
-    // is this the correct info?
-    if (cpu_info[device].cpu_number == int(lp)) {
-        info = cpu_info + device;
-    } else {
-        // see if we can find the full information about this CPU
-        for (int i = 0; !info && i < device_count(); ++i) {
-            if (cpu_info[i].cpu_number == int(lp))
-                info = cpu_info + i;
-        }
-    }
-
-    return full_cpu_info(lp, verbosity, info);
 }
 
 void AbstractLogger::print_thread_header_for_device(int fd, PerThreadData::Test *thr)
@@ -487,70 +455,4 @@ void AbstractLogger::print_fixed_for_device()
         logging_printf(LOG_LEVEL_VERBOSE(1), "  avg-freq-mhz: %.1f\n", freq_avg);
 }
 
-void AbstractLogger::device_print_extra_info()
-{
-    constexpr int cache_levels = sizeof(cpu_info_t::cache) / sizeof(cpu_info_t::cache[0]);
-    std::span<const cpu_info_t> infos(device_info, sApp->device_count);
-
-    struct InstanceInfo {
-        int cache_instruction = -1;
-        int cache_data = -1;
-        // assumption: the instances are stored contiguously
-        int starting_cpu = INT_MAX;
-        int count = 0;
-        bool is_unified = false;
-    };
-
-    logging_printf(LOG_LEVEL_VERBOSE(1), "cache-info:\n");
-
-    for (int level = 0; level < cache_levels; ++level) {
-        // Group the logical processors by which physical cache instance they
-        // share at this level, so we can count the instances and their sizes.
-        std::map<int, InstanceInfo> instances;
-        for (const cpu_info_t &info : infos) {
-            const cache_info_t &c = info.cache[level];
-            if (c.cache_instruction < 0 && c.cache_data < 0)
-                continue;
-            InstanceInfo &inst = instances[c.id];
-            inst.cache_instruction = c.cache_instruction;
-            inst.cache_data = c.cache_data;
-            inst.is_unified = c.is_unified;
-            inst.starting_cpu = std::min(inst.starting_cpu, info.cpu_number);
-            ++inst.count;
-        }
-        if (instances.empty())
-            continue;
-
-        const InstanceInfo &rep = instances.begin()->second;
-        logging_printf(LOG_LEVEL_VERBOSE(1), "  L%d:\n", level + 1);
-        if (rep.is_unified)
-            logging_printf(LOG_LEVEL_VERBOSE(1), "    size: { unified: %d }\n", rep.cache_data);
-        else
-            logging_printf(LOG_LEVEL_VERBOSE(1), "    size: { instruction: %d, data: %d }\n",
-                           rep.cache_instruction, rep.cache_data);
-
-        if (level == cache_levels - 1) {
-            logging_printf(LOG_LEVEL_VERBOSE(1), "    breakdown:\n");
-            for (const auto &[id, inst] : instances) {
-                int size = inst.is_unified ? inst.cache_data
-                        : std::max(inst.cache_instruction, 0) + std::max(inst.cache_data, 0);
-                logging_printf(LOG_LEVEL_VERBOSE(1),
-                               "    - { size: %d, starting_cpu: %d, count: %d }\n",
-                               size, inst.starting_cpu, inst.count);
-            }
-        } else {
-            // unnecessary information (for now)
-            // logging_printf(LOG_LEVEL_VERBOSE(1), "    instances: %zu\n", instances.size());
-        }
-    }
-}
-
 #endif // !SANDSTONE_NO_LOGGING
-
-void dump_device_state(std::string& out, int)
-{
-    // prepend only if there is anything to print
-    if (out.size()) {
-        out.insert(0, "Registers:\n");
-    }
-}

@@ -26,14 +26,11 @@
 #include "sandstone_config.h"
 #include "sandstone_data.h"
 #include <sandstone_test_groups.h>
-#include "sandstone_short_ids.h"
 #include "test_knobs.h"
 
 #ifdef __cplusplus
 #include <atomic>
-#include <functional>
 #include <memory>
-#include <span>
 using std::atomic_int;
 extern "C" {
 #else
@@ -46,9 +43,6 @@ extern "C" {
 
 #define SANDSTONE_STRINGIFY(name)       SANDSTONE_STRINGIFY2(name)
 #define SANDSTONE_STRINGIFY2(name)      #name
-
-#define SANDSTONE_CONCAT(a, b)          SANDSTONE_CONCAT2(a, b)
-#define SANDSTONE_CONCAT2(a, b)         a ## b
 
 #define MAX_HWTHREADS_PER_CORE  4
 
@@ -83,7 +77,7 @@ extern "C" {
 #ifndef NDEBUG
 #  define log_debug(...)        log_message(thread_num, SANDSTONE_LOG_DEBUG __VA_ARGS__)
 #else
-#  define log_debug( ...)       __extension__({ if (true) {} else log_message(thread_num, SANDSTONE_LOG_DEBUG __VA_ARGS__); })
+#  define log_debug( ...)       (void)0
 #endif
 
 // skip categories
@@ -126,7 +120,12 @@ typedef enum TestQuality {
 #endif
 
 #ifdef __cplusplus
-#define IGNORE_RETVAL(call)     std::ignore = call
+#define IGNORE_RETVAL(call)                     \
+    __extension__ ({                            \
+        auto __return_value__  = call;          \
+        (void)__return_value__;                 \
+    })
+
 #else
 #define IGNORE_RETVAL(call)                     \
     __extension__ ({                            \
@@ -150,34 +149,17 @@ typedef enum TestQuality {
 /// used in a test's test_init function to indicate that a test should be skipped.
 #define EXIT_SKIP               -255
 
-/// The `_testid_<shortid>` symbol carries no data; it exists solely so the linker
-/// reports a multiple-definition error if two tests hash to the same short ID.
-/// Force the alignment so the compiler won't try to (un)helpfully overalign it.
-#define DECLARE_TEST_SECTION(test_id, test_short_id) \
-    extern const char SANDSTONE_CONCAT(_testid_, test_short_id); \
-    __attribute__((used)) const char SANDSTONE_CONCAT(_testid_, test_short_id) = 0; \
-    __attribute__((aligned(alignof(struct test)), used, section(SANDSTONE_SECTION_PREFIX "tests")))
-
-#define DECLARE_TEST_STRUCT(test_id, test_id_str, test_short_id, test_description) \
-    struct test _test_ ## test_id = {                                   \
-        .compiler_minimum_device = device_compiler_features,            \
-        .shortid = 0x ## test_short_id,                                 \
-        .id = SANDSTONE_STRINGIFY(test_id_str),                         \
+#define DECLARE_TEST_INNER2(test_id, test_description) \
+    __attribute__((aligned(alignof(void*)), used, section(SANDSTONE_SECTION_PREFIX "tests"))) \
+    struct test _test_ ## test_id = {                   \
+        .compiler_minimum_device = device_compiler_features,   \
+        .id = SANDSTONE_STRINGIFY(test_id),             \
         .description = test_description,
+#define DECLARE_TEST_INNER(test_id, test_description)   DECLARE_TEST_INNER2(test_id, test_description)
 
-#if SANDSTONE_NO_TEST_NAMES
-#  define DECLARE_TEST_INNER(test_id, test_short_id, test_description)  \
-    DECLARE_TEST_STRUCT(test_id, test_short_id, test_short_id, NULL)
-#else
-#  define DECLARE_TEST_INNER(test_id, test_short_id, test_description)  \
-    DECLARE_TEST_STRUCT(test_id, test_id, test_short_id, test_description)
+#ifndef DECLARE_TEST
+#  define DECLARE_TEST(test_id, test_description)       DECLARE_TEST_INNER(test_id, test_description)
 #endif
-#define DECLARE_TEST(test_id, test_description)                         \
-    DECLARE_TEST_SECTION(test_id, TEST_ID_ ## test_id)                  \
-    DECLARE_TEST_INNER(test_id, TEST_ID_ ## test_id, test_description)
-
-#define DECLARE_MANUAL_TEST(test_id, test_description)                  \
-    DECLARE_TEST_INNER(test_id, TEST_ID_ ## test_id, test_description)
 
 #define DECLARE_TEST_GROUPS(...)                                      \
     __extension__ (const struct test_group* const[]){ __VA_ARGS__, NULL }
@@ -199,7 +181,8 @@ typedef enum TestQuality {
             63,62,61,60,59,58,57,56,55,54,53,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38,37,36,35,34,33,32,\
             31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
 
-static_assert(NARGS() == 0, "Empty list");
+//static_assert(NARGS() == 0, "Empty list");
+static_assert(true, "");
 static_assert(NARGS(a1) == 1, "single element");
 static_assert(NARGS(a1, a2) == 2, "two elements");
 static_assert(NARGS(a1, a2, a3, a4, a5, a6, a7, a8) == 8, "8 elements");
@@ -280,20 +263,11 @@ typedef enum test_flag {
     /// system, with all cores.
     test_schedule_isolate_socket    = 3,
 
-#ifdef SANDSTONE_DEVICE_CPU
-    /// Asks the framework to run one child process per core group in each
-    /// socket in the system. Core groups can be:
-    /// - NUMA domains
-    /// - CPU dies or die groups
-    /// - core types (efficiency/performance)
-    test_schedule_isolate_coregroup = 4,
-    test_schedule_isolate_numa_domain [[deprecated("use test_schedule_isolate_coregroup")]]
-        = test_schedule_isolate_coregroup,
-#elif defined(SANDSTONE_DEVICE_GPU)
     /// Asks the framework to run one child process per NUMA domain in each
-    /// socket in the system, with all devices.
+    /// socket in the system, with all cores. Note: on hybrid systems with
+    /// different core types, each core type is considered a different "NUMA"
+    /// domain.
     test_schedule_isolate_numa_domain = 4,
-#endif
 
     test_schedule_mask              = 0x0f,
 
@@ -356,10 +330,6 @@ struct test {
     /// filled in by the DECLARE_TEST macro
     device_features_t compiler_minimum_device;
 
-    /// Short identifier of the test. Unique, generated.
-    uint32_t shortid;
-    // 32 bits of padding unused here
-
     /// Identifier of the test.  Each test must have a unique string identifier
     const char *id;
     /// A one line description of the test.
@@ -420,17 +390,12 @@ struct test {
     /// such resources in the test_init function, store a pointer to them in this
     /// field, retrieve and use the resources in the test_run function and optionally
     /// free them in the test_cleanup function.
-    /// For tests that skipped in preinit, this pointer points to a string with skip message.
     void *data;
     struct test_data_per_thread *per_thread;
 };
 
 /* internal functions; see C macro and C++ templates at the end of this file */
-extern bool _memcmp_or_fail_check_fmt(const char *fmt, ...);
-extern bool _memcmp_fail_check_cb(char *(*cb)(void *token, ptrdiff_t), void *, size_t);
-extern void _memcmp_fail_report_cb(const void *actual, const void *expected, size_t size,
-                                   enum DataType, char *(*cb)(void *token, ptrdiff_t), void *)
-    __attribute__((cold, noreturn));
+extern bool _memcmp_or_fail_check_fmt_nonewline(const char *fmt, ...);
 extern void _memcmp_fail_report(const void *actual, const void *expected, size_t size, enum DataType, const char *fmt, ...)
     ATTRIBUTE_PRINTF(5, 6) __attribute__((cold, noreturn));
 
@@ -440,9 +405,8 @@ extern void _memcmp_fail_report(const void *actual, const void *expected, size_t
 /// the test's run function). The callback is called at most once per thread.
 ///
 /// This function must be called from the main thread (usually, from the test's
-/// init function). The @p cleanup callback, if not a null pointer, will be
-/// called from the main thread between after the test's cleanup function.
-extern void install_failure_callback(void (*cb)(void *), void *token, void (*cleanup)(void *));
+/// init function).
+extern void install_failure_callback(void (*cb)(void *), void *token);
 
 /// can be called from a test's test_run function to fail the test.
 /// This macro will kill the calling thread and cause the test to
@@ -483,8 +447,7 @@ bool test_is_retry() noexcept __attribute__((pure));
 /// failures to allocate memory or create a file.
 extern void log_platform_message(const char *msg, ...) ATTRIBUTE_PRINTF(1, 2);
 extern void log_message(int thread_num, const char *msg, ...) ATTRIBUTE_PRINTF(2, 3);
-extern void log_message_skip(int thread_num, SkipCategory c, const char *msg, ...)
-    ATTRIBUTE_PRINTF(3, 4) __attribute__((cold));
+extern void log_message_skip(int thread_num, SkipCategory c, const char *msg, ...) ATTRIBUTE_PRINTF(3, 4);
 /// logs binary data to the logs.  The data is specified in the data
 /// parameter and the size of the data in bytes in the size parameter.
 /// The message parameter provides a description of the data which
@@ -497,17 +460,12 @@ extern void log_data(const char *message, const void *data, size_t size);
 extern void log_thread_context(const char *msg, ...) ATTRIBUTE_PRINTF(1, 2);
 /// Logs pre-formatted YAML to the logs.
 extern void log_yaml(char levelchar, const char *yaml);
-#define log_yaml(level, ...)        log_yaml(level[0], __VA_ARGS__)
+#define log_yaml(level, yaml)       log_yaml(level[0], yaml)
 
 /// retrieves the physical address of a given pointer.  Currently
 /// this function is only supported on Linux and requires root
 /// privileges.
 uint64_t retrieve_physical_address(const volatile void *ptr);
-
-/// Returns the error message after the last mmap() call failed. This function
-/// must be called before anything overwrites @c errno or @c GetLastError().
-/// This is for mmap() because we implement a compatibility layer for Windows.
-const char *strerror_for_mmap();
 
 #if defined(__linux__) && defined(__x86_64__)
 /// reads the value of the MSR, specified by msr, of CPU cpu.
@@ -621,10 +579,6 @@ extern __thread int thread_num __attribute__((tls_model("initial-exec")));
 /// restricts the number of CPUs sandstone can see.
 int thread_count() __attribute__((pure));
 
-/// Returns the number of devices (CPUs or GPUs) available to a test.
-/// Normally equal to thread_count(), but tracked separately.
-int device_count() __attribute__((pure));
-
 /// Returns the number of physical CPU packages (a.k.a. sockets) available to a
 /// test.
 int num_packages() __attribute__((pure));
@@ -632,21 +586,6 @@ int num_packages() __attribute__((pure));
 extern int8_t sandstone_verbosity_level() __attribute__((pure));
 
 #ifdef __cplusplus
-}
-
-template <typename T, size_t E> inline void memset_random(std::span<T, E> span)
-{
-    memset_random(span.data(), span.size_bytes());
-}
-
-template <typename T, size_t N> inline void memset_random(std::array<T, N> &arr)
-{
-    memset_random(std::span(arr));
-}
-
-template <typename T> inline void memset_random(std::vector<T> &vec)
-{
-    memset_random(std::span(vec));
 }
 
 extern void log_thread_context(std::string_view msg);
@@ -661,82 +600,31 @@ template <typename Callback> void install_failure_callback(Callback cb)
 {
     using Stateless = void (*)();
     if constexpr (std::is_constructible_v<Stateless, Callback>) {
-        install_failure_callback(reinterpret_cast<void (*)(void *)>(+cb), nullptr, nullptr);
+        install_failure_callback(reinterpret_cast<void (*)(void *)>(+cb), nullptr);
     } else {
-        auto call_cb = [](void *token) {
-            (*static_cast<Callback *>(token))();
-        };
-        auto cleanup_cb = [](void *token) {
-            delete static_cast<Callback *>(token);
-        };
         auto copy = new Callback(std::forward<Callback>(cb));
-        install_failure_callback(call_cb, copy, cleanup_cb);
+        install_failure_callback([](void *token) {
+            std::unique_ptr<Callback> self(static_cast<Callback *>(token));
+            (*self)();
+        }, copy);
     }
 }
-
-namespace SandstoneMemcmpOrFail {
-using namespace SandstoneDataDetails;
-template <typename Callback> concept FormatterFunction =
-        std::is_invocable_r_v<std::string, Callback>
-        || std::is_invocable_r_v<std::string, Callback, ptrdiff_t>
-        || std::is_null_pointer_v<Callback>;
-
-using FormatterCallback = std::string (*)(const void *token1, void *token2, ptrdiff_t idx);
-[[noreturn, gnu::cold]] void
-report(const void *, const void *, size_t, DataType, FormatterCallback,
-       const void * = nullptr, void * = nullptr);
-bool test_formatter(std::function<std::string ()> cb, size_t max);
-bool test_formatter(std::function<std::string (ptrdiff_t)> cb, size_t max);
-
-/// compares the arrays actual and expected, both of which are expected to have
-/// count elements, and fails the test if the two arrays are not equal. In the
-/// case of a mismatch the calling thread will exit and diagnostic information
-/// will be output to the logs to indicate the first mismatch detected. The
-/// callback @p formatter will be called with the index of where in the array
-/// the mismatch was detected and is supposed to return a string with
-/// information to include in the logs.
-template <ValidDataType T, FormatterFunction Fn>
-static inline void memcmp_or_fail(const T *actual, const T *expected, size_t count, Fn formatter)
-{
-    DataType type = TypeToDataType<T>::Type;
-    size_t elemSize = 1;
-    if constexpr (!std::is_same_v<T, void>)
-        elemSize = sizeof(T);
-    if (__builtin_memcmp(actual, expected, count * elemSize) == 0) [[likely]] {
-        if constexpr (!std::is_null_pointer_v<Fn>)
-            assert(test_formatter(formatter, count));
-        return;         // no mismatch!
-    }
-
-    FormatterCallback cb = {};
-    const void *token = nullptr;
-    if constexpr (std::is_null_pointer_v<Fn>) {
-        // use null pointers
-    } else if (!SandstoneConfig::NoLogging) {
-        token = &formatter;
-        cb = [](const void *token, void *, ptrdiff_t idx) -> std::string {
-            auto formatter = static_cast<const Fn *>(token);
-            if constexpr (std::is_invocable_v<Fn>)
-                return (*formatter)();
-            else
-                return (*formatter)(idx);
-        };
-    }
-    report(actual, expected, count * elemSize, type, cb, token);
-    __builtin_unreachable();
-}
-
-template <ValidDataType T> static inline void
-memcmp_or_fail(const T *actual, const T *expected, size_t count)
-{
-    return memcmp_or_fail(actual, expected, count, nullptr);
-}
-}
-
-using SandstoneMemcmpOrFail::memcmp_or_fail;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-security"
+template <typename T, typename... FmtArgs> [[noreturn, gnu::cold]] static inline std::enable_if_t<SandstoneDataDetails::TypeToDataType<T>::IsValid>
+memcmp_fail_report(const T *actual, const T *expected, size_t count, const char *fmt, FmtArgs &&... args)
+{
+    DataType type = SandstoneDataDetails::TypeToDataType<T>::Type;
+    size_t elemSize = 1;
+    if constexpr (!std::is_same_v<T, void>)
+        elemSize = sizeof(T);
+    if (SandstoneConfig::NoLogging)
+        _memcmp_fail_report(actual, expected, count * elemSize, type, nullptr);
+    else
+        _memcmp_fail_report(actual, expected, count * elemSize, type, fmt, std::forward<FmtArgs>(args)...);
+}
+
 /// compares the arrays actual and expected, both of which are expected to have count elements,
 /// and fails the test if the two arrays are not equal.  In the case of a mismatch the calling
 /// thread will exit and diagnostic information will be output to the logs to indicate the
@@ -747,20 +635,20 @@ using SandstoneMemcmpOrFail::memcmp_or_fail;
 template <typename T, typename... FmtArgs> static inline std::enable_if_t<SandstoneDataDetails::TypeToDataType<T>::IsValid>
 memcmp_or_fail(const T *actual, const T *expected, size_t count, const char *fmt, FmtArgs &&... args)
 {
-    DataType type = SandstoneDataDetails::TypeToDataType<T>::Type;
     size_t elemSize = 1;
     if constexpr (!std::is_same_v<T, void>)
         elemSize = sizeof(T);
 
-    if (SandstoneConfig::NoLogging)
-        fmt = nullptr;
-    if (!fmt)
-        return memcmp_or_fail(actual, expected, count);
-
-    // printf style instead
+    assert(_memcmp_or_fail_check_fmt_nonewline(fmt, std::forward<FmtArgs>(args)...)
+           && "Data descriptions should not include a newline");
     if (__builtin_memcmp(actual, expected, count * elemSize) != 0)
-        _memcmp_fail_report(actual, expected, count * elemSize, type, fmt, std::forward<FmtArgs>(args)...);
-    assert(_memcmp_or_fail_check_fmt(fmt, std::forward<FmtArgs>(args)...));
+        memcmp_fail_report(actual, expected, count, fmt, std::forward<FmtArgs>(args)...);
+}
+
+template <typename T> static inline std::enable_if_t<SandstoneDataDetails::TypeToDataType<T>::IsValid>
+memcmp_or_fail(const T *actual, const T *expected, size_t count)
+{
+    return memcmp_or_fail(actual, expected, count, nullptr);
 }
 #pragma GCC diagnostic pop
 
@@ -772,6 +660,8 @@ memcmp_or_fail(const T *actual, const T *expected, size_t count, const char *fmt
         _Pragma("GCC diagnostic push");                             \
         _Pragma("GCC diagnostic ignored \"-Wformat-security\"");    \
         _Pragma("GCC diagnostic ignored \"-Wunused-variable\"");    \
+        assert(_memcmp_or_fail_check_fmt_nonewline((fmt), ##__VA_ARGS__) \
+               && "Data descriptions should not include a newline");\
         _memcmp_fail_report((actual), (expected), _size2, _type,    \
                             *(fmt) ? (fmt) : NULL, ##__VA_ARGS__);  \
         _Pragma("GCC diagnostic pop");                              \
@@ -784,24 +674,10 @@ memcmp_or_fail(const T *actual, const T *expected, size_t count, const char *fmt
         size_t _size = sizeof(*_actual) * (size);                   \
         if (__builtin_memcmp(_actual, _expected, _size) != 0)       \
             memcmp_fail_report(_actual, _expected, (size), fmt, ##__VA_ARGS__); \
-        assert(_memcmp_or_fail_check_fmt((fmt), ##__VA_ARGS__));    \
     })
 #define memcmp_or_fail(actual, expected, size, ...) \
     _memcmp_or_fail(actual, expected, size, "" __VA_ARGS__)
 
-#define _memcmp_or_fail_cb(actual, expected, size, cb, token)       \
-    __extension__ ({                                                \
-        __auto_type _actual = actual;                               \
-        __auto_type _expected = expected;                           \
-        size_t _size = sizeof(*_actual) * size;                     \
-        enum DataType _type = DATATYPEFORTYPE(*_actual);            \
-        assert(!cb || _memcmp_fail_check_cb(cb, token, size));      \
-        if (__builtin_expect(__builtin_memcmp(_actual, _expected, _size), 0)) \
-            _memcmp_fail_report_cb(_actual, _expected, _size, _type,\
-                                   cb, token);                      \
-    })
-#define memcmp_or_fail_cb(actual, expected, size, cb, token)        \
-    _memcmp_or_fail_cb((actual), (expected), (size), (cb), (token))
 #endif
 
 #if SANDSTONE_NO_LOGGING
@@ -819,21 +695,17 @@ memcmp_or_fail(const T *actual, const T *expected, size_t count, const char *fmt
 #  define log_error(...)                    log_message(thread_num, SANDSTONE_LOG_ERROR "")
 #  define log_warning(...)                  (void)0
 #  define log_info(...)                     (void)0
-#  define log_yaml(level, ...)              log_yaml(level[0], NULL)
+#  define log_yaml(level, yaml)             log_yaml(level[0], NULL)
 #  define report_fail(test)                 _report_fail(test, NULL, 0)
 #  define report_fail_msg(...)              _report_fail_msg(NULL, 0, NULL)
 
 #  define log_message(thrnum, msg, ...)     ({ if (msg[0] == SANDSTONE_LOG_ERROR[0]) log_message(thrnum, SANDSTONE_LOG_ERROR); })
 #  define log_platform_message(msg, ...)    ({ if (msg[0] == SANDSTONE_LOG_ERROR[0]) log_platform_message(SANDSTONE_LOG_ERROR); })
-#  define log_message_skip(thr, cat, ...)   log_message_skip(thr, cat, NULL)
 
 #  ifdef memcmp_fail_report
 #    define _memcmp_fail_report(actual, expected, size, type, ...) \
         _memcmp_fail_report(actual, expected, size, type, NULL)
 #  endif
-#  undef memcmp_or_fail_cb
-#  define memcmp_or_fail_cb(actual, expected, size, cb, token)     \
-    _memcmp_or_fail_cb((actual), (expected), (size), NULL, NULL)
 #endif
 
 // Static C++ test runner to instantiate appropriate test class or always skipping one

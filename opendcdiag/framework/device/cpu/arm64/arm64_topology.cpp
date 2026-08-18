@@ -28,6 +28,11 @@
 
 namespace {
 
+static bool create_mock_topology(const char *)
+{
+    return false;
+}
+
 enum class TopologySource {
     ACPI_PPTT,
     Sysfs,
@@ -55,6 +60,7 @@ private:
     int detect_sysfs_cpu_count();
     bool read_sysfs_file(int dirfd, const char *filename, char *buf, size_t bufsize);
     bool read_sysfs_int(int dirfd, const char *filename, int *value);
+    bool read_sysfs_int64(int dirfd, const char *filename, int64_t *value);
 
     TopologySource detect_package_info();
     int detect_core_type_from_midr(uint64_t midr);
@@ -109,6 +115,21 @@ bool Arm64TopologyDetector::read_sysfs_int(int dirfd, const char *filename, int 
         return false;
 
     *value = static_cast<int>(val);
+    return true;
+}
+
+bool Arm64TopologyDetector::read_sysfs_int64(int dirfd, const char *filename, int64_t *value)
+{
+    char buf[64];
+    if (!read_sysfs_file(dirfd, filename, buf, sizeof(buf)))
+        return false;
+
+    char *endptr;
+    long long val = strtoll(buf, &endptr, 10);
+    if (endptr == buf || *endptr != '\0')
+        return false;
+
+    *value = static_cast<int64_t>(val);
     return true;
 }
 
@@ -220,62 +241,61 @@ bool Arm64TopologyDetector::parse_cpu_topology_sysfs(int cpu, Topology::Thread *
 
     bool success = true;
 
-    int value = -1;
-    if (read_sysfs_int(cpufd, "topology/physical_package_id", &value))
-        info->package_id = static_cast<decltype(info->package_id)>(value);
-    else
+    int package_id = info->package_id;
+    if (!read_sysfs_int(cpufd, "topology/physical_package_id", &package_id))
         success = false;
-
-    if (read_sysfs_int(cpufd, "topology/core_id", &value))
-        info->core_id = static_cast<decltype(info->core_id)>(value);
     else
-        success = false;
+        info->package_id = static_cast<decltype(info->package_id)>(package_id);
 
-    if (read_sysfs_int(cpufd, "topology/cluster_id", &value)) {
-        info->module_id = static_cast<decltype(info->module_id)>(value);
-    } else {
+    int core_id = info->core_id;
+    if (!read_sysfs_int(cpufd, "topology/core_id", &core_id))
+        success = false;
+    else
+        info->core_id = static_cast<decltype(info->core_id)>(core_id);
+
+    int module_id = info->module_id;
+    if (!read_sysfs_int(cpufd, "topology/cluster_id", &module_id)) {
         info->module_id = info->core_id;
+    } else {
+        info->module_id = static_cast<decltype(info->module_id)>(module_id);
     }
 
-    int thread_siblings = 0;
-    if (read_sysfs_int(cpufd, "topology/thread_siblings_list", &thread_siblings)) {
-        info->thread_id = 0;
-        char buf[256];
-        if (read_sysfs_file(cpufd, "topology/thread_siblings_list", buf, sizeof(buf))) {
-            const char *ptr = buf;
-            while (*ptr) {
-                char *endptr;
-                long val = strtol(ptr, &endptr, 10);
-                if (endptr == ptr)
-                    break;
-                if (static_cast<int>(val) == cpu) {
-                    break;
-                }
-                ++info->thread_id;
-                if (*endptr == ',')
-                    ptr = endptr + 1;
-                else if (*endptr == '-') {
-                    long end_val = strtol(endptr + 1, &endptr, 10);
-                    if (end_val > val) {
-                        info->thread_id += static_cast<int>(end_val - val);
-                        ptr = endptr;
-                    } else {
-                        break;
-                    }
+    info->thread_id = 0;
+    char buf[256];
+    if (read_sysfs_file(cpufd, "topology/thread_siblings_list", buf, sizeof(buf))) {
+        const char *ptr = buf;
+        while (*ptr) {
+            char *endptr;
+            long val = strtol(ptr, &endptr, 10);
+            if (endptr == ptr)
+                break;
+            if (static_cast<int>(val) == cpu) {
+                break;
+            }
+            ++info->thread_id;
+            if (*endptr == ',')
+                ptr = endptr + 1;
+            else if (*endptr == '-') {
+                long end_val = strtol(endptr + 1, &endptr, 10);
+                if (end_val > val) {
+                    info->thread_id += static_cast<int>(end_val - val);
+                    ptr = endptr;
                 } else {
                     break;
                 }
+            } else {
+                break;
             }
         }
     } else {
         info->thread_id = 0;
     }
 
-    char buf[64];
-    if (read_sysfs_file(cpufd, "regs/identification/midr_el1", buf, sizeof(buf))) {
+    char midr_buf[64];
+    if (read_sysfs_file(cpufd, "regs/identification/midr_el1", midr_buf, sizeof(midr_buf))) {
         char *endptr;
-        uint64_t midr = strtoull(buf, &endptr, 16);
-        if (endptr != buf) {
+        uint64_t midr = strtoull(midr_buf, &endptr, 16);
+        if (endptr != midr_buf) {
             info->native_core_type = static_cast<NativeCoreType>(detect_core_type_from_midr(midr));
         }
     }
@@ -501,7 +521,7 @@ void Arm64TopologyDetector::detect(const LogicalProcessorSet &enabled_cpus)
     for (int i = 0; i < sApp->thread_count; ++i) {
         device_info[i].package_id = -1;
         device_info[i].numa_id = -1;
-        device_info[i].die_id = -1;
+        device_info[i].tile_id = -1;
         device_info[i].module_id = -1;
         device_info[i].core_id = -1;
         device_info[i].thread_id = -1;
@@ -521,11 +541,12 @@ void Arm64TopologyDetector::detect(const LogicalProcessorSet &enabled_cpus)
     }
     assert(i == sApp->thread_count);
 
-    // Note: the x86 topology path honors SANDSTONE_MOCK_TOPOLOGY via
-    // TopologyDetector::create_mock_topology(), which is a private member of
-    // the TopologyDetector class in framework/device/cpu/topology.cpp. That
-    // member is not accessible from Arm64TopologyDetector, so the mock
-    // override is not supported on the aarch64 topology path.
+    if (SandstoneConfig::Debug) {
+        if (char *mock_topo = getenv("SANDSTONE_MOCK_TOPOLOGY")) {
+            if (create_mock_topology(mock_topo))
+                return;
+        }
+    }
 
     bool detected = detect_via_acpi_pptt();
     if (!detected) {

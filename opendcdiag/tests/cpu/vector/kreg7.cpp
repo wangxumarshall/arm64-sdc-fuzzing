@@ -56,16 +56,15 @@ static uint8_t sw_movepi64_mask(const uint64_t *data) {
     return mask;
 }
 
-// -------------------- ARM NEON 硬件掩码提取（store-to-array，lane index 无需为常量） --------------------
+// -------------------- ARM NEON 硬件掩码提取（使用 vgetq_lane 逐位提取，避免类型转换问题） --------------------
 static uint64_t neon_movepi8_mask(const uint8_t *data) {
     uint64_t mask = 0;
     // 一次处理 16 个字节，共 4 组
     for (int block = 0; block < 4; ++block) {
         uint8x16_t vec = vld1q_u8(data + block * 16);
-        uint8_t tmp[16];
-        vst1q_u8(tmp, vec);
         for (int i = 0; i < 16; ++i) {
-            if (tmp[i] & 0x80) {
+            uint8_t val = vgetq_lane_u8(vec, i);
+            if (val & 0x80) {
                 mask |= (1ULL << (block * 16 + i));
             }
         }
@@ -78,10 +77,9 @@ static uint32_t neon_movepi16_mask(const uint16_t *data) {
     // 一次处理 8 个 16-bit 元素，共 4 组
     for (int block = 0; block < 4; ++block) {
         uint16x8_t vec = vld1q_u16(data + block * 8);
-        uint16_t tmp[8];
-        vst1q_u16(tmp, vec);
         for (int i = 0; i < 8; ++i) {
-            if (tmp[i] & 0x8000) {
+            uint16_t val = vgetq_lane_u16(vec, i);
+            if (val & 0x8000) {
                 mask |= (1U << (block * 8 + i));
             }
         }
@@ -94,10 +92,9 @@ static uint16_t neon_movepi32_mask(const uint32_t *data) {
     // 一次处理 4 个 32-bit 元素，共 4 组
     for (int block = 0; block < 4; ++block) {
         uint32x4_t vec = vld1q_u32(data + block * 4);
-        uint32_t tmp[4];
-        vst1q_u32(tmp, vec);
         for (int i = 0; i < 4; ++i) {
-            if (tmp[i] & 0x80000000) {
+            uint32_t val = vgetq_lane_u32(vec, i);
+            if (val & 0x80000000) {
                 mask |= (1U << (block * 4 + i));
             }
         }
@@ -110,10 +107,9 @@ static uint8_t neon_movepi64_mask(const uint64_t *data) {
     // 一次处理 2 个 64-bit 元素，共 4 组
     for (int block = 0; block < 4; ++block) {
         uint64x2_t vec = vld1q_u64(data + block * 2);
-        uint64_t tmp[2];
-        vst1q_u64(tmp, vec);
         for (int i = 0; i < 2; ++i) {
-            if (tmp[i] & 0x8000000000000000ULL) {
+            uint64_t val = vgetq_lane_u64(vec, i);
+            if (val & 0x8000000000000000ULL) {
                 mask |= (1U << (block * 2 + i));
             }
         }

@@ -18,7 +18,7 @@ released under different licenses.  See
 
 #### Ubuntu
 
-OpenDCDiag has been built and tested on Ubuntu, starting with 21.04 and 21.10.
+OpenDCDiag has been built and tested on Ubuntu 21.04 and 21.10.
 Before building, the following prerequisites must be installed.
 
 ```console
@@ -27,7 +27,7 @@ sudo apt-get install gcc g++ cmake libeigen3-dev libboost-all-dev libzstd-dev zl
 
 #### Fedora
 
-OpenDCDiag has been built and tested on Fedora, starting with 33 and 34.
+OpenDCDiag has been built and tested on Fedora 33 and 34.
 Before building, the following prerequisites must be installed.
 
 ```console
@@ -37,112 +37,13 @@ sudo dnf install -y boost-devel eigen3-devel gcc gcc-c++ git gtest-devel meson z
 ### Building
 
 OpenDCDiag is built with the [Meson Build
-System](https://mesonbuild.com/) and the [Ninja](https://ninja-build.org/)
-backend. Meson >= 1.3 and a C++23-capable compiler (GCC >= 12) are required.
-
-#### Prerequisites recap
-
-The packages listed under the platform sections above are sufficient, but note
-two specifics that commonly trip up fresh checkouts:
-
-- **Eigen**: OpenDCDiag depends on **Eigen >= 5.0**. Most distros still ship
-  Eigen 3.x (e.g. `libeigen3-dev`/`eigen3-devel` provides 3.3.x). When the
-  system Eigen is too old, the build falls back to the **bundled Eigen 5.0.1
-  source tree under `third-part/`** (see `tests/cpu/meson.build`). That tree is
-  **committed to the repo** (vendored), so a fresh clone already has it — no
-  submodule fetch or extra step is required.
-
-#### Bundled Eigen source (third-part/)
-
-The Eigen 5.0.1 source is vendored under `third-part/` as ordinary committed
-files (it was previously a git submodule, which required a separate
-`git submodule update --init` step that often broke fresh checkouts — that is
-no longer needed). `tests/cpu/meson.build` prefers a system `eigen3 >= 5.0`
-when present and otherwise uses the bundled tree; if `meson setup` prints
-`Using bundled Eigen 5.0 source from third-part/`, the vendored tree is in
-use.
-
-#### Native build (x86_64 or ARM64)
+System](https://mesonbuild.com/). For example, a release build can be
+easily created as follows.
 
 ```console
-meson setup builddir --buildtype=release
+meson builddir --buildtype=release
 ninja -C builddir
 ```
-
-On AArch64 hosts, Meson auto-applies `-march=armv8.1-a -mtune=generic`
-(see `meson.build`), matching e.g. the Kunpeng 920 (ARMv8.1-A). No extra flags
-are needed.
-
-#### Cross-compile for ARM64 from x86
-
-```console
-sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu   # Ubuntu
-meson setup builddir --cross-file meson-cross-arm64.ini --buildtype=release
-ninja -C builddir
-```
-
-#### Verify the build
-
-```console
-./builddir/opendcdiag --version
-./builddir/opendcdiag --list
-```
-
-A clean release build compiles all targets with no errors. A handful of
-warnings are expected and harmless on ARM64:
-`sysv_abi attribute ignored` (x86-only calling convention in
-`framework/sandstone.cpp`), `[[assume(...)]] attribute ignored` (GCC 12
-limitation), and any remaining `-Wunused` notes in
-`framework/device/cpu/arm64/`.
-
-#### Full-load, continuous run
-
-The `-T forever` option loops indefinitely; `-n <N>` runs with N threads for
-full load (`0` is clamped to 1, so pass the explicit CPU count, e.g.
-`-n $(nproc)`); `--ignore-os-error --ignore-timeout` keep it running past
-errors. See `framework/sandstone_opts.cpp` for the full option set.
-
-```console
-./builddir/opendcdiag -T forever -n $(nproc) --ignore-os-error --ignore-timeout -o builddir/run.log -q
-```
-
-### Building for GPU
-
-OpenDCDiag can also be built for other device types by specifying the
-`device_type` build option. Currently supported device types are: `cpu`, `gpu`.
-
-OpenDCDiag uses the [oneAPI Level Zero](https://github.com/oneapi-src/level-zero)
-interface to interact with the GPU devices. A library implementing the Level Zero
-API is required to create OpenDCDiag executable with GPU support.
-
-For example, to install Level Zero loader libraries on Ubuntu, use:
-
-```console
-sudo apt-get install libze1 libze-dev intel-ocloc libigdfcl2 libigc2
-```
-
-On Fedora:
-
-```console
-sudo dnf install -y oneapi-level-zero intel-level-zero intel-level-zero-devel intel-ocloc
-```
-
-With the prerequisites installed, OpenDCDiag for GPU devices can be created
-using commands as follows.
-
-```console
-meson setup builddir --buildtype=release -Ddevice_type=gpu
-ninja -C builddir
-```
-
-The GPU binary uses OpenCL Offline Compiler (also known as `ocloc`) to compile
-and embed compute kernels for specific devices into the resulting OpenDCDiag
-binary. The `target_device` build option can be used to specify the devices that
-are to be supported by the created OpenDCDiag executable.
-
-Value specified in the `target_device` option is passed directly to the OpenCL
-Offline Compiler used to build the binary. Refer to the documentation of the
-offline compiler for the accepted values of the `target_device` option.
 
 ## Contributions
 

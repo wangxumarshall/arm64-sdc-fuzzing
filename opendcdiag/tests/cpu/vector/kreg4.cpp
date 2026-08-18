@@ -53,15 +53,12 @@ static int kreg4_run(struct test *test, int cpu) {
 
         // 提取每个 lane 的最低有效位（0 或 1）组合成 16 位掩码
         uint16_t hw_mask_m = 0;
-        // NEON lane accessors require a compile-time constant index.
         for (int i = 0; i < 4; ++i) {
-            uint32_t v0, v1, v2, v3;
-            switch (i) {
-                case 0: v0 = vgetq_lane_u32(m0, 0); v1 = vgetq_lane_u32(m1, 0); v2 = vgetq_lane_u32(m2, 0); v3 = vgetq_lane_u32(m3, 0); break;
-                case 1: v0 = vgetq_lane_u32(m0, 1); v1 = vgetq_lane_u32(m1, 1); v2 = vgetq_lane_u32(m2, 1); v3 = vgetq_lane_u32(m3, 1); break;
-                case 2: v0 = vgetq_lane_u32(m0, 2); v1 = vgetq_lane_u32(m1, 2); v2 = vgetq_lane_u32(m2, 2); v3 = vgetq_lane_u32(m3, 2); break;
-                default: v0 = vgetq_lane_u32(m0, 3); v1 = vgetq_lane_u32(m1, 3); v2 = vgetq_lane_u32(m2, 3); v3 = vgetq_lane_u32(m3, 3); break;
-            }
+            // 分别处理每组 4 个元素
+            uint32_t v0 = vgetq_lane_u32(m0, i);
+            uint32_t v1 = vgetq_lane_u32(m1, i);
+            uint32_t v2 = vgetq_lane_u32(m2, i);
+            uint32_t v3 = vgetq_lane_u32(m3, i);
             // 取最低位
             int bit0 = (v0 & 1) ? 1 : 0;
             int bit1 = (v1 & 1) ? 1 : 0;
@@ -86,13 +83,10 @@ static int kreg4_run(struct test *test, int cpu) {
         uint32x4_t nm3 = vceqzq_u32(and3);
         uint16_t hw_mask_nm = 0;
         for (int i = 0; i < 4; ++i) {
-            uint32_t v0, v1, v2, v3;
-            switch (i) {
-                case 0: v0 = vgetq_lane_u32(nm0, 0); v1 = vgetq_lane_u32(nm1, 0); v2 = vgetq_lane_u32(nm2, 0); v3 = vgetq_lane_u32(nm3, 0); break;
-                case 1: v0 = vgetq_lane_u32(nm0, 1); v1 = vgetq_lane_u32(nm1, 1); v2 = vgetq_lane_u32(nm2, 1); v3 = vgetq_lane_u32(nm3, 1); break;
-                case 2: v0 = vgetq_lane_u32(nm0, 2); v1 = vgetq_lane_u32(nm1, 2); v2 = vgetq_lane_u32(nm2, 2); v3 = vgetq_lane_u32(nm3, 2); break;
-                default: v0 = vgetq_lane_u32(nm0, 3); v1 = vgetq_lane_u32(nm1, 3); v2 = vgetq_lane_u32(nm2, 3); v3 = vgetq_lane_u32(nm3, 3); break;
-            }
+            uint32_t v0 = vgetq_lane_u32(nm0, i);
+            uint32_t v1 = vgetq_lane_u32(nm1, i);
+            uint32_t v2 = vgetq_lane_u32(nm2, i);
+            uint32_t v3 = vgetq_lane_u32(nm3, i);
             int bit0 = (v0 & 1) ? 1 : 0;
             int bit1 = (v1 & 1) ? 1 : 0;
             int bit2 = (v2 & 1) ? 1 : 0;

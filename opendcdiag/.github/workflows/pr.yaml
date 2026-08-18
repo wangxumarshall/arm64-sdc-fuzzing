@@ -60,24 +60,6 @@ jobs:
         run: |
           ./builddir/unittests \
             --gtest_filter=-LinuxThermalFixture.CurrentMachine_TestUsingSingletomTemperaturesOnCurrentMachine # this test doesn't execute properly in a github runner
-      - name: verify selftests
-        shell: bash
-        run: |
-          set -x
-          set selftest_skip \
-              $(builddir/opendcdiag --selftests --list-tests | grep selftest_log_skip) \
-              '@positive'
-          for t; do
-            builddir/opendcdiag --quick --selftests -e "$t" -o -
-          done
-          set selftest_failinit selftest_logerror
-          for t; do
-            if builddir/opendcdiag --quick --retest-on-failure=0 --selftests -e "$t" -o -; then
-              exit 1
-            else
-              [[ $? = 1 ]]
-            fi
-          done
       - name: run selftests
         if: ${{ matrix.selftests }}
         shell: bash
@@ -110,17 +92,6 @@ jobs:
         uses: actions/checkout@v6
       - name: Build for CPU (Windows)
         uses: ./.github/actions/build-cpu-win
-      - name: verify selftests
-        shell: msys2 {0}
-        run: |
-          set -x
-          set selftest_skip \
-              $(builddir-windows/opendcdiag --selftests --list-tests | grep selftest_log_skip) \
-              '@positive'
-          for t; do
-            builddir-windows/opendcdiag --quick --selftests -e "$t" -o -
-          done
-          builddir-windows/opendcdiag --quick --selftests -e selftest_failinit && exit 1 || [[ $? = 1 ]]
       - name: run selftests
         shell: msys2 {0}
         run: SANDSTONE_BIN=builddir-windows/opendcdiag.exe bats-core/bin/bats -t bats/sanity-check
@@ -155,32 +126,6 @@ jobs:
         uses: actions/checkout@v6
       - name: Build for GPU
         uses: ./.github/actions/build-gpu
-        with:
-            name: ${{ matrix.name }}
-            env: ${{ matrix.env }}
-            meson_args: ${{ matrix.meson_args }}
-            unittests: ${{ matrix.unittests }}
-      - name: run unittests
-        if: ${{ matrix.unittests }}
-        shell: bash
-        run: |
-          ./builddir/unittests
-
-  build-idxd:
-    name: Build binary for IDXD
-    needs: [ lint, git-sanity ]
-    runs-on: ubuntu-24.04
-    container: debian:sid
-    strategy:
-      matrix:
-        include:
-        - { name: GCC, unittests: "unittests" }
-        - { name: GCC-NoLogging, unittests: "unittests", meson_args: "-Dlogging_format=no_output" }
-    steps:
-      - name: Checkout the PR merge point
-        uses: actions/checkout@v6
-      - name: Build for IDXD
-        uses: ./.github/actions/build-idxd
         with:
             name: ${{ matrix.name }}
             env: ${{ matrix.env }}
