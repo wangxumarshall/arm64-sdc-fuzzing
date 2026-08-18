@@ -24,9 +24,28 @@
 #include <sandstone.h>
 
 #include <Eigen/Core>
+#include <cstdlib>
 using namespace Eigen;
 
-#define M_DIM 256
+// Matrix dimension. Historically hardcoded to 256. Now configurable via
+// the GEMM_K_DIM environment variable (default 256 = original baseline) so
+// the fault-propagation-vs-k-dimension hypothesis can be tested without
+// touching random-generation / tolerance / report logic. Nothing else
+// changes: Mat::Random seeding, memcmp_or_fail (byte-exact, no tolerance)
+// and report_fail behavior are untouched.
+static int gemm_k_dim() {
+    static int dim = -1;
+    if (dim < 0) {
+        int d = 256;
+        if (const char *env = getenv("GEMM_K_DIM")) {
+            int parsed = atoi(env);
+            if (parsed > 0) d = parsed;
+        }
+        dim = d;
+    }
+    return dim;
+}
+#define M_DIM gemm_k_dim()
 
 typedef Matrix < float, Dynamic, Dynamic > Mat;
 
