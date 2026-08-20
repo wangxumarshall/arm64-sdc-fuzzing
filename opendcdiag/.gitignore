@@ -2,6 +2,9 @@
 /opendcdiag-*.log
 /opendcdiag-*.yaml
 /total_log_output.yaml
+# self-contained distribution output (package-dist.sh artifacts)
+/opendcdiag-dist/
+/opendcdiag-dist.tar.gz
 # typical names for meson build directories
 /build*/
 # ctags
