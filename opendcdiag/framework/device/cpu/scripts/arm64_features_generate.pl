@@ -85,8 +85,18 @@ while (<$fh>) {
         @basefeatures = @{$architectures{$base}->{allfeatures}} if $base ne "<>";
 
         my @extrafeatures;
+        my $is_alias = 0;
         if (defined $feature_list && $feature_list ne "") {
-            @extrafeatures = grep { $_ ne "" } split /,/, $feature_list;
+            if ($feature_list eq "alias") {
+                # Pure alias: inherits base's full feature set, adds nothing.
+                # Generates the cpu_<id> #define so source referencing the
+                # symbol compiles, but is excluded from the runtime
+                # arm64_architectures[] array (see below) to avoid emitting
+                # non-ARM64 architecture names in "Detected CPU:" output.
+                $is_alias = 1;
+            } else {
+                @extrafeatures = grep { $_ ne "" } split /,/, $feature_list;
+            }
         }
 
         for my $feature_name (@extrafeatures) {
@@ -110,6 +120,7 @@ while (<$fh>) {
             features => \@extrafeatures,
             allfeatures => \@sortedfeatures,
             comment => $comment,
+            is_alias => $is_alias,
         };
         push @architecture_names, $arch
             unless grep { $_ eq $arch } @architecture_names;
@@ -242,6 +253,7 @@ static const struct Arm64Architecture arm64_architectures[] = {|;
 my %seen_arch_signatures;
 for my $arch_name (reverse @architecture_names) {
     my $arch = $architectures{$arch_name};
+    next if $arch->{is_alias};   # alias-only: #define emitted, but not in runtime array
     my $signature = join(',', @{$arch->{allfeatures}});
     next if exists $seen_arch_signatures{$signature};
     $seen_arch_signatures{$signature} = 1;
