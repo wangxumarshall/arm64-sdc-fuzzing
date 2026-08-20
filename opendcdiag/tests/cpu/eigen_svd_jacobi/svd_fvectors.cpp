@@ -59,5 +59,5 @@ DECLARE_TEST(eigen_svd_jacobi_fvectors, "Eigen SVD (Singular Value Decomposition
   .test_init = eigen_svd_jacobi_fvectors_init,
   .test_run = eigen_svd_jacobi_fvectors_test::run,
   .test_cleanup = eigen_svd_jacobi_fvectors_test::cleanup,
-  .quality_level = TEST_QUALITY_SKIP,
+  .quality_level = TEST_QUALITY_PROD,
 END_DECLARE_TEST

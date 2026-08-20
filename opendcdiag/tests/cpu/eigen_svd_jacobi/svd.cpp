@@ -40,5 +40,5 @@ DECLARE_TEST(eigen_svd_jacobi, "Eigen SVD (Singular Value Decomposition, Jacobi 
   .test_init = eigen_svd_jacobi_test::init,
   .test_run = eigen_svd_jacobi_test::run,
   .test_cleanup = eigen_svd_jacobi_test::cleanup,
-  .quality_level = TEST_QUALITY_SKIP,
+  .quality_level = TEST_QUALITY_PROD,
 END_DECLARE_TEST
