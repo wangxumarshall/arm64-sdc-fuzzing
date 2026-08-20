@@ -742,34 +742,44 @@ class SDCFuzzingGeneticDriver(object):
                         "selected_partner": partner.testcase_key,
                     },
                 }
-                generated = generate_testcase(
-                    {
-                        "target": resolved_target,
-                        "policy": resolved_policy,
-                        "wrapper": self.config.wrapper_name,
-                        "sequence_length": self.config.sequence_length,
-                        "benchmark_size": self.config.benchmark_size,
-                        "dependency_distance": dependency_distance,
-                        "memory_stream_stride": preferred_stride,
-                        "strict_validation": self.config.strict_validation,
-                        "profile_name": resolved_profile,
-                        "seed": child_seed,
-                        "output_dir": str(output_dir) if output_dir is not None else None,
-                        "instruction_names": child_names,
-                        "metadata_extra": metadata_extra,
-                    }
-                )
-                vault.upsert_testcase(generated["entry"])
-                records.append(
-                    EvolutionRecord(
-                        testcase_key=generated["entry"].testcase_key,
-                        parent_testcase_keys=(parent.testcase_key, partner.testcase_key),
-                        generation=parent_generation + 1,
-                        risk_score=generated["entry"].risk_score,
-                        output_file=generated.get("output_file"),
-                        metadata=dict(generated.get("metadata", {})),
+                try:
+                    generated = generate_testcase(
+                        {
+                            "target": resolved_target,
+                            "policy": resolved_policy,
+                            "wrapper": self.config.wrapper_name,
+                            "sequence_length": self.config.sequence_length,
+                            "benchmark_size": self.config.benchmark_size,
+                            "dependency_distance": dependency_distance,
+                            "memory_stream_stride": preferred_stride,
+                            "strict_validation": self.config.strict_validation,
+                            "profile_name": resolved_profile,
+                            "seed": child_seed,
+                            "output_dir": str(output_dir) if output_dir is not None else None,
+                            "instruction_names": child_names,
+                            "metadata_extra": metadata_extra,
+                        }
                     )
-                )
-                emitted += 1
+                    vault.upsert_testcase(generated["entry"])
+                    records.append(
+                        EvolutionRecord(
+                            testcase_key=generated["entry"].testcase_key,
+                            parent_testcase_keys=(parent.testcase_key, partner.testcase_key),
+                            generation=parent_generation + 1,
+                            risk_score=generated["entry"].risk_score,
+                            output_file=generated.get("output_file"),
+                            metadata=dict(generated.get("metadata", {})),
+                        )
+                    )
+                    emitted += 1
+                except Exception as exc:  # pragma: no cover - best effort runtime resilience
+                    LOG.warning(
+                        "Skipping invalid offspring for parent=%s partner=%s seed=%d: %s",
+                        parent.testcase_key,
+                        partner.testcase_key,
+                        child_seed,
+                        exc,
+                    )
+                    continue
 
         return records

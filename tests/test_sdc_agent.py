@@ -223,6 +223,74 @@ def test_sdc_agent_run_e2e_sim_writes_unified_report(monkeypatch, tmp_path):
     assert report_payload["build"]["requested"] is False
 
 
+def test_sdc_agent_run_e2e_sim_can_skip_gem5(monkeypatch, tmp_path):
+    output_root = tmp_path / "e2e-sim-skip"
+    db_path = output_root / "vault.sqlite3"
+
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_preflight",
+        lambda **kwargs: {
+            "ready": True,
+            "profile": "sim",
+            "checks": [],
+            "resolved_paths": {
+                "compiler": "cc",
+                "qemu_user_binary": "/tmp/qemu-aarch64",
+                "qemu_system_binary": "/tmp/qemu-system-aarch64",
+                "gem5_binary": None,
+                "gem5_config": str((tmp_path / "baremetal.py").resolve()),
+                "mcpat_binary": str((tmp_path / "mcpat").resolve()),
+                "meson_binary": None,
+                "ninja_binary": None,
+                "opendcdiag_root": str((tmp_path / "opendcdiag").resolve()),
+            },
+            "missing_steps": [],
+            "qemu_user_binary": "/tmp/qemu-aarch64",
+            "qemu_system_binary": "/tmp/qemu-system-aarch64",
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_phase2_validation",
+        lambda **kwargs: {
+            "status": "GOLDEN_READY",
+            "report_path": str((output_root / "phase2" / "phase2-validation.json").resolve()),
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_phase4_validation",
+        lambda **kwargs: {
+            "summary_status": "MATCHED",
+            "report_path": str((output_root / "phase4" / "phase4-validation.json").resolve()),
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.run_cycle",
+        lambda **kwargs: {
+            "generate": {"inserted": 4},
+            "campaign": {"counts": {"executed": 2}},
+            "evolve": {"emitted": 2},
+            "summary": {"counts": {"ALL": 6}},
+        },
+    )
+    monkeypatch.setattr(
+        "sdc_agent.agent.summarize_vault",
+        lambda db_path, limit=5: {"counts": {"ALL": 6}, "db": str(db_path)},
+    )
+
+    payload = run_e2e_sim(
+        output_root=output_root,
+        db_path=db_path,
+        build_missing=False,
+        skip_gem5=True,
+        skip_mcpat=True,
+        timeout=5,
+    )
+
+    assert payload["mode"] == "e2e-sim"
+    assert payload["skip_gem5"] is True
+    assert payload["phase2"]["status"] == "GOLDEN_READY"
+
+
 def test_sdc_agent_run_e2e_dev_generates_materialized_smoke(monkeypatch, tmp_path):
     output_root = tmp_path / "e2e-dev"
     db_path = output_root / "vault.sqlite3"

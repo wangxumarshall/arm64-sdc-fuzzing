@@ -254,3 +254,62 @@ def test_execute_campaign_blocks_when_preflight_fails(monkeypatch, tmp_path):
             mcpat_binary=tmp_path / "mcpat",
             timeout=30,
         )
+
+
+def test_execute_campaign_normalizes_fault_request_when_gem5_is_skipped(monkeypatch, tmp_path):
+    db_path = tmp_path / "vault.sqlite3"
+    source_path = tmp_path / "seed-skip.c"
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    _seed_vault(db_path, testcase_key="seed-skip", source_path=source_path)
+
+    monkeypatch.setattr(
+        "sdc_agent.campaign.run_preflight",
+        lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
+    )
+
+    def fake_run_differential(**kwargs):
+        assert kwargs["fault_model"] == "none"
+        assert kwargs["fault_target"] == ""
+        assert kwargs["fault_bit"] is None
+        assert kwargs["fault_tick"] is None
+        return DifferentialResult(
+            status="golden_only",
+            golden_digest="1111",
+            faulted_digest=None,
+            compile=CommandResult(["cc"], 0, "", ""),
+            qemu=CommandResult(["qemu"], 0, "SDC_DIGEST=1111", ""),
+            gem5=None,
+            mcpat=None,
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_agent.campaign.run_differential", fake_run_differential)
+
+    result = execute_campaign(
+        db_path=db_path,
+        limit=1,
+        source_root=None,
+        output_root=tmp_path / "campaign",
+        dry_run=False,
+        skip_preflight=False,
+        compiler="cc",
+        compiler_flags=[],
+        qemu_binary="qemu-aarch64",
+        qemu_args=[],
+        gem5_binary="gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        gem5_args=[],
+        gem5_cmd_flag="auto",
+        fault_model="register_bit_flip",
+        fault_target="x0",
+        fault_bit=3,
+        fault_tick=900,
+        skip_gem5=True,
+        skip_mcpat=True,
+        mcpat_template_profile="arm64-kunpeng920",
+        mcpat_binary=tmp_path / "mcpat",
+        timeout=30,
+    )
+
+    assert result["ok"] is True
+    assert result["runs"][0]["result_status"] == "golden_only"

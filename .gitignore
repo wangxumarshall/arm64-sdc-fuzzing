@@ -12,3 +12,4 @@ out.ptrace
 qemu/build-user/
 artifacts/materialized/
 artifacts/runtime/
+build

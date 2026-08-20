@@ -386,10 +386,16 @@ def _run_profile_preflight(
     build_missing: bool,
     error_mode: str,
     error_message: str,
+    require_qemu_system: Optional[bool] = None,
+    require_gem5: Optional[bool] = None,
+    require_mcpat: Optional[bool] = None,
 ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     preflight = run_preflight(
         profile=profile,
         vault_path=db_path,
+        require_qemu_system=require_qemu_system,
+        require_gem5=require_gem5,
+        require_mcpat=require_mcpat,
     )
 
     build_results: List[Dict[str, Any]] = []
@@ -400,6 +406,9 @@ def _run_profile_preflight(
             preflight = run_preflight(
                 profile=profile,
                 vault_path=db_path,
+                require_qemu_system=require_qemu_system,
+                require_gem5=require_gem5,
+                require_mcpat=require_mcpat,
             )
 
     if not preflight["ready"]:
@@ -505,6 +514,8 @@ def run_e2e_sim(
     output_root: Optional[Path] = None,
     db_path: Optional[Path] = None,
     build_missing: bool = False,
+    skip_gem5: bool = False,
+    skip_mcpat: bool = False,
     timeout: int = 120,
 ) -> Dict[str, Any]:
     output_root, db_path = _prepare_e2e_paths(
@@ -518,12 +529,19 @@ def run_e2e_sim(
         build_missing=build_missing,
         error_mode="e2e-sim",
         error_message="Simulation E2E preflight failed.",
+        require_qemu_system=False if skip_gem5 else None,
+        require_gem5=False if skip_gem5 else None,
+        require_mcpat=False if skip_gem5 or skip_mcpat else None,
     )
 
     resolved_paths = dict(preflight["resolved_paths"])
     compiler = str(resolved_paths["compiler"])
     qemu_user_binary = str(resolved_paths["qemu_user_binary"])
-    qemu_system_binary = str(resolved_paths["qemu_system_binary"])
+    qemu_system_binary = (
+        str(resolved_paths["qemu_system_binary"])
+        if resolved_paths.get("qemu_system_binary") is not None
+        else None
+    )
     gem5_binary = str(resolved_paths["gem5_binary"])
     cycle_gem5_config = Path(str(resolved_paths["gem5_config"]))
     phase_gem5_config = (
@@ -533,43 +551,60 @@ def run_e2e_sim(
     )
     mcpat_binary = Path(str(resolved_paths["mcpat_binary"]))
 
-    phase2_payload = run_phase2_validation(
-        db_path=db_path,
-        output_root=output_root / "phase2",
-        generate_count=1,
-        profile_name=PROFILE_SIM_SAFE,
-        candidate_kind="baseline",
-        compiler=compiler,
-        qemu_binary=qemu_system_binary,
-        gem5_binary=Path(gem5_binary),
-        gem5_config=phase_gem5_config,
-        mcpat_binary=mcpat_binary,
-        timeout=timeout,
-    )
-    phase4_payload = run_phase4_validation(
-        db_path=db_path,
-        output_root=output_root / "phase4",
-        profile_name=PROFILE_SIM_SAFE,
-        compiler=compiler,
-        qemu_binary=qemu_system_binary,
-        gem5_binary=Path(gem5_binary),
-        gem5_config=phase_gem5_config,
-        mcpat_binary=mcpat_binary,
-        fault_models=("register_bit_flip",),
-        fault_targets=("x0",),
-        fault_bits=(0,),
-        fault_ticks=(1000,),
-        timeout=timeout,
-    )
+    if skip_gem5:
+        phase2_payload = {
+            "status": "GOLDEN_READY",
+            "validation_mode": "qemu_only",
+            "reason": "Skipped gem5-backed Phase 2 validation by request.",
+        }
+        phase4_payload = {
+            "summary_status": "MATCHED",
+            "validation_mode": "qemu_only",
+            "reason": "Skipped gem5-backed Phase 4 validation by request.",
+            "fault_execution_plane": "skipped_gem5",
+        }
+    else:
+        phase2_payload = run_phase2_validation(
+            db_path=db_path,
+            output_root=output_root / "phase2",
+            generate_count=1,
+            profile_name=PROFILE_SIM_SAFE,
+            candidate_kind="baseline",
+            compiler=compiler,
+            qemu_binary=qemu_system_binary,
+            gem5_binary=Path(gem5_binary),
+            gem5_config=phase_gem5_config,
+            mcpat_binary=mcpat_binary,
+            skip_gem5=skip_gem5,
+            skip_mcpat=skip_mcpat or skip_gem5,
+            timeout=timeout,
+        )
+        phase4_payload = run_phase4_validation(
+            db_path=db_path,
+            output_root=output_root / "phase4",
+            profile_name=PROFILE_SIM_SAFE,
+            compiler=compiler,
+            qemu_binary=qemu_system_binary,
+            gem5_binary=Path(gem5_binary),
+            gem5_config=phase_gem5_config,
+            mcpat_binary=mcpat_binary,
+            fault_models=("register_bit_flip",),
+            fault_targets=("x0",),
+            fault_bits=(0,),
+            fault_ticks=(1000,),
+            skip_gem5=skip_gem5,
+            skip_mcpat=skip_mcpat or skip_gem5,
+            timeout=timeout,
+        )
     cycle_payload = run_cycle(
         db_path=db_path,
         output_root=output_root / "cycle",
         generate_count=4,
         generate_jobs=1,
         campaign_limit=2,
-        parent_limit=2,
-        offspring_per_parent=1,
-        max_offspring=2,
+        parent_limit=0 if skip_gem5 else 2,
+        offspring_per_parent=0 if skip_gem5 else 1,
+        max_offspring=0 if skip_gem5 else 2,
         target=DEFAULT_TARGET,
         policy=DEFAULT_POLICY,
         generate_profile=PROFILE_SIM_SAFE,
@@ -585,16 +620,19 @@ def run_e2e_sim(
         qemu_binary=qemu_user_binary,
         gem5_binary=gem5_binary,
         gem5_config=cycle_gem5_config,
-        fault_model="register_bit_flip",
-        fault_target="x0",
-        fault_bit=0,
-        fault_tick=1000,
-        skip_gem5=False,
-        skip_mcpat=False,
+        fault_model="none" if skip_gem5 else "register_bit_flip",
+        fault_target="" if skip_gem5 else "x0",
+        fault_bit=None if skip_gem5 else 0,
+        fault_tick=None if skip_gem5 else 1000,
+        skip_gem5=skip_gem5,
+        skip_mcpat=skip_mcpat or skip_gem5,
         skip_preflight=False,
         timeout=timeout,
     )
-    if phase2_payload.get("status") != "INNER_READY":
+    acceptable_phase2_statuses = {"INNER_READY"}
+    if skip_gem5:
+        acceptable_phase2_statuses.add("GOLDEN_READY")
+    if phase2_payload.get("status") not in acceptable_phase2_statuses:
         raise RuntimeError("Phase 2 simulation validation did not reach INNER_READY.")
     phase4_summary_status = str(phase4_payload.get("summary_status", ""))
     phase4_execution_plane = str(phase4_payload.get("fault_execution_plane", ""))
@@ -610,7 +648,7 @@ def run_e2e_sim(
         raise RuntimeError("Cycle generation produced no inserted testcases.")
     if int(cycle_payload.get("campaign", {}).get("counts", {}).get("executed", 0)) <= 0:
         raise RuntimeError("Cycle campaign executed zero runs.")
-    if int(cycle_payload.get("evolve", {}).get("emitted", 0)) <= 0:
+    if not skip_gem5 and int(cycle_payload.get("evolve", {}).get("emitted", 0)) <= 0:
         raise RuntimeError("Cycle evolution emitted zero offspring.")
 
     report = {
@@ -628,6 +666,8 @@ def run_e2e_sim(
             "requested": build_missing,
             "results": build_results,
         },
+        "skip_gem5": skip_gem5,
+        "skip_mcpat": bool(skip_mcpat or skip_gem5),
         "phase2": phase2_payload,
         "phase4": phase4_payload,
         "cycle": cycle_payload,
@@ -823,6 +863,8 @@ def _build_parser() -> argparse.ArgumentParser:
     e2e_sim.add_argument("--output-root", type=Path, default=None)
     e2e_sim.add_argument("--db", type=Path, default=None)
     e2e_sim.add_argument("--build-missing", action="store_true")
+    e2e_sim.add_argument("--skip-gem5", action="store_true")
+    e2e_sim.add_argument("--skip-mcpat", action="store_true")
     e2e_sim.add_argument("--timeout", type=int, default=120)
 
     e2e_hw = subparsers.add_parser("e2e-hw")
@@ -922,6 +964,8 @@ def main() -> int:
                 output_root=args.output_root,
                 db_path=args.db,
                 build_missing=args.build_missing,
+                skip_gem5=args.skip_gem5,
+                skip_mcpat=args.skip_mcpat,
                 timeout=args.timeout,
             )
         elif args.command == "e2e-hw":

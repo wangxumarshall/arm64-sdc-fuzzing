@@ -11,6 +11,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
+from .differential import (
+    CommandResult,
+    build_fault_args,
+    build_fault_request_summary,
+)
 from .generation import (
     DEFAULT_POLICY,
     DEFAULT_TARGET,
@@ -18,7 +23,6 @@ from .generation import (
     generate_batch,
     generate_testcase,
 )
-from .differential import build_fault_args
 from .materialize import SDC_MEMORY_SIZE, _asm_block, _benchmark_body_lines
 from .power_backends.mcpat_backend import McPATBackend
 from .tooling import (
@@ -242,9 +246,9 @@ def write_shared_kernel_ld(path: Path) -> Path:
             [
                 "ENTRY(__start)",
                 "MEMORY {",
-                "    TXT (rx) : ORIGIN = 2 << 30, LENGTH = 2M",
-                "    DAT (rw) : ORIGIN = (2 << 30) + 2M, LENGTH = 2M",
-                "    TAG (rw) : ORIGIN = (2 << 30) + 4M, LENGTH = 2M",
+                "    TXT (rx) : ORIGIN = 1 << 30, LENGTH = 2M",
+                "    DAT (rw) : ORIGIN = (1 << 30) + 2M, LENGTH = 2M",
+                "    TAG (rw) : ORIGIN = (1 << 30) + 4M, LENGTH = 2M",
                 "}",
                 "SECTIONS {",
                 "    .text : { *(.text) *(.rodata) } >TXT",
@@ -435,6 +439,20 @@ def run_gem5_semihost_validation(
     if semi_stderr.exists():
         stderr_text += "\n" + semi_stderr.read_text(encoding="utf-8", errors="replace")
     digest = extract_digest(stdout_text + "\n" + stderr_text)
+    command_result = CommandResult(
+        command=[str(part) for part in cmd],
+        returncode=result.returncode,
+        stdout=stdout_text,
+        stderr=stderr_text,
+    )
+    fault_request = build_fault_request_summary(
+        gem5_outdir=output_root,
+        gem5_result=command_result,
+        fault_model=str(fault_model),
+        fault_target=str(fault_target),
+        fault_bit=fault_bit,
+        fault_tick=fault_tick,
+    )
     return {
         "command": cmd,
         "returncode": result.returncode,
@@ -443,6 +461,10 @@ def run_gem5_semihost_validation(
         "gem5_digest": digest,
         "semi_stdout": str(semi_stdout.resolve()),
         "semi_stderr": str(semi_stderr.resolve()),
+        "fault_request": fault_request,
+        "implemented_in_script": bool(fault_request.get("implemented_in_script", False)),
+        "injection_observed": bool(fault_request.get("injection_observed", False)),
+        "fault_execution_plane": str(fault_request.get("execution_plane", "")),
     }
 
 
@@ -556,6 +578,8 @@ def run_phase2_validation(
     gem5_binary: Path = DEFAULT_GEM5_BINARY,
     gem5_config: Path = DEFAULT_GEM5_BAREMETAL_CONFIG,
     mcpat_binary: Path = DEFAULT_MCPAT_BINARY,
+    skip_gem5: bool = False,
+    skip_mcpat: bool = False,
     timeout: int = 30,
 ) -> Dict[str, Any]:
     output_root = output_root.resolve()
@@ -584,6 +608,7 @@ def run_phase2_validation(
     testcase_key = str(candidate["testcase_key"])
     metadata = _decode_metadata(candidate)
     build_dir = output_root / testcase_key
+    build_dir.mkdir(parents=True, exist_ok=True)
 
     build_artifacts = build_semihost_validation_elf(
         asm_content=str(candidate["asm_content"]),
@@ -597,27 +622,57 @@ def run_phase2_validation(
         timeout=timeout,
     )
     gem5_outdir = build_dir / "gem5"
-    gem5_result = run_gem5_semihost_validation(
-        gem5_binary=gem5_binary,
-        gem5_config=gem5_config,
-        elf_path=build_artifacts["elf_path"],
-        output_root=gem5_outdir,
-        timeout=timeout,
-    )
-    mcpat_result = McPATBackend(
-        template_profile="arm64-kunpeng920",
-        mcpat_binary=mcpat_binary,
-    ).run(gem5_outdir)
-    mcpat_result = _json_safe(mcpat_result)
+    if skip_gem5:
+        gem5_result = {
+            "command": [],
+            "returncode": 0,
+            "stdout": "Skipped gem5; qemu-only mode.",
+            "stderr": "",
+            "gem5_digest": qemu_result["golden_digest"],
+            "semi_stdout": str((gem5_outdir / "semi.stdout").resolve()),
+            "semi_stderr": str((gem5_outdir / "semi.stderr").resolve()),
+            "fault_request": {"fault_model": "none", "execution_plane": "skipped_gem5"},
+            "implemented_in_script": False,
+            "injection_observed": False,
+            "fault_execution_plane": "skipped_gem5",
+        }
+        mcpat_result = None
+        matched = qemu_result["returncode"] == 0 and qemu_result["golden_digest"] is not None
+        status = "GOLDEN_READY" if matched else "FAILED"
+    else:
+        gem5_result = run_gem5_semihost_validation(
+            gem5_binary=gem5_binary,
+            gem5_config=gem5_config,
+            elf_path=build_artifacts["elf_path"],
+            output_root=gem5_outdir,
+            fault_model="none",
+            fault_target="",
+            fault_bit=None,
+            fault_tick=None,
+            timeout=timeout,
+        )
+        mcpat_result = None
+        if not skip_mcpat:
+            mcpat_result = McPATBackend(
+                template_profile="arm64-kunpeng920",
+                mcpat_binary=mcpat_binary,
+            ).run(gem5_outdir)
+            mcpat_result = _json_safe(mcpat_result)
 
-    matched = (
-        qemu_result["returncode"] == 0
-        and gem5_result["returncode"] == 0
-        and qemu_result["golden_digest"] is not None
-        and qemu_result["golden_digest"] == gem5_result["gem5_digest"]
-        and mcpat_result.get("power_total") is not None
-    )
-    status = "INNER_READY" if matched else "FAILED"
+        matched = (
+            qemu_result["returncode"] == 0
+            and gem5_result["returncode"] == 0
+            and qemu_result["golden_digest"] is not None
+            and qemu_result["golden_digest"] == gem5_result["gem5_digest"]
+            and (
+                skip_mcpat
+                or (
+                    isinstance(mcpat_result, dict)
+                    and mcpat_result.get("power_total") is not None
+                )
+            )
+        )
+        status = "INNER_READY" if matched else "FAILED"
 
     updated_metadata = {
         **metadata,
@@ -636,6 +691,8 @@ def run_phase2_validation(
             "qemu": qemu_result,
             "gem5": gem5_result,
             "matched": matched,
+            "skip_gem5": skip_gem5,
+            "skip_mcpat": bool(skip_mcpat or skip_gem5),
         },
         "inner_loop": {
             "inner_status": status,
@@ -645,7 +702,7 @@ def run_phase2_validation(
             "elf_path": str(build_artifacts["elf_path"]),
             "golden_digest": qemu_result["golden_digest"],
             "gem5_digest": gem5_result["gem5_digest"],
-            "power_total": mcpat_result.get("power_total"),
+            "power_total": mcpat_result.get("power_total") if isinstance(mcpat_result, dict) else None,
             "source_cache_hit": False,
             "elf_cache_hit": False,
             "golden_cache_hit": False,
@@ -667,7 +724,11 @@ def run_phase2_validation(
         vault.update_execution_result(
             testcase_key,
             qemu_golden_hash=qemu_result["golden_digest"],
-            mcpat_power=float(mcpat_result["power_total"]),
+            mcpat_power=(
+                float(mcpat_result["power_total"])
+                if isinstance(mcpat_result, dict) and mcpat_result.get("power_total") is not None
+                else None
+            ),
             status=status,
             metadata=updated_metadata,
         )
@@ -686,7 +747,11 @@ def run_phase2_validation(
         gem5_digest=gem5_result["gem5_digest"],
         qemu_returncode=int(qemu_result["returncode"]),
         gem5_returncode=int(gem5_result["returncode"]),
-        mcpat_power_total=float(mcpat_result["power_total"]),
+        mcpat_power_total=(
+            float(mcpat_result["power_total"])
+            if isinstance(mcpat_result, dict) and mcpat_result.get("power_total") is not None
+            else None
+        ),
         status=status,
         report_path=str((build_dir / "phase2-validation.json").resolve()),
     )
@@ -694,10 +759,14 @@ def run_phase2_validation(
         **asdict(report),
         "qemu": qemu_result,
         "gem5": gem5_result,
-        "mcpat": {
-            key: _json_safe(value)
-            for key, value in mcpat_result.items()
-        },
+        "mcpat": (
+            {
+                key: _json_safe(value)
+                for key, value in mcpat_result.items()
+            }
+            if isinstance(mcpat_result, dict)
+            else None
+        ),
     }
     report_path = Path(report.report_path)
     report_path.write_text(
@@ -732,6 +801,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gem5-binary", type=Path, default=DEFAULT_GEM5_BINARY)
     parser.add_argument("--gem5-config", type=Path, default=DEFAULT_GEM5_BAREMETAL_CONFIG)
     parser.add_argument("--mcpat-binary", type=Path, default=DEFAULT_MCPAT_BINARY)
+    parser.add_argument("--skip-gem5", action="store_true")
+    parser.add_argument("--skip-mcpat", action="store_true")
     parser.add_argument("--timeout", type=int, default=30)
     return parser
 
@@ -750,10 +821,12 @@ def main() -> int:
         gem5_binary=args.gem5_binary,
         gem5_config=args.gem5_config,
         mcpat_binary=args.mcpat_binary,
+        skip_gem5=args.skip_gem5,
+        skip_mcpat=args.skip_mcpat,
         timeout=args.timeout,
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))
-    return 0 if payload["status"] == "INNER_READY" else 1
+    return 0 if payload["status"] in {"INNER_READY", "GOLDEN_READY"} else 1
 
 
 if __name__ == "__main__":

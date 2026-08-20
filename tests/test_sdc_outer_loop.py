@@ -169,9 +169,11 @@ def test_outer_loop_executes_fault_runs_and_aggregates(monkeypatch, tmp_path):
         assert metadata["outer_loop"]["active_fault_runs"] == 2
         assert metadata["outer_loop"]["sdc_hits"] == 1
         assert metadata["outer_loop"]["fault_detection_rate"] == 0.5
+        assert abs(metadata["outer_loop"]["outer_value_score"] - 0.225) < 1e-9
         assert metadata["outer_loop"]["observed_injection_runs"] == 1
         assert metadata["outer_loop"]["manifest_only_runs"] == 1
         assert metadata["outer_loop"]["injector_confidence_score"] == 0.5
+        assert abs(metadata["outer_loop"]["promotion_readiness_score"] - 0.1125) < 1e-9
         assert metadata["outer_loop"]["promotion_ready"] is True
         assert metadata["outer_loop"]["summary_status"] == "SDC_FOUND"
         fault_runs = vault.list_fault_runs("seed-b", limit=10)
@@ -269,3 +271,55 @@ def test_outer_loop_retries_create_distinct_campaign_records(monkeypatch, tmp_pa
     with SDCVault(db_path) as vault:
         campaigns = vault.list_fault_campaigns(limit=10)
         assert len(campaigns) == 2
+
+
+def test_outer_loop_normalizes_fault_specs_when_gem5_is_skipped(monkeypatch, tmp_path):
+    db_path = tmp_path / "vault.sqlite3"
+    source_path = tmp_path / "seed-skip.c"
+    source_path.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    _seed_inner_ready(db_path, testcase_key="seed-skip", source_path=source_path)
+
+    monkeypatch.setattr(
+        "sdc_agent.outer_loop.run_preflight",
+        lambda **kwargs: {"ready": True, "checks": [], "repo_root": str(tmp_path)},
+    )
+
+    def fake_run_differential(**kwargs):
+        assert kwargs["fault_model"] == "none"
+        assert kwargs["fault_target"] == ""
+        return DifferentialResult(
+            status="golden_only",
+            golden_digest="1111",
+            faulted_digest=None,
+            compile=CommandResult(["cc"], 0, "", ""),
+            qemu=CommandResult(["qemu"], 0, "SDC_DIGEST=1111", ""),
+            gem5=None,
+            mcpat=None,
+            mcpat_error=None,
+        )
+
+    monkeypatch.setattr("sdc_agent.outer_loop.run_differential", fake_run_differential)
+
+    payload = run_outer_loop(
+        db_path=db_path,
+        limit=1,
+        source_root=None,
+        output_root=tmp_path / "outer",
+        fault_models=("register_bit_flip",),
+        fault_targets=("x0",),
+        fault_bits=(0,),
+        fault_ticks=(100,),
+        dry_run=False,
+        skip_preflight=False,
+        compiler="cc",
+        qemu_binary="qemu-aarch64",
+        gem5_binary="gem5.opt",
+        gem5_config=tmp_path / "cfg.py",
+        skip_gem5=True,
+        skip_mcpat=True,
+        timeout=30,
+    )
+
+    assert payload["counts"]["executed_runs"] == 1
+    assert payload["fault_specs"][0]["fault_model"] == "none"
+    assert payload["executed_runs"][0]["result_status"] == "golden_only"

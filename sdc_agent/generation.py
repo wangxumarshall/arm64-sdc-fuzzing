@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import multiprocessing as mp
 import random
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -186,15 +188,82 @@ def collect_sensitive_instructions(
     profile_name: str = PROFILE_SIM_SAFE,
 ) -> List[Any]:
     try:
-        from microprobe.targets.arm64.policies.sdc_fuzzing_policy import (
-            SDCSensitiveAnalyzer,
-        )
+        from microprobe.targets.arm64.policies.sdc_fuzzing_policy import SDCSensitiveAnalyzer
 
         return SDCSensitiveAnalyzer(target).collect(profile_name=profile_name)
     except Exception:
+        try:
+            policy_path = (
+                MICROPROBE_ROOT
+                / "targets"
+                / "arm64"
+                / "policies"
+                / "sdc_fuzzing_policy.py"
+            ).resolve()
+            spec = importlib.util.spec_from_file_location(
+                "microprobe_arm64_sdc_fuzzing_policy",
+                policy_path,
+            )
+            if spec is not None and spec.loader is not None:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module.SDCSensitiveAnalyzer(target).collect(
+                    profile_name=profile_name
+                )
+        except Exception:
+            pass
+
         instructions = list(getattr(target.isa, "instructions", {}).values())
         instructions.sort(key=lambda item: item.name)
         return instructions
+
+
+_MOVE_WIDE_PATTERN = re.compile(
+    r"^(?P<opc>MOV[ZNK])\s+(?P<reg>[A-Za-z0-9]+),\s*(?P<imm>[-]?[0-9]+),\s*(?P<hw>[0-3])$",
+    re.IGNORECASE,
+)
+_SHIFT_REG_PATTERN = re.compile(
+    r"^(?P<opc>ADD|ADDS|SUB|SUBS|AND|ORR|EOR)\s+"
+    r"(?P<rd>[A-Za-z0-9]+),\s*(?P<rn>[A-Za-z0-9]+),\s*(?P<rm>[A-Za-z0-9]+),\s*"
+    r"(?P<shift>[0-3])\s+(?P<amount>[0-9]+)$",
+    re.IGNORECASE,
+)
+_SHIFT_NAMES = {
+    "0": "lsl",
+    "1": "lsr",
+    "2": "asr",
+    "3": "ror",
+}
+
+
+def normalize_arm64_asm(rendered: str) -> str:
+    normalized: List[str] = []
+    for line in rendered.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//") or stripped.startswith("."):
+            normalized.append(line)
+            continue
+
+        move_match = _MOVE_WIDE_PATTERN.match(stripped)
+        if move_match is not None:
+            groups = move_match.groupdict()
+            shift_amount = int(groups["hw"]) * 16
+            normalized.append(
+                f"{groups['opc'].lower()} {groups['reg']}, #{groups['imm']}, lsl #{shift_amount}"
+            )
+            continue
+
+        shift_match = _SHIFT_REG_PATTERN.match(stripped)
+        if shift_match is not None:
+            groups = shift_match.groupdict()
+            shift_name = _SHIFT_NAMES[str(groups["shift"])]
+            normalized.append(
+                f"{groups['opc'].lower()} {groups['rd']}, {groups['rn']}, {groups['rm']}, {shift_name} #{groups['amount']}"
+            )
+            continue
+
+        normalized.append(stripped.lower())
+    return "\n".join(normalized) + "\n"
 
 
 def select_instructions(
@@ -446,6 +515,8 @@ def generate_testcase(task: Mapping[str, Any]) -> Dict[str, Any]:
     )
     benchmark = synth.synthesize()
     rendered = "".join(str(elem) for elem in synth._wrap(benchmark))
+    if "armv8_common" in target_name:
+        rendered = normalize_arm64_asm(rendered)
     testcase_key = hashlib.sha1(rendered.encode("utf-8")).hexdigest()
 
     metadata = dict(getattr(benchmark, "metadata", {}))

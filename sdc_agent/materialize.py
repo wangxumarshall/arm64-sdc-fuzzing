@@ -148,8 +148,6 @@ def _register_initialization_lines() -> List[str]:
 
 def _register_capture_lines() -> List[str]:
     lines = [
-        "sub sp, sp, #16",
-        "stp x16, x17, [sp]",
         "adrp x16, sdc_gprs",
         "add x16, x16, :lo12:sdc_gprs",
     ]
@@ -167,7 +165,6 @@ def _register_capture_lines() -> List[str]:
         lines.append(f"str x{reg_index}, [x16, #{reg_index * 8}]")
     lines.extend(
         [
-            "add sp, sp, #16",
             "adrp x16, sdc_nzcv",
             "add x16, x16, :lo12:sdc_nzcv",
             "mrs x17, nzcv",
@@ -180,8 +177,15 @@ def _register_capture_lines() -> List[str]:
         lines.append(f"str q{reg_index}, [x16, #{reg_index * 16}]")
     lines.extend(
         [
-            "ldr x30, [sp]",
-            "add sp, sp, #16",
+            "ldr x30, [sp, #112]",
+            "ldp x28, x29, [sp, #96]",
+            "ldp x26, x27, [sp, #80]",
+            "ldp x24, x25, [sp, #64]",
+            "ldp x22, x23, [sp, #48]",
+            "ldp x20, x21, [sp, #32]",
+            "ldp x18, x19, [sp, #16]",
+            "ldp x16, x17, [sp, #0]",
+            "add sp, sp, #128",
             "ret",
             ".size sdc_benchmark_body, .-sdc_benchmark_body",
         ]
@@ -196,6 +200,15 @@ def _benchmark_body_lines(asm_content: str) -> List[str]:
         ".global sdc_benchmark_body",
         ".type sdc_benchmark_body, %function",
         "sdc_benchmark_body:",
+        "sub sp, sp, #128",
+        "stp x16, x17, [sp, #0]",
+        "stp x18, x19, [sp, #16]",
+        "stp x20, x21, [sp, #32]",
+        "stp x22, x23, [sp, #48]",
+        "stp x24, x25, [sp, #64]",
+        "stp x26, x27, [sp, #80]",
+        "stp x28, x29, [sp, #96]",
+        "str x30, [sp, #112]",
     ]
     lines.extend(_register_initialization_lines())
     lines.extend(_prepare_asm_lines(asm_content))

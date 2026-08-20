@@ -387,6 +387,16 @@ python3 tools/sdc_agent.py e2e-sim \
 
 `bootstrap_ubuntu_24_04_arm.sh` 会同时安装根目录 `requirements-dev.txt` 中声明的 Python 依赖，以及 QEMU/gem5 常见系统依赖。
 
+如果当前主机因为内存压力无法构建或运行 gem5，可先走 qemu-only smoke：
+
+```bash
+python3 -m sdc_agent.preflight --profile sim --skip-gem5 --skip-mcpat --verbose
+python3 tools/sdc_agent.py e2e-sim --skip-gem5 --skip-mcpat \
+  --output-root artifacts/e2e-sim/qemu-only-smoke
+```
+
+这条路径仍会执行真实生成、物料化、QEMU golden 与 qemu-only `cycle`，但会显式跳过 gem5 / McPAT 相关步骤。
+
 执行成功后，统一报告位于：
 
 ```text
@@ -420,6 +430,11 @@ python3 -m sdc_agent.preflight --profile sim --verbose
 - `dev`：控制面开发 smoke
 - `sim`：Ubuntu 24.04 ARM 真实仿真执行面
 - `hw`：OpenDCDiag staging / promotion lane
+
+内存受限时可附加：
+
+- `--skip-gem5`
+- `--skip-mcpat`
 
 ### 6.4 批量生成候选
 

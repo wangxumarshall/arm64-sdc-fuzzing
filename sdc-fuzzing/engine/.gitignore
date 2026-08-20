@@ -1,0 +1,3 @@
+# built engine artifacts — regenerate with ./scripts/build_engine.sh
+eigen_cabidrv.o
+mrueig

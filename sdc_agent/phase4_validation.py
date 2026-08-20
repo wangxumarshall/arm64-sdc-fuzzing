@@ -185,6 +185,8 @@ def run_phase4_validation(
     fault_targets: Sequence[str] = ("x0", "x1"),
     fault_bits: Sequence[Optional[int]] = (0, 1),
     fault_ticks: Sequence[Optional[int]] = (1000,),
+    skip_gem5: bool = False,
+    skip_mcpat: bool = False,
     timeout: int = 30,
 ) -> Dict[str, Any]:
     output_root = output_root.resolve()
@@ -212,6 +214,7 @@ def run_phase4_validation(
     testcase_key = str(testcase["testcase_key"])
     metadata = _decode_metadata(testcase)
     build_dir = output_root / testcase_key
+    build_dir.mkdir(parents=True, exist_ok=True)
     build_artifacts = build_semihost_validation_elf(
         asm_content=str(testcase["asm_content"]),
         testcase_key=testcase_key,
@@ -246,91 +249,110 @@ def run_phase4_validation(
 
         run_records: List[Phase4FaultRun] = []
         latest_mcpat_power: Optional[float] = None
-        for spec in fault_specs:
-            run_key = _spec_run_key(spec)
-            run_dir = build_dir / run_key
-            gem5_outdir = run_dir / "gem5"
-            gem5_kwargs = {
-                "gem5_binary": gem5_binary,
-                "gem5_config": gem5_config,
-                "elf_path": build_artifacts["elf_path"],
-                "output_root": gem5_outdir,
-                "timeout": timeout,
-            }
-            if gem5_config.name == "sdc_kunpeng920_se.py":
-                gem5_kwargs.update(
-                    {
-                        "fault_model": spec.fault_model,
-                        "fault_target": spec.fault_target,
-                        "fault_bit": spec.fault_bit,
-                        "fault_tick": spec.fault_tick,
-                    }
-                )
-            gem5_result = run_gem5_semihost_validation(**gem5_kwargs)
-            fault_request = _build_phase4_fault_request(spec, gem5_result)
-            result_status = _classify_phase4_fault_run(
-                qemu_result=qemu_result,
-                gem5_result=gem5_result,
-                fault_request=fault_request,
-            )
-            mcpat_result: Dict[str, Any] = {}
-            if int(gem5_result.get("returncode", -1)) == 0:
-                mcpat_result = McPATBackend(
-                    template_profile="arm64-kunpeng920",
-                    mcpat_binary=mcpat_binary,
-                ).run(gem5_outdir)
-                latest_mcpat_power = float(mcpat_result["power_total"])
-            result_json = run_dir / "result.json"
-            run_payload = {
-                "fault_spec": asdict(spec),
-                "fault_request": fault_request,
-                "qemu": qemu_result,
-                "gem5": gem5_result,
-                "mcpat": {
-                    key: str(value) if isinstance(value, Path) else value
-                    for key, value in mcpat_result.items()
-                },
-                "result_status": result_status,
-                "fault_execution_plane": fault_request["execution_plane"],
-            }
-            result_json.parent.mkdir(parents=True, exist_ok=True)
-            result_json.write_text(
-                json.dumps(run_payload, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
-            vault.record_fault_run(
-                campaign_id=campaign_id,
-                testcase_key=testcase_key,
-                fault_model=spec.fault_model,
-                fault_target=spec.fault_target,
-                fault_bit=spec.fault_bit,
-                fault_tick=spec.fault_tick,
-                golden_digest=qemu_result["golden_digest"],
-                faulted_digest=gem5_result["gem5_digest"],
-                result_status=result_status,
-                metadata={
-                    "artifact_dir": str(run_dir.resolve()),
-                    "result_json": str(result_json.resolve()),
-                    "fault_request": fault_request,
-                    "fault_execution_plane": fault_request["execution_plane"],
-                    "injection_observed": bool(fault_request["injection_observed"]),
-                },
-            )
+        if skip_gem5:
+            run_dir = build_dir / "qemu-only"
+            run_dir.mkdir(parents=True, exist_ok=True)
             run_records.append(
                 Phase4FaultRun(
-                    run_key=run_key,
+                    run_key="qemu-only",
+                    fault_model="none",
+                    fault_target="",
+                    fault_bit=None,
+                    fault_tick=None,
+                    result_status="matched" if qemu_result["returncode"] == 0 else "golden_failed",
+                    golden_digest=qemu_result["golden_digest"],
+                    faulted_digest=qemu_result["golden_digest"],
+                    artifact_dir=str(run_dir.resolve()),
+                    execution_plane="skipped_gem5",
+                    injection_observed=False,
+                )
+            )
+        else:
+            for spec in fault_specs:
+                run_key = _spec_run_key(spec)
+                run_dir = build_dir / run_key
+                gem5_outdir = run_dir / "gem5"
+                gem5_kwargs = {
+                    "gem5_binary": gem5_binary,
+                    "gem5_config": gem5_config,
+                    "elf_path": build_artifacts["elf_path"],
+                    "output_root": gem5_outdir,
+                    "timeout": timeout,
+                }
+                if gem5_config.name == "sdc_kunpeng920_se.py":
+                    gem5_kwargs.update(
+                        {
+                            "fault_model": spec.fault_model,
+                            "fault_target": spec.fault_target,
+                            "fault_bit": spec.fault_bit,
+                            "fault_tick": spec.fault_tick,
+                        }
+                    )
+                gem5_result = run_gem5_semihost_validation(**gem5_kwargs)
+                fault_request = _build_phase4_fault_request(spec, gem5_result)
+                result_status = _classify_phase4_fault_run(
+                    qemu_result=qemu_result,
+                    gem5_result=gem5_result,
+                    fault_request=fault_request,
+                )
+                mcpat_result: Dict[str, Any] = {}
+                if int(gem5_result.get("returncode", -1)) == 0 and not skip_mcpat:
+                    mcpat_result = McPATBackend(
+                        template_profile="arm64-kunpeng920",
+                        mcpat_binary=mcpat_binary,
+                    ).run(gem5_outdir)
+                    latest_mcpat_power = float(mcpat_result["power_total"])
+                result_json = run_dir / "result.json"
+                run_payload = {
+                    "fault_spec": asdict(spec),
+                    "fault_request": fault_request,
+                    "qemu": qemu_result,
+                    "gem5": gem5_result,
+                    "mcpat": {
+                        key: str(value) if isinstance(value, Path) else value
+                        for key, value in mcpat_result.items()
+                    },
+                    "result_status": result_status,
+                    "fault_execution_plane": fault_request["execution_plane"],
+                }
+                result_json.parent.mkdir(parents=True, exist_ok=True)
+                result_json.write_text(
+                    json.dumps(run_payload, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                vault.record_fault_run(
+                    campaign_id=campaign_id,
+                    testcase_key=testcase_key,
                     fault_model=spec.fault_model,
                     fault_target=spec.fault_target,
                     fault_bit=spec.fault_bit,
                     fault_tick=spec.fault_tick,
-                    result_status=result_status,
                     golden_digest=qemu_result["golden_digest"],
                     faulted_digest=gem5_result["gem5_digest"],
-                    artifact_dir=str(run_dir.resolve()),
-                    execution_plane=str(fault_request["execution_plane"]),
-                    injection_observed=bool(fault_request["injection_observed"]),
+                    result_status=result_status,
+                    metadata={
+                        "artifact_dir": str(run_dir.resolve()),
+                        "result_json": str(result_json.resolve()),
+                        "fault_request": fault_request,
+                        "fault_execution_plane": fault_request["execution_plane"],
+                        "injection_observed": bool(fault_request["injection_observed"]),
+                    },
                 )
-            )
+                run_records.append(
+                    Phase4FaultRun(
+                        run_key=run_key,
+                        fault_model=spec.fault_model,
+                        fault_target=spec.fault_target,
+                        fault_bit=spec.fault_bit,
+                        fault_tick=spec.fault_tick,
+                        result_status=result_status,
+                        golden_digest=qemu_result["golden_digest"],
+                        faulted_digest=gem5_result["gem5_digest"],
+                        artifact_dir=str(run_dir.resolve()),
+                        execution_plane=str(fault_request["execution_plane"]),
+                        injection_observed=bool(fault_request["injection_observed"]),
+                    )
+                )
 
         aggregate = _aggregate_fault_runs(base_score=1.0, runs=run_records)
         metadata["outer_loop"] = {
@@ -340,6 +362,8 @@ def run_phase4_validation(
             "qemu_binary": str(qemu_binary),
             "gem5_binary": str(gem5_binary),
             "mcpat_binary": str(mcpat_binary),
+            "skip_gem5": skip_gem5,
+            "skip_mcpat": bool(skip_mcpat or skip_gem5),
         }
         vault.update_execution_result(
             testcase_key,
@@ -360,7 +384,9 @@ def run_phase4_validation(
                 "fault_specs": [asdict(spec) for spec in fault_specs],
                 "aggregate": aggregate,
                 "fault_execution_plane": (
-                    "phase4_real_e2e"
+                    "skipped_gem5"
+                    if skip_gem5
+                    else "phase4_real_e2e"
                     if any(run.injection_observed for run in run_records)
                     else "phase4_no_injector"
                 ),
@@ -392,7 +418,9 @@ def run_phase4_validation(
         "fault_runs": [asdict(run) for run in run_records],
         "qemu": qemu_result,
         "fault_execution_plane": (
-            "phase4_real_e2e"
+            "skipped_gem5"
+            if skip_gem5
+            else "phase4_real_e2e"
             if any(run.injection_observed for run in run_records)
             else "phase4_no_injector"
         ),
@@ -421,6 +449,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fault-target", action="append", default=["x0", "x1"])
     parser.add_argument("--fault-bit", action="append", default=["0", "1"])
     parser.add_argument("--fault-tick", action="append", default=["1000"])
+    parser.add_argument("--skip-gem5", action="store_true")
+    parser.add_argument("--skip-mcpat", action="store_true")
     parser.add_argument("--timeout", type=int, default=30)
     return parser
 
@@ -450,6 +480,8 @@ def main() -> int:
         fault_targets=tuple(args.fault_target),
         fault_bits=_parse_optional_ints(args.fault_bit),
         fault_ticks=_parse_optional_ints(args.fault_tick),
+        skip_gem5=args.skip_gem5,
+        skip_mcpat=args.skip_mcpat,
         timeout=args.timeout,
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))

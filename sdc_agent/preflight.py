@@ -382,6 +382,7 @@ def run_preflight(
     check_hardware_tools: Optional[bool] = None,
     require_qemu_user: Optional[bool] = None,
     require_qemu_system: Optional[bool] = None,
+    require_gem5: Optional[bool] = None,
     require_mcpat: Optional[bool] = None,
 ) -> dict:
     normalized_profile = normalize_profile_name(profile)
@@ -395,7 +396,7 @@ def run_preflight(
     effective_require_qemu_user = spec.require_qemu_user if require_qemu_user is None else require_qemu_user
     effective_require_qemu_system = spec.require_qemu_system if require_qemu_system is None else require_qemu_system
     effective_require_mcpat = spec.require_mcpat if require_mcpat is None else require_mcpat
-    effective_require_gem5 = spec.require_gem5
+    effective_require_gem5 = spec.require_gem5 if require_gem5 is None else require_gem5
     effective_require_gem5_config = spec.require_gem5_config
     effective_check_build_deps = spec.check_build_deps if check_build_deps is None else check_build_deps
     effective_check_hardware_tools = (
@@ -612,6 +613,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not require a system-mode QEMU binary.",
     )
     parser.add_argument(
+        "--skip-gem5",
+        action="store_true",
+        help="Do not require a gem5 binary for qemu-only smoke flows.",
+    )
+    parser.add_argument(
+        "--skip-mcpat",
+        action="store_true",
+        help="Do not require McPAT for reduced-memory qemu-only smoke flows.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Show detailed output with install hints",
@@ -637,6 +648,8 @@ def main() -> int:
         check_build_deps=False if args.skip_build_deps else None,
         check_hardware_tools=False if args.skip_hardware_tools else None,
         require_qemu_system=False if args.skip_system_qemu else None,
+        require_gem5=False if args.skip_gem5 else None,
+        require_mcpat=False if args.skip_gem5 or args.skip_mcpat else None,
     )
 
     if args.verbose:

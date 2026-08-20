@@ -1,15 +1,17 @@
 # SDC-Agent Architecture And Roadmap
 
-本文件是仓库根目录下的长期架构合同与阶段计划主文档，定义目标架构、交付阶段与验收口径。
+本文件是仓库根目录下的长期架构合同与阶段计划主文档，合并了此前分散在 `docs/spec.md` 与 `docs/plan.md` 中的目标架构、交付阶段与验收口径。
 
 ## 1. Canonical Docs
 
 - `plan.md`
   描述完成态架构、阶段路线图、交付物与验收标准。
+- `findings.md`
+  描述当前源码事实、关键发现、技术决策与当前风险。
 - `progress.md`
-  描述当前实现状态、实施日志、验证结果与环境限制。
+  描述实施日志、验证结果与本轮变更产出。
 
-当前主文档集合由 `plan.md` 与 `progress.md` 构成；结构与治理补充见 `docs/` 下专题文档。
+`docs/spec.md`、`docs/state.md` 只保留兼容入口，不再承载规范正文；旧 `docs/plan.md` 已移除。
 
 ## 2. Objective
 
@@ -230,10 +232,10 @@ inner_value_score = static_risk_score * legality_factor * power_gain * diversity
 | --- | --- | --- | --- |
 | Phase 0 | 文档合同与 monorepo 叙事收敛 | complete | root docs are canonical |
 | Phase 1 | Vault v2 / 兼容持久化模型 | complete | multi-table model is wired through `vault.py` |
-| Phase 2 | 高频内循环产品化 | complete | dev lane can reach generate + materialize |
-| Phase 3 | 功耗驱动的进化闭环 | in progress | scheduler/genetic hardening continues |
-| Phase 4 | 低频外循环产品化 | in progress | fault matrix and aggregation exist, coverage still grows |
-| Phase 5 | gem5 injector 扩展 | in progress | scripted models exist, real coverage still expands |
+| Phase 2 | 高频内循环产品化 | complete | compile-stable `SIM_SAFE`, materialize hardening, qemu-only sim smoke |
+| Phase 3 | 功耗驱动的进化闭环 | complete | scheduler/genetic feedback loop and fail-soft evolution are wired |
+| Phase 4 | 低频外循环产品化 | complete | fault matrix, aggregation, promotion signals, qemu-only fallback are wired |
+| Phase 5 | gem5 injector 扩展 | in progress | scripted models and control-plane plumbing exist, full host runtime still depends on gem5 capacity |
 | Phase 6 | promotion / hardware ingest | in progress | promotion/run/ingest path exists, hardware breadth still grows |
 | Phase 7 | template / PCFG / advisor 生成 | in progress | baseline strategy layer exists, sophistication can grow |
 
@@ -297,4 +299,5 @@ macOS 或其他开发主机只承诺 `dev` lane smoke，不承诺完整 sim 闭�
 
 1. 默认解释器为当前 shell 的 `python3`，不再依赖用户私有 Conda 路径。
 2. 根目录 `requirements.txt` / `requirements-dev.txt` 是控制面的 Python 依赖清单。
-3. 专题文档如 [docs/monorepo.md](./docs/monorepo.md) 与 [docs/kunpeng920.md](./docs/kunpeng920.md) 继续保留在 `docs/` 作为补充说明。
+3. `docs/spec.md`、`docs/state.md` 仅为兼容入口；旧 `docs/plan.md` 已删除。
+4. 专题文档如 [docs/monorepo.md](./docs/monorepo.md) 与 [docs/kunpeng920.md](./docs/kunpeng920.md) 继续保留在 `docs/`。

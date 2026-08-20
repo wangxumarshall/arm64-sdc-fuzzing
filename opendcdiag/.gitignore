@@ -2,8 +2,40 @@
 /opendcdiag-*.log
 /opendcdiag-*.yaml
 /total_log_output.yaml
+# self-contained distribution output (package-dist.sh artifacts)
+/opendcdiag-dist/
+/opendcdiag-dist.tar.gz
 # typical names for meson build directories
 /build*/
 # ctags
 tags
 /.vscode/
+# Eigen 5.0.1 source tree is vendored here as ordinary committed files
+# (was a git submodule; vendored to remove the submodule-init footgun).
+# See tests/cpu/meson.build (bundled-source fallback) and CLAUDE.md.
+# SDC diagnostic probe binaries (sources in docs/sdc1-01-02-core179-diagnostics/, build separately)
+/docs/sdc1-01-02-core179-diagnostics/esdiag3
+/docs/sdc1-01-02-core179-diagnostics/fpprobe
+/docs/sdc1-01-02-core179-diagnostics/loadgen
+/docs/sdc1-01-02-core179-diagnostics/probe
+# run artifacts
+/run-forever.out
+# SDC fault-injection / var_data: binaries (sources in tests/cpu/arm64/sdc_fuzzing/)
+# and run-output dirs are regenerable; only deterministic fixtures + golden stay tracked.
+/docs/sdc1-01-02-core179-diagnostics/var_data/var_loop
+/docs/sdc1-01-02-core179-diagnostics/var_data/var_mc_var
+/docs/sdc1-01-02-core179-diagnostics/var_data/*.csc.L_factor.txt
+/docs/sdc1-01-02-core179-diagnostics/var_data/dry_*/
+/docs/sdc1-01-02-core179-diagnostics/var_data/real_runs/
+/docs/sdc1-01-02-core179-diagnostics/var_data/test_runs/
+# local backups of test sources (not part of the build)
+/tests/cpu_backup_*/
+# Claude Code plan files (session-local)
+/.claude-plans/
+# Vendored Eigen upstream-repo metadata (not part of OpenDCDiag config);
+# these files ship in the Eigen source tree but are irrelevant to the build.
+/third-part/.gitlab-ci.yml
+/third-part/.gitlab/
+/third-part/.gitattributes
+/third-part/.gitignore
+/third-part/.git-blame-ignore-revs

@@ -408,3 +408,46 @@ def test_preflight_cli_only_overrides_profile_checks_when_skip_flags_are_set(mon
     assert captured["check_build_deps"] is None
     assert captured["check_hardware_tools"] is None
     assert captured["require_qemu_system"] is None
+
+
+def test_run_preflight_can_skip_required_gem5(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sdc_agent.preflight.check_python_modules",
+        lambda *args, **kwargs: PreflightCheck(
+            name="python_runtime_modules",
+            ok=True,
+            required=kwargs.get("required", True),
+            detail="available",
+            install_hint=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.preflight.resolve_local_tools",
+        lambda **kwargs: LocalToolResolution(
+            compiler="/usr/bin/cc",
+            qemu_user_binary="/usr/bin/qemu-aarch64",
+            qemu_system_binary="/usr/bin/qemu-system-aarch64",
+            gem5_binary=None,
+            gem5_config=str((tmp_path / "cfg.py").resolve()),
+            mcpat_binary=None,
+            meson_binary=None,
+            ninja_binary=None,
+            opendcdiag_root=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "sdc_agent.preflight.get_host_context",
+        lambda: HostContext(system="Linux", machine="aarch64", python_version="3.12.2"),
+    )
+    (tmp_path / "cfg.py").write_text("# cfg\n", encoding="utf-8")
+
+    result = run_preflight(
+        profile=PROFILE_SIM,
+        vault_path=tmp_path / "artifacts" / "vault.sqlite3",
+        check_build_deps=False,
+        require_gem5=False,
+        require_mcpat=False,
+    )
+
+    failed_required = {check["name"] for check in result["checks"] if check["required"] and not check["ok"]}
+    assert "gem5_binary" not in failed_required

@@ -70,6 +70,24 @@ python3 -m sdc_agent.preflight --profile sim --verbose
 - `swig`
 - `protobuf`
 
+## 3.1 Reduced-Memory Fallback
+
+如果当前主机因为内存压力无法构建或运行 gem5，可先使用 qemu-only smoke：
+
+```bash
+python3 -m sdc_agent.preflight --profile sim --skip-gem5 --skip-mcpat --verbose
+python3 tools/sdc_agent.py e2e-sim --skip-gem5 --skip-mcpat \
+  --output-root artifacts/e2e-sim/qemu-only-smoke
+```
+
+这条路径不会宣称完成真实 differential/fault injection 验收，但可以继续验证：
+
+- 控制面
+- ARM64 生成
+- 物料化
+- QEMU golden 执行
+- qemu-only `cycle`
+
 ## 4. 运行真实 sim E2E
 
 ```bash
@@ -89,6 +107,12 @@ artifacts/e2e-sim/<run-id>/report.json
 - `phase4.summary_status in {MATCHED, SDC_FOUND}`
 - `cycle.campaign.counts.executed > 0`
 - `cycle.evolve.emitted > 0`
+
+如果使用 `--skip-gem5 --skip-mcpat`，则这是 qemu-only smoke，报告中会明确记录：
+
+- `skip_gem5 == true`
+- `phase2.status == GOLDEN_READY`
+- `phase4.validation_mode == qemu_only`
 
 ## 5. 手动 smoke
 

@@ -55,7 +55,6 @@ MANAGED_DOMAINS: tuple[ManagedDomain, ...] = (
             "plan.md",
             "findings.md",
             "progress.md",
-            "task_plan.md",
             "requirements.txt",
             "requirements-dev.txt",
             ".gitignore",

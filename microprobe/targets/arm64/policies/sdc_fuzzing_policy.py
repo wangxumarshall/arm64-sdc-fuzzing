@@ -41,6 +41,28 @@ def _target_looks_like_arm64(target):
 class SDCSensitiveAnalyzer(object):
     """Pick ARM64 instructions that are more likely to expose silent faults."""
 
+    _SIM_SAFE_INSTRUCTION_NAMES = {
+        "MOVZ_X_V0",
+        "MOVZ_W_V0",
+        "MOVK_X_V0",
+        "MOVK_W_V0",
+        "MOVN_X_V0",
+        "MOVN_W_V0",
+        "ADD_X_IMM_V0",
+        "ADD_W_IMM_V0",
+        "ADD_X_REG_V0",
+        "ADD_W_REG_V0",
+        "ADDS_X_IMM_V0",
+        "ADDS_W_IMM_V0",
+        "SUB_X_IMM_V0",
+        "SUB_W_IMM_V0",
+        "SUB_X_REG_V0",
+        "SUB_W_REG_V0",
+        "SUBS_X_IMM_V0",
+        "SUBS_W_IMM_V0",
+        "NOP_V0",
+    }
+
     _SIM_SAFE_MNEMONICS = {
         "MOVZ", "MOVK", "MOVN",                 # Move
         "ADD", "SUB", "CMP", "CMN",             # Arithmetic
@@ -78,6 +100,8 @@ class SDCSensitiveAnalyzer(object):
 
         for instr in instructions:
             mnemonic = instr.mnemonic.upper()
+            if not aggressive and instr.name not in self._SIM_SAFE_INSTRUCTION_NAMES:
+                continue
             if mnemonic in selected_mnemonics:
                 allowed.append(instr)
 
