@@ -14,9 +14,14 @@ Output binary: `opendcdiag` (was historically `sandstone`).
 - openEuler / aarch64, GCC 12.3.1 (`gnu++23` supported), Meson 1.3.1, Ninja 1.11.1
 - Deps: boost 1.83 (headers only is fine — `meson.build` falls back from
   header-check), gtest_main 1.14, libzstd 1.5.5, zlib 1.2.13.
-- Eigen: system pkg is 3.3.8 (too old; needs >= 5.0) → build uses the
-  bundled `third-part/` Eigen 5.0.1 source, which is **committed to the repo**
-  (vendored, not a submodule). No fetch step needed.
+- Eigen: on this host a system `eigen3` is found at `/usr/local/include/eigen3`
+  (3.4.0); `tests/cpu/meson.build` prefers a system `eigen3 >= 5.0` when present
+  and otherwise falls back to the bundled `third-part/` Eigen 5.0.1 source
+  (which is **committed to the repo**, vendored, not a submodule). In practice
+  the 3.4.0 system pkg is accepted and used (no Eigen-5.0-only API is
+  exercised), so no fetch step is needed. If `meson setup` prints
+  `Using bundled Eigen 5.0 source from third-part/`, the vendored tree is
+  being used instead.
 
 ## Build commands
 
@@ -44,6 +49,35 @@ otherwise falls back to the bundled tree via
 `Using bundled Eigen 5.0 source from third-part/`, the vendored tree is
 being used. To switch Eigen versions, replace the contents of `third-part/`
 (keep the flat layout: `third-part/Eigen/Core` must exist).
+
+## ARM64 优化库依赖 (arithmetic_arm)
+
+`tests/cpu/arithmetic_arm/` (13 个 SDC 测试: `aor_math`/`aor_string`/
+`crt_builtins`/`acl_gemm`/`gmp_bignum`/`gmp_bigadd`/`adcx_arm`/`adcxlong_arm`/
+`adcx_adox_interleaved_arm`/`adox_arm`/`bigint_mulx_arm`/`cbw_arm`/`fisttp_arm`)
+依赖第三方优化库, 在 `tests/cpu/meson.build` 的 `if host_machine.cpu_family()
+== 'aarch64'` 块里挂接. 这些库走**系统包**, 不需要 `third_party/arm-opt-install`:
+
+- `libmathlib` / `libstringlib` (Arm Optimized Routines, math+string) —
+  系统包 `/usr/lib/lib{mathlib,stringlib}.a`, 头文件 `/usr/include/{mathlib,stringlib}.h`.
+- `libarm_compute` (Arm Compute Library, 动态库) — 系统包 `/usr/lib64/libarm_compute.so.29`,
+  头文件 `/usr/include/arm_compute/`. 动态链接, 运行时由 ldconfig 解析, 无需 `LD_LIBRARY_PATH`.
+- `libgmp` — 系统包 `/usr/lib64/libgmp.so`, 头文件 `/usr/include/gmp.h`.
+- compiler-rt 软浮点 builtins — 系统 compiler-rt 17
+  `/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/libclang_rt.builtins.a`,
+  提供 `__addsf3`/`__subsf3`/`__mulsf3`/`__divsf3` (`crt_builtins.cpp` 用).
+
+**`-lfplib` 已从 `aor_dep` 移除** (提交 4316aa36 曾引用 `third_party/arm-opt-install`
+下的 `libfplib`, 但该目录在此主机从不存在, 且 AOR 的 fplib 是 32 位 ARM
+软浮点汇编 — Cortex-M `armv6-m` / A32 `at32`, 为无硬件浮点的目标设计 —
+无法在 aarch64 上汇编/链接, AOR 也没有 aarch64 fplib 端口. Kunpeng 920
+armv8.1-a 有硬件浮点, 不需要软浮点例程; 且无任何测试源码引用 fplib 符号.
+软浮点覆盖由 `crt_builtins.cpp` 经系统 compiler-rt 完成.) 若未来有测试
+需要真实 fplib, 需先为 aarch64 移植 AOR fplib, 再加回 `-lfplib`.
+
+`crt_builtins_lib` 优先 `third_party/arm-opt-install/lib/libclang_rt.builtins-aarch64.a`,
+不存在时回退系统 compiler-rt 路径 (见 `tests/cpu/meson.build` 中的
+`fs.exists()` 分支).
 
 ## Full-load / continuous run
 

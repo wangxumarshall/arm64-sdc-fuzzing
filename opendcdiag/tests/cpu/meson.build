@@ -376,7 +376,15 @@ tests_set_base.add(
 )
 
 # 直接查找 libisal 库（不依赖 pkg-config）
-isal_lib = cpp.find_library('isal', required : false)
+# isal 强制静态链入（static : true），把 isa-l CRC 代码打包进 opendcdiag 二进制，
+# 不再运行时依赖 libisal.so.2. 这里不跟随 dep_static: 全局 -Ddependency_link=static
+# 会让只有 .so 的 libarm_compute 链接失败, 故 isal 单独硬编码静态.
+# /usr/lib/libisal.a 自包含（内部成员互引，无外部非标准符号），静态链入不缺符号.
+isal_lib = cpp.find_library('isal', required : false, static : true)
+# atomic: 提供 __atomic_load_16/__atomic_store_16/__atomic_compare_exchange_16
+# 等 128 位原子符号 (cmpxchg16b 测试用). 本机未装 libatomic-static 包
+# (无 libatomic.a), 故不强制 static:true — 否则 find_library 返回未找到,
+# 链接缺符号. 走动态 libatomic.so.1, 打包时随包附带到 lib/ 即可.
 atomic_lib = cpp.find_library('atomic', required : false)
 # 如果找到 isal，添加 CRC 测试
 #if isal_dep.found()
@@ -506,8 +514,14 @@ endif
 
 # ---------------------------------------------------------------------------
 # arithmetic_arm: 第三方优化库测试用例 (GMP / Arm Optimized Routines /
-# Arm Compute Library / compiler-rt). 这些库统一安装于
-# third_party/arm-opt-install 下; GMP 走系统路径. 仅在 aarch64 上启用.
+# Arm Compute Library / compiler-rt). mathlib/stringlib/arm_compute 走系统包;
+# compiler-rt 软浮点 builtins 走系统 compiler-rt. 仅在 aarch64 上启用.
+#
+# 注: Arm Optimized Routines 的 fplib 是 32 位 ARM 软浮点汇编 (Cortex-M
+# armv6-m / A32 at32), 为无硬件浮点的目标设计; aarch64 原生有硬件浮点,
+# AOR 也没有 aarch64 fplib 端口, 且无任何测试源码引用 fplib 符号 (软浮点
+# 由 crt_builtins.cpp 经 compiler-rt 的 __addsf3 等覆盖). 因此不再链接
+# -lfplib. 详见 CLAUDE.md "ARM64 优化库依赖" 一节.
 # ---------------------------------------------------------------------------
 if host_machine.cpu_family() == 'aarch64'
     arm_opt_prefix = join_paths(meson.project_source_root(), '..', 'third_party', 'arm-opt-install')
@@ -524,23 +538,40 @@ if host_machine.cpu_family() == 'aarch64'
         )
     endif
 
-    # Arm Optimized Routines: mathlib/stringlib/fplib (符号唯一, 无冲突)
+    # Arm Optimized Routines: mathlib/stringlib. 强制静态链入 (.a), 消除对
+    # 目标机 libmathlib.so/libstringlib.so 的运行时依赖 (它们不在 22.03 SP4
+    # 标准仓库里, 随包附带 .so 又会带进 GLIBC_2.38 版本需求). find_library 的
+    # static:true 让 meson 直接传 .a 路径而非 -l..., 避免同目录有 .so 时 ld
+    # 默认选动态. 不链接 fplib (见上注释).
+    aor_mathlib = cpp.find_library('mathlib', required : false,
+        static : true, dirs : [arm_opt_libdir, '/usr/lib'])
+    aor_stringlib = cpp.find_library('stringlib', required : false,
+        static : true, dirs : [arm_opt_libdir, '/usr/lib'])
     aor_dep = declare_dependency(
         compile_args : ['-isystem', arm_opt_incdir],
-        link_args    : ['-L' + arm_opt_libdir,
-                        '-lmathlib', '-lstringlib', '-lfplib'],
+        dependencies : [aor_mathlib, aor_stringlib],
     )
 
-    # Arm Compute Library: libarm_compute (C++ 张量/算子)
+    # Arm Compute Library: libarm_compute (系统包 /usr/lib64; C++ 张量/算子)
     acl_dep = declare_dependency(
         compile_args : ['-isystem', arm_opt_incdir],
         link_args    : ['-L' + arm_opt_libdir, '-larm_compute'],
     )
 
-    # compiler-rt builtins: 静态库, 整数实现的软浮点 (__addsf3 等)
+    # compiler-rt builtins: 静态库, 软浮点整数实现 (__addsf3 等).
+    # 优先 third_party/arm-opt-install/lib/libclang_rt.builtins-aarch64.a;
+    # 否则回退系统 compiler-rt (openEuler: /usr/lib/clang/<ver>/lib/<triple>/
+    # libclang_rt.builtins.a). -Wl,--whole-archive 防止软浮点符号被剔除.
+    crt_builtins_local = join_paths(arm_opt_libdir, 'libclang_rt.builtins-aarch64.a')
+    if fs.exists(crt_builtins_local)
+        crt_builtins_path = crt_builtins_local
+    else
+        # 系统 compiler-rt (LLVM 资源目录): 静态软浮点 builtins.
+        crt_builtins_path = '/usr/lib/clang/17/lib/aarch64-openEuler-linux-gnu/libclang_rt.builtins.a'
+    endif
     crt_builtins_lib = declare_dependency(
         link_args : ['-Wl,--whole-archive',
-                      join_paths(arm_opt_libdir, 'libclang_rt.builtins-aarch64.a'),
+                      crt_builtins_path,
                       '-Wl,--no-whole-archive'],
     )
 

@@ -32,6 +32,19 @@
  *
  * Allocation uses mmap + mbind(MPOL_BIND) directly via syscall, so it does
  * not depend on libnuma.
+ *
+ * NUMA-FALLBACK (fixed): the original probe hardcoded input on node 7 and
+ * swapped on node 0, assuming core 179's home node was 7. That is wrong on
+ * machines whose topology differs (e.g. this ARM64 host has only nodes 0-3,
+ * and memory only on node 1), so mbind() returned EINVAL and the test failed
+ * in test_init before the hot loop ever ran -- a test-environment mismatch,
+ * not an SDC. The probe now resolves the two nodes at runtime: it scans
+ * /sys/devices/system/node/has_memory for nodes that actually have memory,
+ * picks two distinct such nodes for the input/swap domains (falling back to
+ * a single node, then to plain unbound mmap if fewer than one is available),
+ * and only calls mbind() for nodes that exist. Compile-time overrides via
+ * PROBE_E_INPUT_NODE / PROBE_E_SWAP_NODE are still honored when they name
+ * valid nodes.
  * @endparblock
  */
 
@@ -41,16 +54,17 @@
 #include <sys/syscall.h>
 #include <cstring>
 #include <cerrno>
+#include <cstdio>
 
 #define MOVBE_BUFFER_SIZE (1 << 14)
 
-// NUMA nodes -- override at compile time if needed. Defaults: input on core
-// 179's home node (7), swapped on a different node (0) = different LLC.
+// Compile-time overrides still honored if they name real memory nodes.
+// Defaults (-1) mean "resolve at runtime" (see node_with_memory()).
 #ifndef PROBE_E_INPUT_NODE
-#  define PROBE_E_INPUT_NODE 7
+#  define PROBE_E_INPUT_NODE (-1)
 #endif
 #ifndef PROBE_E_SWAP_NODE
-#  define PROBE_E_SWAP_NODE 0
+#  define PROBE_E_SWAP_NODE (-1)
 #endif
 
 struct movbe_data {
@@ -59,7 +73,9 @@ struct movbe_data {
 };
 
 // mmap a page-aligned region of `bytes` and bind it to NUMA `node` via
-// mbind(MPOL_BIND). Returns MAP_FAILED on failure. We round up to pages.
+// mbind(MPOL_BIND). Returns MAP_FAILED only on mmap failure; mbind failure
+// is logged but tolerated (the region stays unbound) so the test can still
+// run its hot loop instead of failing in init. We round up to pages.
 static void *mmap_on_node(size_t bytes, int node)
 {
     long pagesize = sysconf(_SC_PAGESIZE);
@@ -71,18 +87,21 @@ static void *mmap_on_node(size_t bytes, int node)
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (p == MAP_FAILED) return p;
 
-    // Build a nodemask with just `node`.
-    unsigned long nodemask = 0UL;
+    // Build a nodemask with just `node`. Only attempt the bind when the node
+    // is a real non-negative index that fits in a single unsigned long mask.
     if (node >= 0 && node < (int)(sizeof(unsigned long) * 8)) {
-        nodemask = (1UL << node);
+        unsigned long nodemask = (1UL << node);
         // mbind(addr, len, MPOL_BIND, nodemask, maxnode, flags=0)
         // maxnode = number of bits in nodemask (use 64).
         long r = syscall(__NR_mbind, p, total, 2 /*MPOL_BIND*/,
                          &nodemask, sizeof(unsigned long) * 8, 0);
         if (r != 0) {
-            // mbind failed: munmap and report failure so init aborts clearly.
-            munmap(p, total);
-            return MAP_FAILED;
+            // mbind failed (e.g. node has no memory / does not exist on this
+            // host): do NOT abort the whole test. Log and leave the region
+            // unbound; the hot loop is still a valid byte-swap round-trip
+            // probe, just without the cross-NUMA placement guarantee.
+            log_info("MovBE-probeE: mbind to node %d failed (errno=%d); "
+                     "continuing unbound", node, errno);
         }
     }
     // Touch every page so the binding takes effect (first-touch).
@@ -90,19 +109,79 @@ static void *mmap_on_node(size_t bytes, int node)
     return p;
 }
 
+// Return the number of NUMA nodes that carry memory, by parsing
+// /sys/devices/system/node/has_memory (a cpuset-style list like "1" or
+// "0,2-3"). Up to `out_nodes_len` node ids are written to out_nodes in
+// ascending order; returns the count filled. On any parse error returns 0.
+static int nodes_with_memory(int *out_nodes, int out_nodes_len)
+{
+    FILE *f = fopen("/sys/devices/system/node/has_memory", "r");
+    if (!f) return 0;
+    char buf[256];
+    int count = 0;
+    if (fgets(buf, sizeof(buf), f)) {
+        // Parse a cpuset list: comma-separated ranges/terms, e.g. "1" or
+        // "0,2-3". Trailing newline is ignored by strtoul.
+        char *p = buf;
+        while (*p && count < out_nodes_len) {
+            // skip non-digit separators
+            while (*p && *p != '-' && (*p < '0' || *p > '9')) p++;
+            if (!*p) break;
+            char *end;
+            unsigned long a = strtoul(p, &end, 10);
+            p = end;
+            unsigned long b = a;
+            if (*p == '-') {
+                p++;
+                b = strtoul(p, &end, 10);
+                p = end;
+            }
+            for (unsigned long n = a; n <= b && count < out_nodes_len; ++n)
+                out_nodes[count++] = (int)n;
+        }
+    }
+    fclose(f);
+    return count;
+}
+
 static int movbe_init(struct test *test)
 {
     movbe_data *data = (movbe_data *)malloc(sizeof(movbe_data));
+
+    // Resolve the two placement nodes at runtime. Compile-time overrides
+    // (PROBE_E_INPUT_NODE / PROBE_E_SWAP_NODE) win if they name real memory
+    // nodes; otherwise we pick two distinct memory-bearing nodes from the
+    // host's /sys/devices/system/node/has_memory, falling back to the same
+    // node (or none, i.e. unbound mmap) if the host has fewer than two.
+    int memnodes[16];
+    int nmem = nodes_with_memory(memnodes, 16);
+    int input_node = PROBE_E_INPUT_NODE;
+    int swap_node = PROBE_E_SWAP_NODE;
+
+    auto node_is_memory = [&](int n) {
+        for (int i = 0; i < nmem; ++i) if (memnodes[i] == n) return true;
+        return false;
+    };
+    if (input_node < 0 || !node_is_memory(input_node))
+        input_node = (nmem >= 1) ? memnodes[0] : -1;
+    if (swap_node < 0 || !node_is_memory(swap_node) || swap_node == input_node)
+        swap_node = (nmem >= 2) ? memnodes[1] : input_node;
+
     data->input = (uint32_t *)mmap_on_node(MOVBE_BUFFER_SIZE * sizeof(uint32_t),
-                                           PROBE_E_INPUT_NODE);
+                                           input_node);
     data->swapped = (uint32_t *)mmap_on_node(MOVBE_BUFFER_SIZE * sizeof(uint32_t),
-                                             PROBE_E_SWAP_NODE);
+                                             swap_node);
     if (data->input == MAP_FAILED || data->swapped == MAP_FAILED) {
-        log_error("MovBE-probeE: mmap/mbind failed (input=%p swapped=%p errno=%d)",
+        // mmap itself failed (not mbind -- that is tolerated inside
+        // mmap_on_node). This is a genuine allocation failure; abort.
+        log_error("MovBE-probeE: mmap failed (input=%p swapped=%p errno=%d)",
                   (void *)data->input, (void *)data->swapped, errno);
         free(data);
         return EXIT_FAILURE;
     }
+    log_info("MovBE-probeE: placement input_node=%d swap_node=%d "
+             "(memnodes=%d, fallback used)",
+             input_node, swap_node, nmem);
 
     for (size_t i = 0; i < MOVBE_BUFFER_SIZE; ++i) {
         data->input[i] = random32();

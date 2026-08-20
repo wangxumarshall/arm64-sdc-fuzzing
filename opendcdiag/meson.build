@@ -188,6 +188,11 @@ else
     if get_option('buildtype') == 'debug'
         debug_nasm_flags = '-gdwarf'
     endif
+    # 注: 不加 -static-libgcc. 它与 --whole-archive 链入的 compiler-rt
+    # builtins 冲突 (二者都提供 SME-ABI 符号 __arm_za_disable/__arm_tpidr2_save,
+    # 导致 multiple definition). libgcc_s.so.1 作为动态依赖随包附带到 lib/ 即可
+    # (它只依赖 glibc, 可靠). 若未来需交付到更旧 glibc 目标, 应改为在目标基线
+    # 重编, 而非在此用 -static-libgcc (无法解决 .so 内部 verneed).
 endif
 
 default_c_flags += [
@@ -305,6 +310,13 @@ sandstone_tests_link_whole += [sandstone_tests]
 executable(
     get_option('executable_name'),
     install: true,
+    # RPATH=$ORIGIN/lib: arm_compute.so 只能动态链接 (无静态归档), 随包附带到
+    # 同目录 lib/ 子目录后, 二进制靠 $ORIGIN/lib 定位, 不依赖目标机 ldconfig
+    # / LD_LIBRARY_PATH. 注意: 若 .so 是在更新 glibc 上编译的, 其内部 verneed
+    # 仍会要求高版本符号, RPATH 只解决"找不到文件", 解决不了版本 — 需保证
+    # .so 与二进制在目标基线 (如 22.03 SP4 / glibc 2.34) 上构建.
+    build_rpath: '$ORIGIN/lib',
+    install_rpath: '$ORIGIN/lib',
     dependencies: target_deps,
     link_with: [
         sandstone_tests_link,

@@ -27,10 +27,25 @@
  * way in and one on the way out; the stored value is the single-swapped
  * form. The round-trip property bswap(bswap(x)) == x still holds for the
  * comparison value `val`, so a healthy core still passes.
+ *
+ * THREAD-SAFETY (fixed): the baseline comment above ("a healthy core still
+ * passes") only holds in the single-threaded case. Under `-n N` the framework
+ * runs movbe_run on N threads sharing the SAME test->data buffer; if every
+ * thread stores back into the shared data->input[i], a thread's reload of
+ * input[i] can observe a value another thread wrote between its store and
+ * load, so reloaded != val deterministically (the failure signature is
+ * actual == original input, golden == bswap(input)). That is a test-harness
+ * race, not an SDC. To preserve the SLF probe's intent (store-to-load
+ * forwarding on the input line) without the multi-writer race, each thread
+ * now operates on its OWN private copy of the input line: the shared
+ * data->input is treated as a read-only seed, copied once per thread into a
+ * thread_local buffer, and the store-back/reload happens on that private
+ * copy. Single-threaded behavior is unchanged.
  * @endparblock
  */
 
 #include "sandstone.h"
+#include <cstring>
 
 #define MOVBE_BUFFER_SIZE (1 << 14)
 
@@ -38,6 +53,15 @@ struct movbe_data {
     uint32_t *input;
     uint32_t *swapped;
 };
+
+// Per-thread private input line. The shared data->input is now a read-only
+// seed; each thread copies it into its own thread_local buffer on first use
+// and does the store-back/reload there, eliminating the multi-writer race on
+// the shared buffer. See THREAD-SAFETY note in the file header.
+static thread_local struct {
+    uint32_t *input;        // private per-thread SLF target
+    bool initialized;
+} tls;
 
 static int movbe_init(struct test *test)
 {
@@ -57,6 +81,18 @@ static int movbe_run(struct test *test, int cpu)
 {
     movbe_data *data = (movbe_data *)test->data;
 
+    // Lazily set up this thread's private input line from the shared seed.
+    // The private buffer is what we store back into and reload from, so the
+    // store-to-load-forwarding probe runs in isolation per thread.
+    if (!tls.initialized) {
+        tls.input = (uint32_t *)aligned_alloc_safe(64,
+                MOVBE_BUFFER_SIZE * sizeof(uint32_t));
+        if (!tls.input)
+            return EXIT_FAILURE;
+        memcpy(tls.input, data->input, MOVBE_BUFFER_SIZE * sizeof(uint32_t));
+        tls.initialized = true;
+    }
+
     TEST_LOOP(test, 1 << 13) {
         for (size_t i = 0; i < MOVBE_BUFFER_SIZE; ++i) {
             // PROBE C: store-to-load-forwarding. Read input[i], byte-swap it,
@@ -65,11 +101,11 @@ static int movbe_run(struct test *test, int cpu)
             // the store buffer (SLF) rather than the cache, because the
             // store and load hit the exact same address. A defect in the
             // store-buffer / forwarding path shows up as reloaded != stored.
-            volatile uint32_t *vinput = &data->input[i];
+            volatile uint32_t *vinput = &tls.input[i];
             uint32_t val = *vinput;
             val = __builtin_bswap32(val);
 
-            data->input[i] = val;          // store to the same address
+            tls.input[i] = val;             // store to the same address (private)
 
             uint32_t reloaded = *vinput;    // SLF reload (volatile forces it)
 
