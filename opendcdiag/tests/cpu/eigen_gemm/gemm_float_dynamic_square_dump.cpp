@@ -26,7 +26,30 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/time.h>
 using namespace Eigen;
+
+// Binary fail-record: appended to /tmp/eigen_gemm_float_dump_<pid>.bin on
+// each miscompare. Cold-branch only; FMA hot path (x = lhs*rhs) byte-identical
+// to the original (see memory eigen-sdc-bitflip-position-stats: dump variants
+// reproduce the original fail count — cold-branch dumps do not suppress the
+// defect).
+#pragma pack(push, 1)
+struct eigen_gemm_dump_record {
+    uint64_t timestamp_us;
+    uint32_t cpu;
+    uint32_t iteration;
+    uint32_t row;
+    uint32_t col;
+    uint32_t elem_idx;
+    uint32_t component;       // 0=scalar
+    uint64_t golden_bits;     // float value zero-extended to 64 bits
+    uint64_t actual_bits;
+    uint64_t xor_val;
+};
+#pragma pack(pop)
 
 // Matrix dimension. Historically hardcoded to 256. Now configurable via
 // the GEMM_K_DIM environment variable (default 256 = original baseline) so
@@ -54,6 +77,7 @@ struct eigen_test_data {
     Mat lhs;
     Mat rhs;
     Mat prod;
+    int dump_fd;
 };
 }
 
@@ -68,10 +92,18 @@ static int eigen_gemm_float_dynamic_square_init(struct test *test) {
     } catch (...) {
         report_fail_msg("Exception on Eigen code, most probably OOM");
     }
+
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/eigen_gemm_float_dump_%d.bin", getpid());
+    CAST(test->data)->dump_fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (CAST(test->data)->dump_fd < 0)
+        log_error("eigen_gemm_float_dump: failed to open dump log %s", path);
+
     return EXIT_SUCCESS;
 }
 
 static int eigen_gemm_float_dynamic_square_run(struct test *test, int cpu) {
+    uint32_t iter = 0;
     do {
         auto testdata = CAST(test->data);
         Mat x;
@@ -106,20 +138,42 @@ static int eigen_gemm_float_dynamic_square_run(struct test *test, int cpu) {
                           gb[3], gb[2], gb[1], gb[0],
                           ab[3], ab[2], ab[1], ab[0],
                           xb[3], xb[2], xb[1], xb[0]);
+
+                // Binary record (cold branch only — hot path is the gemm above)
+                if (testdata->dump_fd >= 0) {
+                    struct timeval tv;
+                    gettimeofday(&tv, NULL);
+                    struct eigen_gemm_dump_record rec = {
+                        .timestamp_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec,
+                        .cpu = (uint32_t)cpu,
+                        .iteration = iter,
+                        .row = (uint32_t)row,
+                        .col = (uint32_t)col,
+                        .elem_idx = (uint32_t)idx,
+                        .component = 0,
+                        .golden_bits = (uint64_t)golden_bits,
+                        .actual_bits = (uint64_t)actual_bits,
+                        .xor_val = (uint64_t)xorv,
+                    };
+                    write(testdata->dump_fd, &rec, sizeof(rec));
+                }
                 report_fail_msg("eigen_gemm_float_dump: product miscompare at [%d,%d]", row, col);
             }
         }
         (void)ok;
+        iter++;
     } while (test_time_condition(test));
     return EXIT_SUCCESS;
 }
 
 static int eigen_gemm_float_dynamic_square_finish(struct test *test) {
+    if (CAST(test->data)->dump_fd >= 0)
+        close(CAST(test->data)->dump_fd);
     delete(CAST(test->data));
     return EXIT_SUCCESS;
 }
 
-DECLARE_TEST(eigen_gemm_float_dynamic_square_dump, "Eigen GEMM payload (float, dynamic, square) — dump variant records golden/actual/xor on miscompare")
+DECLARE_TEST(eigen_gemm_float_dynamic_square_dump, "Eigen GEMM payload (float, dynamic, square) — dump variant records golden/actual/xor (text + binary log) on miscompare")
   .groups = DECLARE_TEST_GROUPS(&group_math),
   .test_init = eigen_gemm_float_dynamic_square_init,
   .test_run = eigen_gemm_float_dynamic_square_run,

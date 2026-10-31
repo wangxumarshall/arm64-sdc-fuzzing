@@ -39,7 +39,6 @@
 static constexpr size_t NUM_ELEMENTS = 1024;
 static constexpr float FLOAT_MIN = -100.0f;
 static constexpr float FLOAT_MAX = 100.0f;
-static constexpr uint64_t FIXED_SEED = 0x123456789ABCDEF0ULL;
 
 // 单个线程专属的资源上下文
 struct PerThreadContext {
@@ -84,7 +83,8 @@ static int fisttp_arm_init(struct test *test) {
 
     shared_data->thread_ctx.reserve(max_cpus);
 
-    std::mt19937_64 rng(FIXED_SEED);
+    /* 随机种子：固定种子=单一输入模式，SDC 是 seed 敏感的（fixed-seed 陷阱） */
+    std::mt19937_64 rng(std::random_device{}());
     std::uniform_real_distribution<float> dist(FLOAT_MIN, FLOAT_MAX);
 
     for (size_t i = 0; i < NUM_ELEMENTS; ++i) {

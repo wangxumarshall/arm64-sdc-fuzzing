@@ -1,0 +1,33 @@
+── 第一步 日志风险分级 ──
+条件1 SEL硬件报错: 窗口内硬错类 0 条 (全部137条中 良性137/未归类0) → ✓ 无硬件报错
+条件2 软件报错: 69 条核归因错误, 5 种受害者软件(awk,bash,control,irqbalance...), 核179 占比 100% → ✓ ×10
+条件3 非计划重启: 10 次/30d (计划内 0) → ✓ ×10
+条件4 阶段对比: 数据不足(前一阶段无日志) → ✗
+风险 = 基线 × 10^2   模式 = priority (优先核 179)
+
+原始判定 JSON:
+{
+ "cond1": true,
+ "cond2": true,
+ "cond2_core": 179,
+ "cond2_share": 1.0,
+ "cond2_kinds": [
+  "awk",
+  "bash",
+  "control",
+  "irqbalance",
+  "pgrep"
+ ],
+ "cond3": true,
+ "cond3_unplanned": 10,
+ "cond3_planned": 0,
+ "cond4": false,
+ "cond4_prev_available": false,
+ "journal_total": 69,
+ "journal_per_core": {
+  "179": 69
+ },
+ "sel_hard": [],
+ "multipliers": 2,
+ "mode": "priority"
+}

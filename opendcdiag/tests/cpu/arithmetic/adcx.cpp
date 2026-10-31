@@ -114,7 +114,7 @@ static int adcx_init(struct test *test) {
     data->rhs.resize(N);
     data->gold.resize(N);
 
-    std::mt19937_64 rng(12345);
+    std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<uint64_t> dist;
     for (size_t i = 0; i < N; ++i) {
         data->lhs[i] = dist(rng);

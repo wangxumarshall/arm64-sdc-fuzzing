@@ -153,12 +153,12 @@ static int adcx_adox_interleaved_run(struct test *test, int cpu) {
 
         bool passed = data_ok && consistent;
 
-        print_colored_result("adcx_adox_interleaved", passed,
-                             td->lhs.data(), td->rhs.data(),
-                             result_cf.data(), result_of.data(),
-                             td->gold.data(), N);
-
         if (!passed) {
+            /* fail 详查输出移到冷分支——热循环内无条件 fprintf 是时序扰动源 */
+            print_colored_result("adcx_adox_interleaved", passed,
+                                 td->lhs.data(), td->rhs.data(),
+                                 result_cf.data(), result_of.data(),
+                                 td->gold.data(), N);
             report_fail_msg("adcx_adox_interleaved: data_ok=%d, consistent=%d",
                             data_ok, consistent);
             return EXIT_FAILURE;

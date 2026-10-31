@@ -148,12 +148,12 @@ static int adcxlong_run(struct test *test, int cpu) {
 
         bool passed = data_ok && consistent;
 
-        print_colored_result("adcxlong", passed,
-                             td->lhs.data(), td->rhs.data(),
-                             result.data(), td->gold.data(),
-                             N, td->carry_in);
-
         if (!passed) {
+            /* fail 详查输出移到冷分支——热循环内无条件 fprintf 是时序扰动源 */
+            print_colored_result("adcxlong", passed,
+                                 td->lhs.data(), td->rhs.data(),
+                                 result.data(), td->gold.data(),
+                                 N, td->carry_in);
             report_fail_msg("adcxlong: data_ok=%d, consistent=%d", data_ok, consistent);
             return EXIT_FAILURE;
         }

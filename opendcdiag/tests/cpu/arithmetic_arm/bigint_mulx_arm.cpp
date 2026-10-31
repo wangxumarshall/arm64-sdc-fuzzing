@@ -26,7 +26,6 @@
 
 static constexpr int NUM_WORDS = 8;          // 512 位 = 8 × 64 位
 static constexpr int BITS = 512;
-static constexpr uint64_t FIXED_SEED = 0x123456789ABCDEF0ULL;
 
 struct TestData {
     std::vector<uint64_t> a_words;
@@ -59,7 +58,8 @@ static int bigint_mulx_arm_init(struct test *test) {
     data->b_words.resize(NUM_WORDS);
     data->golden_product.resize(NUM_WORDS);
 
-    std::mt19937_64 rng(FIXED_SEED);
+    /* 随机种子：固定种子=单一输入模式，SDC 是 seed 敏感的（fixed-seed 陷阱） */
+    std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<uint64_t> dist(0, UINT64_MAX);
 
     for (int i = 0; i < NUM_WORDS; ++i) {

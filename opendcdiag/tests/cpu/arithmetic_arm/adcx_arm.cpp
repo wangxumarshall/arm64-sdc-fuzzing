@@ -179,23 +179,28 @@ static int adcx_arm_run(struct test *test, int cpu) {
 
             bool passed = data_ok && consistent;
 
-            // 7. 输出结果（每次迭代都输出）
-            const char *color = passed ? "\033[32m" : "\033[31m";
-            const char *result_str = passed ? "PASS" : "FAIL";
-
-            fprintf(stderr,
-                    "[adcx_arm] Iter %zu: a_high=0x%016" PRIx64 " b_high=0x%016" PRIx64 " "
-                    "hw_high=0x%016" PRIx64 " golden_high=0x%016" PRIx64 " "
-                    "carry hw=%" PRIu64 " golden=%" PRIu64 " consistent=%d → %s%s\033[0m\n",
-                    i,
-                    a_words[NUM_WORDS-1], b_words[NUM_WORDS-1],
-                    hw_words[NUM_WORDS-1], golden[NUM_WORDS-1],
-                    hw_words[NUM_WORDS], golden[NUM_WORDS],
-                    consistent,
-                    color, result_str);
-
             if (!passed) {
-                report_fail_msg("adcx_arm: mismatch at pair %zu", i);
+                /* fail 详查：原版每对元素无条件 fprintf 1024 次/轮，热循环 I/O
+                 * 把时序全毁；现只在 fail 冷分支输出，详查数据走 log_data */
+                char ctx[192];
+                snprintf(ctx, sizeof(ctx),
+                         "adcx_arm pair %zu: a_high=0x%016" PRIx64 " b_high=0x%016" PRIx64
+                         " hw_high=0x%016" PRIx64 " golden_high=0x%016" PRIx64
+                         " carry hw=%" PRIu64 " golden=%" PRIu64 " consistent=%d",
+                         i,
+                         a_words[NUM_WORDS-1], b_words[NUM_WORDS-1],
+                         hw_words[NUM_WORDS-1], golden[NUM_WORDS-1],
+                         hw_words[NUM_WORDS], golden[NUM_WORDS],
+                         (int)consistent);
+                log_data("adcx_arm input a (256-bit, little-endian limbs)",
+                         a_words, NUM_WORDS * sizeof(uint64_t));
+                log_data("adcx_arm input b (256-bit, little-endian limbs)",
+                         b_words, NUM_WORDS * sizeof(uint64_t));
+                log_data("adcx_arm output hw (mpz_add result)",
+                         hw_words, (NUM_WORDS + 1) * sizeof(uint64_t));
+                log_data("adcx_arm golden (software __int128 result)",
+                         golden, (NUM_WORDS + 1) * sizeof(uint64_t));
+                report_fail_msg("%s", ctx);
                 mpz_clear(a_mpz);
                 mpz_clear(b_mpz);
                 mpz_clear(result_hw);

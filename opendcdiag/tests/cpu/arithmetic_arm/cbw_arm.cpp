@@ -34,7 +34,6 @@ extern "C" {
 
 static constexpr size_t DATA_SIZE = 256;
 static constexpr size_t COPY_SIZE = 64;
-static constexpr uint64_t FIXED_SEED = 0x123456789ABCDEF0ULL;
 
 struct TestData {
     std::vector<int8_t> byte_data;
@@ -59,7 +58,8 @@ static int cbw_arm_init(struct test *test) {
     data->dst_data.resize(DATA_SIZE);
     data->golden_copy.resize(DATA_SIZE);
 
-    std::mt19937_64 rng(FIXED_SEED);
+    /* 随机种子：固定种子=单一输入模式，SDC 是 seed 敏感的（fixed-seed 陷阱） */
+    std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<int16_t> dist16(INT16_MIN, INT16_MAX);
     std::uniform_int_distribution<int8_t> dist8(INT8_MIN, INT8_MAX);
     std::uniform_int_distribution<uint8_t> distu8(0, 255);

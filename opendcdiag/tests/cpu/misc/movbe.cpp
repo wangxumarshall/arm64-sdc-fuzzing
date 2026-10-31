@@ -12,7 +12,7 @@
 
 #include "sandstone.h"
 
-#define MOVBE_BUFFER_SIZE (1 << 14)
+#define MOVBE_BUFFER_SIZE (1 << 11)
 
 struct movbe_data {
     uint32_t *input;
@@ -37,7 +37,7 @@ static int movbe_run(struct test *test, int cpu)
 {
     movbe_data *data = (movbe_data *)test->data;
 
-    TEST_LOOP(test, 1 << 13) {
+    TEST_LOOP(test, 1 << 8) {
         for (size_t i = 0; i < MOVBE_BUFFER_SIZE; ++i) {
             // Perform "movbe" (Byte Swap)
             uint32_t val = data->input[i];

@@ -26,7 +26,31 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/time.h>
 using namespace Eigen;
+
+// Binary fail-record: appended to /tmp/eigen_gemm_double_dump_<pid>.bin on
+// each miscompare. Mirrors movbe_dump / mrn_rmw_dump: written only from the
+// cold verification branch; the FMA hot path (x = lhs*rhs) is byte-for-byte
+// identical to the original test (see memory eigen-sdc-bitflip-position-stats:
+// dump variants reproduce the original fail count — cold-branch dumps do not
+// suppress the defect).
+#pragma pack(push, 1)
+struct eigen_gemm_dump_record {
+    uint64_t timestamp_us;   // microseconds since epoch
+    uint32_t cpu;            // logical cpu where failure occurred
+    uint32_t iteration;       // do-while iteration counter
+    uint32_t row;             // matrix row of mismatch
+    uint32_t col;             // matrix col of mismatch
+    uint32_t elem_idx;        // raw element index
+    uint32_t component;       // 0=scalar (float/double); 1=imag (cdouble)
+    uint64_t golden_bits;     // expected value bits (memcpy, IEEE-754)
+    uint64_t actual_bits;     // actual value bits (memcpy, IEEE-754)
+    uint64_t xor_val;         // golden_bits ^ actual_bits (flipped bit(s))
+};
+#pragma pack(pop)
 
 // Matrix dimension. Historically hardcoded to 256. Now configurable via
 // the GEMM_K_DIM environment variable (default 256 = original baseline) so
@@ -54,6 +78,7 @@ struct eigen_test_data {
     Mat lhs;
     Mat rhs;
     Mat prod;
+    int dump_fd;   // binary fail-log file descriptor (-1 if disabled)
 };
 }
 
@@ -68,10 +93,19 @@ static int eigen_gemm_double_dynamic_square_init(struct test *test) {
     } catch (...) {
         report_fail_msg("Exception on Eigen code, most probably OOM");
     }
+
+    // Open per-process binary fail-log (append). The hot path never touches it.
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/eigen_gemm_double_dump_%d.bin", getpid());
+    CAST(test->data)->dump_fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (CAST(test->data)->dump_fd < 0)
+        log_error("eigen_gemm_double_dump: failed to open dump log %s", path);
+
     return EXIT_SUCCESS;
 }
 
 static int eigen_gemm_double_dynamic_square_run(struct test *test, int cpu) {
+    uint32_t iter = 0;
     do {
         auto testdata = CAST(test->data);
         Mat x;
@@ -108,20 +142,42 @@ static int eigen_gemm_double_dynamic_square_run(struct test *test, int cpu) {
                           gb[7], gb[6], gb[5], gb[4], gb[3], gb[2], gb[1], gb[0],
                           ab[7], ab[6], ab[5], ab[4], ab[3], ab[2], ab[1], ab[0],
                           xb[7], xb[6], xb[5], xb[4], xb[3], xb[2], xb[1], xb[0]);
+
+                // Binary record (cold branch only — hot path is the gemm above)
+                if (testdata->dump_fd >= 0) {
+                    struct timeval tv;
+                    gettimeofday(&tv, NULL);
+                    struct eigen_gemm_dump_record rec = {
+                        .timestamp_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec,
+                        .cpu = (uint32_t)cpu,
+                        .iteration = iter,
+                        .row = (uint32_t)row,
+                        .col = (uint32_t)col,
+                        .elem_idx = (uint32_t)idx,
+                        .component = 0,
+                        .golden_bits = golden_bits,
+                        .actual_bits = actual_bits,
+                        .xor_val = xorv,
+                    };
+                    write(testdata->dump_fd, &rec, sizeof(rec));
+                }
                 report_fail_msg("eigen_gemm_double_dump: product miscompare at [%d,%d]", row, col);
             }
         }
         (void)ok;
+        iter++;
     } while (test_time_condition(test));
     return EXIT_SUCCESS;
 }
 
 static int eigen_gemm_double_dynamic_square_finish(struct test *test) {
+    if (CAST(test->data)->dump_fd >= 0)
+        close(CAST(test->data)->dump_fd);
     delete(CAST(test->data));
     return EXIT_SUCCESS;
 }
 
-DECLARE_TEST(eigen_gemm_double_dynamic_square_dump, "Eigen GEMM payload (double, dynamic, square) — dump variant records golden/actual/xor on miscompare")
+DECLARE_TEST(eigen_gemm_double_dynamic_square_dump, "Eigen GEMM payload (double, dynamic, square) — dump variant records golden/actual/xor (text + binary log) on miscompare")
   .groups = DECLARE_TEST_GROUPS(&group_math),
   .test_init = eigen_gemm_double_dynamic_square_init,
   .test_run = eigen_gemm_double_dynamic_square_run,

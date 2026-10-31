@@ -1,0 +1,206 @@
+{
+  "version": "2026-10-25",
+  "source": "farron/TESTCASE_POOL.md; docs/CORE179_ALL_VALID_SDC_TESTCASES_20260923.md; docs/CORE179_SDC_TESTCASE_PRIORITY_TIERS_20261022.md",
+  "levels": {
+    "suspicious": {
+      "_doc": "可疑级：定期测试在该核上新发现错误的用例（动态、按核标记）。core -> [testcase,...]",
+      "cores": {
+        "100": [
+          "movbe_dump"
+        ],
+        "179": [
+          "neon_rot_ldr_at_top_rowmajor"
+        ]
+      }
+    },
+    "active": {
+      "_doc": "活跃级：已证实可检测错误的用例（57），按梯队 P0-P4",
+      "P0": [
+        "neon_rot_ldr_at_top_rowmajor",
+        "neon_rot_ldr_at_top_sub",
+        "mrn_reloaded_2src_alu",
+        "neon_rot_ldr_at_top_str3",
+        "movbe",
+        "neon_rot_ldr_at_top_mla"
+      ],
+      "P1": [
+        "neon_rot_ldr_at_top_rowmajor_gps",
+        "mrn_rmw_diff_64k",
+        "neon_rot_ldr_at_top_rowmajor_k7p_rand",
+        "neon_rot_ldr_at_top_rowmajor_k5inter_rand",
+        "movbe_dump"
+      ],
+      "P2": [
+        "neon_rot_ldr_at_top_rowmajor_k3res",
+        "movbe_l1d",
+        "mrn_rmw_fwd",
+        "movbe_dump_golden",
+        "neon_rot_ldr_at_top_rowmajor_k7p_hiham",
+        "neon_rot_ldr_at_top_rowmajor_k7p_one",
+        "arm0102_kreg_select",
+        "mrn_pairs_2src_alu",
+        "neon_rot_ldr_at_top_rowmajor_k5far",
+        "neon_rot_ldr_at_top_ldr4",
+        "neon_rot_2src"
+      ],
+      "P3": [
+        "neon_rot_ldr_at_top_offdiag",
+        "mrn_rmw_diff",
+        "agu_stress_2src",
+        "mrn_nuke_2src_alu",
+        "neon_rot_store_only",
+        "mrn_rmw",
+        "neon_rot_ldr_at_top_rowmajor_dualcmp",
+        "mrn_rmw_dump",
+        "mrn_nuke_3src_alu",
+        "eigen_gemm_float_dynamic_square",
+        "eigen_gemm_double_dynamic_square",
+        "eigen_svd",
+        "neon_rot_ldr_at_top_rowmajor_dump",
+        "arm0102_kreg_not",
+        "mrn_nuke_4src_alu"
+      ],
+      "P4": [
+        "mrn_rmw_nop",
+        "neon_rot_u8x16",
+        "mrn_rmw_nop1",
+        "eigen_gemm_float_dynamic_square_dump",
+        "eigen_gemm_double_dynamic_square_dump",
+        "eigen_gemm_cdouble_dynamic_square",
+        "eigen_svd_double2",
+        "movbe_dump_probe_xn",
+        "mrn_rmw_nop4",
+        "agu_stress_store_only",
+        "neon_rot_ldr_at_top_str3_checkall",
+        "arm0102_fma_f32",
+        "arm0102_kreg_logic",
+        "mem_disambig_alu",
+        "mrn_nuke_dense",
+        "eigen_svd_cdouble_noavx512",
+        "movbe_dump_probe_h",
+        "movbe_dump_probe_x",
+        "memcpy1",
+        "eigen_gemm_double14"
+      ],
+      "_notes": [
+        "arm0102 四用例未注册 meson，复跑前须先挂接 tests/cpu/meson.build",
+        "跨夜率存在 0.45x~4x 波动；单窗口率不可比（爆发/潜伏周期主导）"
+      ]
+    },
+    "basic": {
+      "_doc": "基础级：从未检测出错误（灭活对照 70 + 未入账 13）",
+      "inactivated": [
+        "movbe_dump_probe_a",
+        "movbe_dump_probe_b",
+        "movbe_dump_probe_d",
+        "movbe_dump_probe_e",
+        "movbe_l1d_v_rev",
+        "movbe_l2",
+        "mrn_rmw_nop8",
+        "mrn_rmw_nop16",
+        "mrn_rmw_nop64",
+        "mrn_rmw_l1d",
+        "mrn_rmw_diff_nop64",
+        "mrn_nuke",
+        "mrn_pairs",
+        "mrn_reloaded",
+        "mem_disambiguation",
+        "partial_store_forwarding",
+        "part_store_fwd_jit",
+        "atomic_seq_cst",
+        "mfence",
+        "mfence_pure",
+        "mite",
+        "mrn_flags",
+        "modified_sort",
+        "move_elimination_jit",
+        "move_elimination_2_jit",
+        "move_elimination_3_jit",
+        "movdq2q",
+        "movq2dq",
+        "movmskpspd",
+        "zero_control_vec_jit",
+        "zero_control_vec_2_jit",
+        "zero_control_vec_3_jit",
+        "mrn_nuke_recross",
+        "mrn_pairs_2src_alu_keep8",
+        "mrn_nuke_2src_add",
+        "mrn_nuke_2src_sub",
+        "mrn_nuke_2src_eor",
+        "mrn_nuke_2src_and",
+        "probe_asm_fwd_v1",
+        "probe_asm_fwd_v2",
+        "agu_stress_1src",
+        "agu_stress_unaligned",
+        "neon_rot_1src",
+        "neon_rot_u32x4",
+        "neon_rot_fwd_probe",
+        "neon_rot_ldr_at_top_rowmajor_k2pureload",
+        "neon_rot_ldr_at_top_rowmajor_k4gap",
+        "neon_rot_ldr_at_top_rowmajor_k4bgap",
+        "neon_rot_ldr_at_top_rowmajor_k7p_zero",
+        "neon_rot_ldr_at_top_rowmajor_scalar64",
+        "tlbstress",
+        "lsqfill",
+        "rfport",
+        "robfill",
+        "robfill_np",
+        "prefetch",
+        "neon_rot_ldr_at_top_str4",
+        "neon_rot_ldr_at_top_str4_checkall",
+        "neon_rot_ldr_at_top_ldr5",
+        "arm0102_fma_f64",
+        "arm0102_swizzle",
+        "arm0102_ins_ext",
+        "arm0102_kreg_mask",
+        "arm0102_kreg_mask_vceq",
+        "arm0102_kreg_mask_dump",
+        "stress_sub",
+        "stress_xor",
+        "stress_fma",
+        "cachebounce_sdc",
+        "cache_stress_civac"
+      ],
+      "untested": [
+        "adcx",
+        "adcxlong",
+        "adcx_adox_interleaved",
+        "adcx_arm",
+        "bigint_mulx_arm",
+        "cbw_arm",
+        "fisttp_arm",
+        "neon_rot_ldr_at_top_priv",
+        "neon_rot_ldr_at_top_dump",
+        "eigen_svd_jacobi",
+        "movbe_str_multiload",
+        "movbe_l1d_variants",
+        "core179_kernel_sdc_repro"
+      ]
+    }
+  },
+  "excluded": {
+    "_doc": "特殊排除：不参与两级分类",
+    "multi_core_storm": [
+      "movbe_dump_probe_c"
+    ],
+    "banned_freeze": [
+      "neon_rot_ldr_at_top"
+    ],
+    "non_sdc_stimulator": [
+      "sched_storm_baseline",
+      "sched_storm_futex",
+      "sched_storm_thread",
+      "sched_storm_hybrid"
+    ],
+    "undetermined": [
+      "eigen_sparse",
+      "eigen_gemm_double_ab_split"
+    ],
+    "arch_broken_on_aarch64": [
+      "movmskpspd",
+      "zero_control_vec_jit",
+      "zero_control_vec_2_jit",
+      "zero_control_vec_3_jit"
+    ]
+  }
+}

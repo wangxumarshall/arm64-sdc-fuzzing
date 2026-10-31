@@ -39,3 +39,12 @@ tags
 /third-part/.gitattributes
 /third-part/.gitignore
 /third-part/.git-blame-ignore-revs
+farron/bmc.env
+# FARRON runtime state (logs, sweep data, run stdout) — 本地保留, 不入库
+farron/state/
+farron/__pycache__/
+# 二进制上下文 dump / 第三方解包树 / 本地备份 (体积过大, 非源码)
+/ctx_*.bin
+/Open-Field-Health-Check/
+/Open-Field-Health-Check.tar.gz
+/backups/
