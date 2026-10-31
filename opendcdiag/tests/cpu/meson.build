@@ -389,6 +389,45 @@ if framework_config.get('SANDSTONE_SSL_BUILD') == 1
             'ipsec/aes128_cbc/ipsec_aes128_cbc_sha2_224_avx.cpp'
         )
     )
+    # ARM64 dual-arch port: also build the ipsec _avx/_avx512 variants on
+    # aarch64. These sources are portable (they call sandstone_ssl.h OpenSSL
+    # EVP/HMAC/CMAC wrappers, no x86 intrinsics); their only ARM64 obstacle
+    # was the cpu_haswell/cpu_skylake_avx512 symbols, now provided as
+    # armv8_crc_crypto aliases via arm64_features.conf. Guarded by aarch64 so
+    # x86 builds keep using the skx/hsw sets above unchanged (no duplicate
+    # compile). On aarch64 the skx/hsw sets are never applied (see the
+    # x86_64-only apply block below), so there is no duplication here either.
+    if host_machine.cpu_family() == 'aarch64'
+        tests_set_base.add(
+            when : crypto_dep,
+            if_true: files(
+                'ipsec/3des_docsis/ipsec_3des_docsis_aes_cmac_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_aes_xcbc_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_hmac_sha1_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_hmac_sha224_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_hmac_sha256_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_hmac_sha384_avx512.cpp',
+                'ipsec/3des_docsis/ipsec_3des_docsis_hmac_sha512_avx512.cpp',
+                'ipsec/aes192_gcm/ipsec_aes192_gcm_avx512.cpp',
+                'ipsec/aes192_cbc/ipsec_aes192_cbc_sha2_384_avx.cpp',
+                'ipsec/aes192_cbc/ipsec_aes192_cbc_sha2_512_avx.cpp',
+                'ipsec/aes192_cbc/ipsec_aes192_cbc_xcbc_96_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_hmac_sha1_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_hmac_sha224_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_hmac_sha256_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_hmac_sha384_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_hmac_sha512_avx.cpp',
+                'ipsec/aes192_ctr/ipsec_aes192_ctr_xcbc_avx.cpp',
+                'ipsec/aes256_cbc/ipsec_aes256_cbc_hmac_sha1_avx.cpp',
+                'ipsec/aes256_cbc/ipsec_aes256_cbc_sha2_224_avx.cpp',
+                'ipsec/aes256_cbc/ipsec_aes256_cbc_sha2_256_avx.cpp',
+                'ipsec/aes192_gcm/ipsec_aes192_gcm_avx.cpp',
+                'ipsec/aes128_cbc/ipsec_aes128_cbc_aes_cmac_avx.cpp',
+                'ipsec/aes128_cbc/ipsec_aes128_cbc_hmac_sha1_avx.cpp',
+                'ipsec/aes128_cbc/ipsec_aes128_cbc_sha2_224_avx.cpp'
+            )
+        )
+    endif
 elif target_machine.system() == 'windows'
     tests_set_base.add(
         files(
@@ -441,6 +480,22 @@ tests_set_base.add(
         'eigen_svd_jacobi/svd_fvectors.cpp',
     )
 )
+
+# ARM64 dual-arch port: build eigen_svd_cdouble on aarch64 too. Upstream
+# gates it behind tests_set_skx (AVX-512-only) because its .minimum_cpu =
+# cpu_skylake_avx512. On aarch64 that symbol is provided as an
+# armv8_crc_crypto alias (arm64_features.conf), and the SVD code itself
+# (Eigen BDCSVD on std::complex<double>) is portable and already proven by
+# its sibling eigen_svd_cdouble_noavx512 which passes on aarch64. Guarded
+# by aarch64 so x86 builds keep using tests_set_skx above unchanged.
+if host_machine.cpu_family() == 'aarch64'
+    tests_set_base.add(
+        when : eigen3_dep,
+        if_true : files(
+            'eigen_svd/svd_cdouble.cpp',
+        )
+    )
+endif
 
 tests_set_skx.add(
     when : eigen3_dep,

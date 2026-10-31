@@ -44,7 +44,34 @@ farron/bmc.env
 farron/state/
 farron/__pycache__/
 # 二进制上下文 dump / 第三方解包树 / 本地备份 (体积过大, 非源码)
-/ctx_*.bin
 /Open-Field-Health-Check/
 /Open-Field-Health-Check.tar.gz
 /backups/
+
+# SDC run artifacts (logs, context binaries, per-core/per-test output dirs).
+# These are regenerable outputs from stress/probe runs — not source.
+# Sources (.cpp/.c/.py/.md) deliberately stay untracked-but-visible.
+*.log
+/ctx_*.bin
+/gen_gemm_context
+# Built ELF probes whose sources live alongside (esdiag_elem0_full.cpp, mru_eigenmc_full.c)
+/docs/sdc1-01-02-core179-diagnostics/esdiag_elem0_full
+/docs/sdc1-01-02-core179-diagnostics/mrueig_full
+# per-run output directories
+/adjacent_cores_logs/
+/core179_180_per_test_*/
+/eigen_core179_30m_stress_logs/
+/eigen_core179_stress_logs/
+/fail/
+/fail_all_core/
+/fail_only_clean/
+/gemm_k_estrate_logs/
+/temp_test_*/
+# standalone run-summary text outputs
+/fail_times.txt
+/docs/sdc1-01-02-core179-diagnostics/sparse_repro_*/
+# local backups of test sources / build files
+/tests/cpu/meson.build.bak.*
+/tests/cpu/misc/*.bak
+*.bak
+*.bak.*

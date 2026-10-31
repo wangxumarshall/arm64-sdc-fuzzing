@@ -85,18 +85,24 @@ armv8.1-a 有硬件浮点, 不需要软浮点例程; 且无任何测试源码引
 `-n <N>` = run with N threads. **Do NOT use `-n 0`** — in this build `0` is
 treated as out-of-range and clamped to 1, so only one core runs (the warning
 `value out of range for option '-n / --threads': 0` appears in stdout). For
-full load pass the explicit CPU count: this Kunpeng 920 host has `nproc` = 128,
-so use `-n 128`.
+full load pass the explicit CPU count: this Kunpeng 920 host has `nproc` = 96,
+so use `-n 96`. (An earlier/host-documentation figure of 128 was stale — verify
+with `nproc` on the box you're on.)
 `--ignore-os-error --ignore-timeout` = don't halt on errors/timeouts.
 
 ```console
-./builddir/opendcdiag -T forever -n 128 --ignore-os-error --ignore-timeout -o builddir/run.log -q
+./builddir/opendcdiag -T forever -n 96 --ignore-os-error --ignore-timeout -o builddir/run.log -q
 ```
 (`builddir/` is gitignored; keep a log file instead of `/dev/null` so SDC
 errors are captured.)
 
-Timed variant: `-T 24h`. Directed ARM64 tests: `-e arm64_sdc -e neon_add -e arm_crypto`
-(note: `--list` does not print the arm64 tests, but `-e <name>` runs them).
+Timed variant: `-T 24h`. Directed ARM64 SDC tests: `-e arm64_sdc -e neon_add -e arm_crypto`
+(note: `--list` prints most ARM64 tests, but **omits** `arm64_sdc`/`neon_add`/
+`arm_crypto` — `-e <name>` runs them). **These three are `TEST_QUALITY_BETA`,
+so the framework skips them unless you pass `--beta`** — without `--beta` the
+process stays alive but every result is `skip` (no real SDC testing). Always
+launch the ARM64-dedicated round with `--beta`:
+`-e arm64_sdc -e neon_add -e arm_crypto --beta -T forever -n 96 ...`.
 Self-tests: `./builddir/opendcdiag --selftests --max-test-loop-count 1`
 (exits `invalid` by design — the selftests deliberately fail/crash to verify
 the framework's failure detection; count `result: pass` for the positive cases).
