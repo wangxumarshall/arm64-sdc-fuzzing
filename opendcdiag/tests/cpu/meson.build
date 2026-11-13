@@ -253,6 +253,7 @@ tests_set_base.add(
         'misc/neon_rot_ldr_at_top_rowmajor_fp64_ldrw.cpp',
         'misc/neon_rot_ldr_at_top_rowmajor_fp64_str4.cpp',
         'misc/neon_rot_ldr_at_top_rowmajor_fp64_str5.cpp',
+        'misc/adaptive_mem_sdc.cpp',
         'misc/neon_rot_ldr_at_top_str3.cpp',
         'misc/neon_rot_ldr_at_top_rowmajor_str3_checkall.cpp',
         'misc/neon_rot_ldr_at_top_str4.cpp',
