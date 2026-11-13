@@ -15,7 +15,7 @@ NAME=adaptive_mem_sdc
 RR=/home/sdc/adaptive_mem_sdc
 mkdir -p "$RR"
 BINFP=$(sha256sum $BIN | cut -c1-12)
-[ "$BINFP" = "4a4d12c8e5d3" ] || { echo "ABORT: 指纹 $BINFP ≠ 4a4d12c8e5d3" > $RR/ABORT; exit 1; }
+[ "$BINFP" = "33f2edb0df13" ] || { echo "ABORT: 指纹 $BINFP ≠ 33f2edb0df13" > $RR/ABORT; exit 1; }
 online(){ echo 1 | sudo tee /sys/devices/system/cpu/cpu$1/online >/dev/null; }
 offline(){ echo 0 | sudo tee /sys/devices/system/cpu/cpu$1/online >/dev/null; }
 KEY=$(date +%s)_$$
@@ -29,10 +29,11 @@ fi
 # ---------------- 阶段1: verify (30组合 golden 自检) ----------------
 P1=$RR/phase1; mkdir -p "$P1"
 echo "[$(date '+%F %T')] == 阶段1 verify: 179下线, 30组合轮扫 60s, bin=$BINFP ==" >> "$P1/monitor.log"
+# 他役守卫必须先于任何 pkill (否则先摧毁对方监控栈才发现冲突)
+pgrep -x opendcdiag >/dev/null && { echo "smoke_abort" > "$P1/STATUS"; echo "[$(date '+%F %T')] 已有 opendcdiag 在跑, 作废" >> "$P1/monitor.log"; exit 1; }
 pkill -f 'temp_monitor_5s[.]sh' 2>/dev/null || true
 pkill -f 'sdc_env_logger[.]sh' 2>/dev/null || true
 pkill -f 'farron/watchdog_cont[.]sh' 2>/dev/null || true
-pgrep -x opendcdiag >/dev/null && { echo "smoke_abort" > "$P1/STATUS"; echo "[$(date '+%F %T')] 已有 opendcdiag 在跑, 作废" >> "$P1/monitor.log"; exit 1; }
 online 178; online 179; offline 190; offline 191; offline 179; sleep 2
 s179=$(cat /sys/devices/system/cpu/cpu179/online); s190=$(cat /sys/devices/system/cpu/cpu190/online); s191=$(cat /sys/devices/system/cpu/cpu191/online)
 echo "[$(date '+%F %T')] 核心配置: 179=$s179(冒烟下线) 190=$s190 191=$s191 | 在线核数=$(grep -c processor /proc/cpuinfo)" >> "$P1/monitor.log"
@@ -40,7 +41,7 @@ echo "[$(date '+%F %T')] 核心配置: 179=$s179(冒烟下线) 190=$s190 191=$s1
 nohup taskset -c 0-7 bash $O/farron/temp_monitor_5s.sh "$P1/temp_all.log" 4500 >/dev/null 2>&1 & disown
 setsid nohup taskset -c 0-7 bash $O/scripts/sdc_env_logger.sh "$P1" 6 >> "$P1/env_logger.out" 2>&1 < /dev/null & disown
 ADAPTIVE_MEM_SDC_VERIFY=1 ADAPTIVE_MEM_SDC_KEY=${KEY}_p1 ADAPTIVE_MEM_SDC_COVFILE=$P1/covfile.txt \
-  timeout 200 taskset -c 96-178,180-189 $BIN -e $NAME -n 93 -T 60s \
+  timeout -k 5 200 taskset -c 96-178,180-189 $BIN -e $NAME -n 93 -T 60s \
   --ignore-os-error --ignore-timeout -o "$P1/run.log" -q >/dev/null 2>&1
 f1=$(grep -c 'result: fail' "$P1/run.log" 2>/dev/null); f1=${f1:-0}
 mc1=$(grep -c 'miscompare' "$P1/run.log" 2>/dev/null); mc1=${mc1:-0}
@@ -66,15 +67,18 @@ online 179; sleep 2
 pkill -f 'temp_monitor_5s[.]sh' 2>/dev/null || true
 pkill -f 'sdc_env_logger[.]sh' 2>/dev/null || true
 echo "[$(date '+%F %T')] == 阶段2 正式: 179上线, 96-189 (-n 94) 墙钟扫描 30min/组合, -T 16h ==" >> "$P2/monitor.log"
-nohup taskset -c 0-7 bash $O/farron/temp_monitor_5s.sh "$P2/temp_all.log" 4500 >/dev/null 2>&1 & disown
+nohup taskset -c 0-7 bash $O/farron/temp_monitor_5s.sh "$P2/temp_all.log" 57600 >/dev/null 2>&1 & disown
 nohup taskset -c 0-7 bash $O/farron/watchdog_cont.sh "$P2/temp_all.log" >/dev/null 2>&1 & disown
-setsid nohup taskset -c 0-7 bash $O/scripts/sdc_env_logger.sh "$P2" 75 >> "$P2/env_logger.out" 2>&1 < /dev/null & disown
+setsid nohup taskset -c 0-7 bash $O/scripts/sdc_env_logger.sh "$P2" 960 >> "$P2/env_logger.out" 2>&1 < /dev/null & disown
 
 ADAPTIVE_MEM_SDC_KEY=${KEY}_p2 ADAPTIVE_MEM_SDC_COVFILE=$P2/covfile.txt \
-  taskset -c 96-189 $BIN -e $NAME -n 94 -T 16h \
+  timeout -s KILL 57660 taskset -c 96-189 $BIN -e $NAME -n 94 -T 16h \
   --ignore-os-error --ignore-timeout -o "$P2/run.log" -q >/dev/null 2>&1 &
 MAINPID=$!
-echo "[$(date '+%F %T')] 主进程 pid=$MAINPID 启动, 看门狗进入轮询 (10s/次)" >> "$P2/monitor.log"
+LAUNCH_TS=$(date +%s)
+# 看门狗墙钟上限: -T 16h=57600s + timeout 后备 60s + 余量 (防主进程悬挂时看门狗空转)
+WATCH_DEADLINE=$((LAUNCH_TS + 57720))
+echo "[$(date '+%F %T')] 主进程 pid=$MAINPID 启动 (timeout -s KILL 57660s 后备), 看门狗进入轮询 (10s/次, 墙钟上限 $(date -d @$WATCH_DEADLINE '+%F %T'))" >> "$P2/monitor.log"
 
 # 看门狗: 首个 fail 块 → SIGKILL (铁律) + 组合标签提取 + 总结
 while kill -0 $MAINPID 2>/dev/null; do
@@ -91,13 +95,42 @@ while kill -0 $MAINPID 2>/dev/null; do
     echo "[$(date '+%F %T')] SDC_CAUGHT | $TAG | fail块=$(grep -c 'result: fail' "$P2/run.log") miscompare=$(grep -c 'miscompare' "$P2/run.log")" >> "$RR/series_summary.txt"
     echo sdc_caught > "$P2/STATUS"
     pkill -f 'farron/watchdog_cont[.]sh' 2>/dev/null || true
+    rm -f /dev/shm/adaptive_mem_sdc_${KEY}_p2
     exit 0
+  fi
+  if [ "$(date +%s)" -ge "$WATCH_DEADLINE" ]; then
+    echo "[$(date '+%F %T')] ⚠ 看门狗墙钟上限到达但主进程仍在 → 强制 SIGKILL + 异常状态" >> "$P2/monitor.log"
+    kill -9 $MAINPID 2>/dev/null; sleep 2
+    pkill -9 -x opendcdiag 2>/dev/null; sleep 1
+    echo "[$(date '+%F %T')] WATCHDOG_TIMEOUT | 主进程悬挂, 强杀" >> "$RR/series_summary.txt"
+    echo watchdog_timeout > "$P2/STATUS"
+    pkill -f 'farron/watchdog_cont[.]sh' 2>/dev/null || true
+    exit 1
   fi
   sleep 10
 done
 
 # -T 自然到期 / 全扫完退出
 wait $MAINPID 2>/dev/null
+RC=$?
+NOW=$(date +%s); RAN=$((NOW - LAUNCH_TS))
+
+# 收尾断言 (评审 Important#2): 启动失败/空跑/崩溃不得伪装成"全扫完 0 fail"
+if [ ! -s "$P2/run.log" ] || [ "$RAN" -lt 300 ] || [ ! -s "$P2/covfile.txt" ]; then
+  echo "[$(date '+%F %T')] ⚠ 阶段2 异常退出: run.log/covfile 状态异常 或 运行时长 ${RAN}s < 300s → 判启动/早退失败" >> "$P2/monitor.log"
+  echo "[$(date '+%F %T')] LAUNCH_FAIL_OR_EARLY_EXIT | ran=${RAN}s | run.log=$(test -s "$P2/run.log" && echo ok || echo missing) | cov=$(test -s "$P2/covfile.txt" && echo ok || echo missing)" >> "$RR/series_summary.txt"
+  echo launch_fail > "$P2/STATUS"
+  pkill -f 'farron/watchdog_cont[.]sh' 2>/dev/null || true
+  exit 1
+fi
+crashn=$(grep -c 'result: crash' "$P2/run.log" 2>/dev/null); crashn=${crashn:-0}
+if ! grep -q 'exit: pass' "$P2/run.log" || [ "$crashn" -ne 0 ]; then
+  echo "[$(date '+%F %T')] ⚠ 阶段2 非正常收尾: exit:pass 缺失 或 crash 块=$crashn → 人工检查" >> "$P2/monitor.log"
+  echo "[$(date '+%F %T')] ABNORMAL_END | crash=$crashn | exitpass=$(grep -c 'exit: pass' "$P2/run.log")" >> "$RR/series_summary.txt"
+  echo abnormal_end > "$P2/STATUS"
+  pkill -f 'farron/watchdog_cont[.]sh' 2>/dev/null || true
+  exit 1
+fi
 f=$(grep -c 'result: fail' "$P2/run.log" 2>/dev/null); f=${f:-0}
 mc=$(grep -c 'miscompare' "$P2/run.log" 2>/dev/null); mc=${mc:-0}
 covn=$(awk '$4=="normal"{print $5}' "$P2/covfile.txt" 2>/dev/null | sort -u | wc -l); covn=${covn:-0}

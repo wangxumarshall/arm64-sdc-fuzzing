@@ -515,7 +515,14 @@ static struct AdaptiveShm *shm_setup(void)
 {
     const char *key = getenv("ADAPTIVE_MEM_SDC_KEY");
     char name[128];
-    snprintf(name, sizeof(name), "/adaptive_mem_sdc_%s", key ? key : "dflt");
+    if (key) {
+        snprintf(name, sizeof(name), "/adaptive_mem_sdc_%s", key);
+    } else {
+        /* no key: derive from the main process pid (children fork from it,
+         * so every child of one run shares the name; a later ad-hoc run
+         * gets a fresh object instead of reusing a stale anchor/sdc_flag) */
+        snprintf(name, sizeof(name), "/adaptive_mem_sdc_ppid%ld", (long)getppid());
+    }
 
     int fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
     bool creator = (fd >= 0);
