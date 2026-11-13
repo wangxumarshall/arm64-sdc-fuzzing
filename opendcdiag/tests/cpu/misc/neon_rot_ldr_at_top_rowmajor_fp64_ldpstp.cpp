@@ -85,6 +85,26 @@ static int neon_rot_ldr_at_top_rowmajor_fp64_ldpstp_init(struct test *test) {
     memset_random(data->srcB, NEON_ROT_LDR_AT_TOP_ROWMAJOR_FP64_LDPSTP_COUNT * sizeof(uint64x2_t));
     memset_random(data->scratch, NEON_ROT_LDR_AT_TOP_ROWMAJOR_FP64_LDPSTP_COUNT * sizeof(uint64x2_t));
 
+    /* NaN-free inputs (2026-11-13 root-cause fix; spec appendix v2.1 in
+     * docs/ADAPTIVE_MEM_SDC_DESIGN_20261113.md): GCC reorders operands of
+     * the commutative FP ops between the two inlined copies of the rotation
+     * (this golden loop vs the hot loop), and for a BOTH-sNaN lane AArch64
+     * returns the quieted *first* operand — operand-order dependent, so the
+     * copies can diverge bit-exactly (false positive on healthy cores;
+     * confirmed live in build 33f2edb0df13: init fmul(A,B) vs hot
+     * fmul(B,A)).  Clearing the all-ones exponent at fill time removes the
+     * NaN/Inf payload ambiguity; finite arithmetic is bit-deterministic
+     * under operand reordering.  Touches ~0.1% of words. */
+    {
+        auto sanitize = [](uint64x2_t *buf, int n) {
+            auto *w = reinterpret_cast<uint64_t *>(buf);
+            for (int k = 0; k < n * 2; k++)
+                if ((w[k] >> 52 & 0x7ff) == 0x7ff)
+                    w[k] &= ~(1ULL << 62);
+        };
+        sanitize(data->srcA, NEON_ROT_LDR_AT_TOP_ROWMAJOR_FP64_LDPSTP_COUNT);
+        sanitize(data->srcB, NEON_ROT_LDR_AT_TOP_ROWMAJOR_FP64_LDPSTP_COUNT);
+    }
     /* golden: same FP64 rotating composition per element, on the same NEON units */
     for (int i = 0; i < NEON_ROT_LDR_AT_TOP_ROWMAJOR_FP64_LDPSTP_COUNT; i++) {
         data->expected[i] = fp64_rot(i % 4, data->srcA[i], data->srcB[i]);

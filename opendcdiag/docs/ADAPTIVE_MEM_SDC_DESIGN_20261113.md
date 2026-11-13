@@ -114,7 +114,7 @@ sweep 末: 冷路径 memcmp(dst, expected)；不一致 → report_fail_msg(含�
 | 空 | — | （无 ALU，res = a） | （同） | 2×64b | 交替升降 |
 | mla（分解式） | 0 | vmulq_s32（t=a×b） | svmul_s32 | 4×32b | 单调（随其父） |
 | | 1 | vmulq_s32 + vaddq_s32(t, a)（mla 型） | svmul_s32 + svadd_s32 | | |
-| | 2 | vmulq_s32 + vsubq_s32(b, t)（mls 型） | svmul_s32 + svsub_s32 | | |
+| | 2 | vmulq_s32 + vsubq_s32(t, b)（mls 型，实为 mul−b——父版底盘原式；原表 b−t 为转写笔误 v2.2 更正） | svmul_s32 + svsub_s32(t, b) | | |
 | | 3 | veorq_s32（对照） | sveor_s32 | | |
 | sub | 0/1/2/3 | vsubq_u64 / veorq_u64 / vbicq_u64 / vornq_u64 | svsub_u64 / sveor_u64 / svbic_u64 / svorr(a,svnot(b)) | 2×64b | 单调（随其父） |
 
@@ -224,3 +224,17 @@ shm 标志置位后：后续子进程 init 见标志 → test_run 直接返回�
 二义性；整数段精确无需处理。修复后 93 线程复现器 3.01 亿轮零失配、真测试 93 核 verify
 60s 全 0 fail!!!。**注意：fp64 家族父版（raw NaN 数据 + init/热双副本）埋着同款潜在
 雷**，其幸存纯属两副本操作数序碰巧一致——后续建议单独立案。
+
+## 附录 v2.2（2026-11-13，家族 sNaN 修复 + 文本更正）
+
+**fp64 家族父版 sNaN 双副本雷——确认活雷并修复**：在 33f2edb0df13 构件上 objdump 实证
+父版 init-golden 副本四槽统一 op(A,B)（x6=srcA→q2 为 op1），热循环升序段 fmul(B,A)——
+fmul 槽两副本操作数序分歧，双 sNaN lane 必然 golden≠hot（估算 p≈3e-5/golden；历史冒烟
+全干净属概率未中）。修复 = fp64/fp64_dump/fp64_ldpstp 三文件填充 NaN-free（同
+adaptive_mem_sdc 修复，三文件 179 下线冒烟 0 fail!!! 两法交叉）；**ldrh/ldrw 构造性免疫**
+（u16/u32 整数精确扩宽为 double，FP 输入永非 NaN）；str4/str5 生而 NaN-free；
+stress_fma 属同类暴露（golden 走标量 a*b+c、热循环走 asm fmadd，NaN 语义可异）但为
+死探针未修，复活前须先修。
+
+**mla slot2 公式更正**：父版底盘（及本实现）实为 `t−b`（vsubq_s32(mul, sb)），§3 原表
+`b−t` 为用户表格转写笔误，零功能影响（golden≡hot 同式）。bin e1d1cc981468。
