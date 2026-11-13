@@ -118,6 +118,7 @@ static int gps_rowmajor_init(struct test *test) {
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, GPS_ROWMAJOR_COUNT * sizeof(uint64x2_t)));
     data->expected= static_cast<uint64x2_t *>(aligned_alloc(64, GPS_ROWMAJOR_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(GPS_DUMP_DIR, 0755);  /* EEXIST is fine; 09-08 lesson: dump to disk */
 
     /* Tagged fill replaces memset_random — the ONLY functional delta vs

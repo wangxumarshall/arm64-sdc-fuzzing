@@ -523,6 +523,31 @@ class Farron02:
                 f.write("ts,round,mode,group,cores,case,dur_s,cf,evict_s,run_s,"
                         "restore_s,n_fails,fail_cores,first_ttf\n")
         self.assessment_log = os.path.join(cfg["outdir"], "farron02_assessment.jsonl")
+        # v1.2 修正(4h 验收缺陷#2): 用例按二进制实际可用集过滤
+        # (用例池含未注册 meson 的 arm0102_* 等, 会造成 0.01s 空转窗)
+        self.available_cases = None
+        if not cfg.get("dry_run"):
+            self.available_cases = self._probe_available_cases()
+            if self.available_cases is not None:
+                missing = [c for c, _ in self.pool.active_order()
+                           if c not in self.available_cases]
+                if missing:
+                    log02(f"用例过滤: 池中 {len(missing)} 个用例不在二进制 --list, 本轮跳过: {missing}")
+
+    def _probe_available_cases(self):
+        """二进制 --list 实际可用用例名集合(格式: '序号 名称 \"描述\"'); 失败返回 None(不过滤)。"""
+        try:
+            out = subprocess.run([self.cfg["opendcdiag"], "--list"],
+                                 capture_output=True, text=True, timeout=60).stdout
+        except Exception as ex:
+            log02(f"⚠️ --list 探测失败({ex}), 用例不过滤")
+            return None
+        names = set()
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].isdigit():
+                names.add(parts[1])
+        return names or None
 
     # ---- 基础设施 ----
     def sampler(self):
@@ -560,6 +585,8 @@ class Farron02:
 
     def next_case(self):
         order = [c for c, _ in self.pool.active_order()]
+        if self.available_cases:
+            order = [c for c in order if c in self.available_cases]
         if not order:
             return None
         case = order[self.case_idx % len(order)]
@@ -697,9 +724,11 @@ class Farron02:
                             else self.cfg["cool_wait_max"]
                         w = self.cool_wait(sockets, wmax)
                         round_waited |= sockets
-                        if w < wmax:
+                        # v1.2 修正(4h 验收缺陷#1): 优先组等待后必跑, 不因转凉早退丢窗
+                        # ("每 30min 必测一次"是硬要求); 例行组保留 v1.1 等凉再覆盖语义
+                        if w < wmax and mode != "priority":
                             continue
-                        log02(f"凉检等待超时(全热) → 带温度补偿执行")
+                        log02(f"凉检等待 {w}s 后执行 (mode={mode}; 优先组不丢窗)")
                 cf = self.comp_factor(sockets)
                 dur = int(window_s * cf)
                 case = self.next_case()
@@ -850,6 +879,11 @@ def selftest():
     check("组44 互补掩码 = 0-175,180-191", complement_mask({176, 177, 178, 179}) == "0-175,180-191")
     check("优先组序列 = [44,43,45]±", [44] + [g for d in range(1, 2) for g in (44 - d, 44 + d)]
           == [44, 43, 45])
+    check("quarter(12核): 核179 → 组14(168-179), 16组且组不跨插槽",
+          group_of(179, 12) == 14 and group_cores(14, 12) == list(range(168, 180))
+          and n_groups(12) == 16
+          and all(g * 12 // 48 == (g * 12 + 11) // 48 for g in range(16)))
+    check("组14 互补掩码 = 0-167,180-191", complement_mask(set(range(168, 180))) == "0-167,180-191")
 
     print("窗口 stdout 解析自检:")
     wtext = """  test: foo
@@ -876,10 +910,10 @@ def selftest():
 
 # ================= stub-run（全流程桩演示） =================
 
-def stub_run():
-    """模拟: 评估(合成=本机实况) → 优先模式 → 组44窗检出179 → 整槽深测确认 → 裁决屏蔽。
+def stub_run(config_path=None):
+    """模拟: 评估(合成=本机实况) → 优先模式 → 优先组窗检出179 → 整槽深测确认 → 裁决屏蔽。
     不跑真负载/不动应用/不调 sudo。"""
-    cfg = load_config02()
+    cfg = load_config02(config_path)
     cfg["outdir"] = os.path.join(F.STATE_DIR, "sweep", "farron02_stub")
     cfg["speed"] = 60.0
     os.makedirs(cfg["outdir"], exist_ok=True)
@@ -913,7 +947,7 @@ def stub_run():
                            script=[("neon_rot", {179}, {179: 2})])
     f = Farron02(cfg, runner=stub, assessor=StubAssessor(),
                  temp_src=StubTemp().read, speed=60.0)
-    log02("=== STUB-RUN 演示: 评估→优先模式→组44窗检出→整槽深测→裁决 ===")
+    log02(f"=== STUB-RUN 演示: 评估→优先模式→优先组(组大小{cfg['group_size']})窗检出→整槽深测→裁决 ===")
     f.run(max_seconds=100)
     log02("=== STUB-RUN 结束 ===")
     print(json.dumps({"masked": sorted(f.masked), "retired": f.retired_sockets,
@@ -924,8 +958,8 @@ def stub_run():
 
 # ================= assess-only（真实日志分级报告） =================
 
-def assess_only():
-    cfg = load_config02()
+def assess_only(config_path=None):
+    cfg = load_config02(config_path)
     setup_logging(cfg["outdir"])
     A = LogRiskAssessor(cfg).assess()
     print(LogRiskAssessor(cfg).report_str(A))
@@ -954,9 +988,9 @@ def main():
     if args.selftest:
         sys.exit(selftest())
     if args.assess_only:
-        sys.exit(assess_only())
+        sys.exit(assess_only(args.config))
     if args.stub_run:
-        sys.exit(stub_run())
+        sys.exit(stub_run(args.config))
 
     cfg = load_config02(args.config)
     if args.outdir:

@@ -59,6 +59,7 @@ static int k5ir_init(struct test *test) {
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, K5IR_COUNT * sizeof(uint64x2_t)));
     data->expected= static_cast<uint64x2_t *>(aligned_alloc(64, K5IR_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(K5IR_DUMP_DIR, 0755);
 
     memset_random(data->src, K5IR_SRC_ELEMS * sizeof(uint64x2_t));

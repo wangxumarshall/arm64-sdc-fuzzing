@@ -110,6 +110,7 @@ static int k2pureload_init(struct test *test) {
     data->srcB    = static_cast<uint64x2_t *>(aligned_alloc(64, K2PL_COUNT * sizeof(uint64x2_t)));
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, K2PL_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(K2PL_DUMP_DIR, 0755);
 
     for (int i = 0; i < K2PL_COUNT; i++) {

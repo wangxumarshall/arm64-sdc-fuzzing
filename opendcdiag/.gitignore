@@ -58,6 +58,7 @@ farron/__pycache__/
 /docs/sdc1-01-02-core179-diagnostics/esdiag_elem0_full
 /docs/sdc1-01-02-core179-diagnostics/mrueig_full
 # per-run output directories
+/movbe_log/
 /adjacent_cores_logs/
 /core179_180_per_test_*/
 /eigen_core179_30m_stress_logs/

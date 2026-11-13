@@ -95,6 +95,7 @@ static int k4gap_init(struct test *test) {
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, K4GAP_COUNT * sizeof(uint64x2_t)));
     data->expected= static_cast<uint64x2_t *>(aligned_alloc(64, K4GAP_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(K4GAP_DUMP_DIR, 0755);
 
     for (int i = 0; i < K4GAP_COUNT; i++) {

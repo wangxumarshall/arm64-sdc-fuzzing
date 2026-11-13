@@ -124,6 +124,7 @@ static int k7p_init_common(struct test *test, enum K7Pattern p) {
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, K7P_COUNT * sizeof(uint64x2_t)));
     data->expected= static_cast<uint64x2_t *>(aligned_alloc(64, K7P_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(K7P_DUMP_DIR, 0755);
 
     for (int i = 0; i < K7P_COUNT; i++) {

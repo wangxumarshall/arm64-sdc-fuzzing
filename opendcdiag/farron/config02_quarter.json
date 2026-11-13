@@ -1,0 +1,8 @@
+{
+  "_doc": "farron-02 四分之一插槽变体 (用户指令 2026-11-01): 每30min一窗×每窗30s, 粒度=单插槽48核的1/4(12核连续序号); 日志锁定单核故障→优先测故障核所在的四分之一; 窗长按指令固定30s(不随温度补偿拉伸)",
+  "group_size": 12,
+  "priority_neighbor_groups": 0,
+  "priority_window_s": 30,
+  "routine_window_s": 30,
+  "temp_comp_enable": false
+}

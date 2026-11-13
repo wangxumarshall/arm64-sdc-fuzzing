@@ -107,6 +107,7 @@ static int k5far_init(struct test *test) {
     data->scratch = static_cast<uint64x2_t *>(aligned_alloc(64, K5FAR_COUNT * sizeof(uint64x2_t)));
     data->expected= static_cast<uint64x2_t *>(aligned_alloc(64, K5FAR_COUNT * sizeof(uint64x2_t)));
 
+    mkdir("movbe_log", 0755);        /* mkdir creates only the last component */
     mkdir(K5FAR_DUMP_DIR, 0755);
 
     /* Interleaved tagged fill — the ONLY functional delta vs the GPS

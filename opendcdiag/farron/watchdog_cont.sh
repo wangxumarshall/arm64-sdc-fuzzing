@@ -18,9 +18,21 @@ while [ $SECONDS -lt $end ]; do
             hot=$((hot+1))
             echo "$(date '+%F %T') HOT#$hot:$over" >> "$OUT"
             if [ $hot -ge 2 ]; then
-                echo "$(date '+%F %T') ABORT: killing opendcdiag" >> "$OUT"
-                pkill -x opendcdiag
-                echo "$(date '+%F %T') KILLED" >> "$OUT"
+                echo "$(date '+%F %T') ABORT: killing opendcdiag (SIGKILL)" >> "$OUT"
+                # 2026-11-06 panic#20 教训: SIGTERM 被框架捕获不停车 (仅 SIGINT count==1
+                # 优雅停, sandstone_run.cpp:922), 必须用 SIGKILL + 死亡验证
+                pkill -9 -x opendcdiag
+                for i in $(seq 1 10); do
+                    pgrep -x opendcdiag >/dev/null || break
+                    sleep 1
+                done
+                if pgrep -x opendcdiag >/dev/null; then
+                    echo "$(date '+%F %T') KILL FAILED after -9, escalating -f" >> "$OUT"
+                    pkill -9 -f 'builddir/opendcdiag'
+                    sleep 2
+                fi
+                if pgrep -x opendcdiag >/dev/null; then st=ALIVE; else st=DEAD; fi
+                echo "$(date '+%F %T') KILLED(verified=$st)" >> "$OUT"
                 exit 0
             fi
         else
