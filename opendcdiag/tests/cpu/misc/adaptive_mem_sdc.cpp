@@ -89,14 +89,10 @@ extern "C" const struct ComboDef kComboTable[ADAPT_COMBO_COUNT] = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Engine entry points.  SVE body arrives in Task 3.                    */
+/* Engine entry points.  The SVE/SVE2 body lives in                    */
+/* adaptive_mem_sdc_sve.cpp (own TU, +sve2 march); the NEON body is    */
+/* below.                                                              */
 /* ------------------------------------------------------------------ */
-
-extern "C" int adaptive_sve_run_combo(struct test *test, int cpu, int combo)
-{
-    (void)test; (void)cpu; (void)combo;
-    return EXIT_SUCCESS;
-}
 
 #if defined(__aarch64__)
 
@@ -105,12 +101,6 @@ extern "C" int adaptive_sve_run_combo(struct test *test, int cpu, int combo)
 /* ------------------------------------------------------------------ */
 
 #include <arm_neon.h>
-
-/* Per-child plumbing state (defined early: the engine reads test->data) */
-struct AdaptiveMemSdcData {
-    struct AdaptiveShm *shm;             /* mmap'd, shared across children */
-    int isa;                             /* 0=NEON 1=SVE 2=SVE2 */
-};
 
 /* Per-call context.  Every test_run invocation owns its own buffers:
  * verify mode picks a fresh combo per call, so fill+golden+alloc are

@@ -673,6 +673,28 @@ if host_machine.cpu_family() == 'x86_64'
 endif
 
 # ---------------------------------------------------------------------------
+# adaptive_mem_sdc SVE/SVE2 引擎: 独立翻译单元用 +sve2 march 编译,
+# 编译期无需 SVE 硬件 (鲲鹏 920 本机编过但运行期 HWCAP 永不选中;
+# 920B/950 上由 adaptive_mem_sdc.cpp 的 getauxval 探测分发).
+# ---------------------------------------------------------------------------
+if host_machine.cpu_family() == 'aarch64'
+    sve2_march = cpp.compiles(
+        '#include <arm_sve.h>\nint f(void) { return 0; }',
+        args: ['-march=armv9-a+sve2'],
+        name: 'armv9-a+sve2 compile probe',
+    ) ? ['-march=armv9-a+sve2'] : ['-march=armv8.2-a+sve2']
+
+    tests_sve_a = static_library(
+        'tests_sve',
+        sources: ['misc/adaptive_mem_sdc_sve.cpp'],
+        build_by_default: false,
+        include_directories: [tests_common_incdirs],
+        cpp_args: [tests_common_cpp_args, sve2_march],   # sve2_march 必须在 common 之后生效
+    )
+    sandstone_tests += [tests_sve_a]
+endif
+
+# ---------------------------------------------------------------------------
 # arithmetic_arm: 第三方优化库测试用例 (GMP / Arm Optimized Routines /
 # Arm Compute Library / compiler-rt). mathlib/stringlib/arm_compute 走系统包;
 # compiler-rt 软浮点 builtins 走系统 compiler-rt. 仅在 aarch64 上启用.

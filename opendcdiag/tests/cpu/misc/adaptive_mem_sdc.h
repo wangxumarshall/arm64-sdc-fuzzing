@@ -65,6 +65,12 @@ struct test;
 int adaptive_neon_run_combo(struct test *test, int cpu, int combo);
 int adaptive_sve_run_combo(struct test *test, int cpu, int combo);
 
+/* Per-child plumbing state (test->data), shared by both engine TUs */
+struct AdaptiveMemSdcData {
+    struct AdaptiveShm *shm;             /* mmap'd, shared across children */
+    int isa;                             /* 0=NEON 1=SVE 2=SVE2 */
+};
+
 #ifdef __cplusplus
 }
 #endif
